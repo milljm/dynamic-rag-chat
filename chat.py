@@ -5,9 +5,11 @@ import sys
 import asyncio
 import logging
 import argparse
+import threading
 from prompt_toolkit import PromptSession
 from prompt_toolkit.key_binding import KeyBindings
 from rich.console import Console
+from rich.live import Live
 from rich.markup import escape
 from langchain_chroma import Chroma
 from langchain_ollama import ChatOllama
@@ -16,25 +18,52 @@ from langchain.schema import Document
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.callbacks.base import AsyncCallbackHandler
 from langchain.prompts import ChatPromptTemplate
+from richify import richify
 logging.getLogger("chromadb").setLevel(logging.ERROR)
 current_dir = os.path.dirname(os.path.abspath(__file__))
 console = Console()
+live = Live(console=console, refresh_per_second=10, vertical_overflow="visible")
 
-class RichStreamingHandler(AsyncCallbackHandler):
+#class RichStreamingHandler(AsyncCallbackHandler):
+#    """
+#    Responsible for pretty console output during streaming.
+#    """
+#    async def on_llm_new_token(self, token: str, **kwargs):
+#        console.print(f"{token}", end="", soft_wrap=True)
+
+class LiveStreamingHandler(AsyncCallbackHandler):
     """
     Responsible for pretty console output during streaming.
     """
-    async def on_llm_new_token(self, token: str, **kwargs):
-        console.print(f"{token}", end="", soft_wrap=True)
+    def __init__(self):
+        self.buffer = ''
 
-class DynamicRAGManager(AsyncCallbackHandler):
+    async def on_llm_new_token(self, token: str, **kwargs):
+        pass
+
+    #async def on_llm_new_token(self, token: str, **kwargs):
+    #    """ whatever """
+    #    self.buffer += token
+    #    with Live(Markdown(self.buffer), console=console, auto_refresh=True) as live:
+    #        live.update(Markdown(self.buffer))
+
+class DynamicRAGManager():
     """
     Responsible for producing key:value pairs on 'ideas' to return as a naminging convention for
     RAG collection identification.
     """
-    async def find_and_create(self, message):
+    def update_rag_async(self, model, url, context, prompt):
         """ regular expression through message and attempt to create key:value tuples """
-        return ()
+        pre_llm = OllamModel(model=model, url=url)
+        prompt_template = ChatPromptTemplate.from_messages([
+            ("system", prompt),
+            ("human", '')
+        ])
+        prompt_template.format_messages(context=context, question='')
+        results = pre_llm.query_llm_oneshot(f'{prompt}\n\n{context}', print_footer=False).content
+        with open('testing_output.txt', 'w', encoding='utf-8') as f:
+            f.write(f'model:\n{model}\n\nresponse:\n{context}\n\nprompt:\n{prompt}\n\nresults:\n{results}')
+        return
 
 class VectorData():
     """ Responsible for dealing with vector database operations """
@@ -108,19 +137,20 @@ class OllamModel():
         else:
             console.print(f"\n[{level}]{ms:.2f}/ms {' '.join(g)}[/]")
 
-    def query_llm_oneshot(self, query):
+    def query_llm_oneshot(self, query, print_footer=True):
         """ query the llm with a message, without streaming """
         llm = ChatOllama(model=self.model,
-                              temperature=0.,
-                              base_url=self.url,
-                              streaming=False)
+                         temperature=0.,
+                         base_url=self.url,
+                         streaming=False)
         response = llm.invoke(query, stop=["\n\n", "###", "Conclusion"])
-        self.__print_footer(response)
+        if print_footer:
+            self.__print_footer(response, print_footer)
         return response
 
-    async def query_llm(self, query):
+    async def query_llm(self, query, pre_model=None, pre_url=None, post_prompt=None):
         """ query the llm with a message, stream the message """
-        handler = RichStreamingHandler()
+        handler = LiveStreamingHandler()
         llm = ChatOllama(model=self.model,
                               temperature=1,
                               base_url=self.url,
@@ -130,6 +160,10 @@ class OllamModel():
         response = await llm.ainvoke(query)
         self.chat_history.append(response.content)
         self.__print_footer(response, tight=False)
+        # And the magical dynamic RAG creation starts here
+        update_rags = DynamicRAGManager()
+        threading.Thread(target=update_rags.update_rag_async,
+                         args=(pre_model,pre_url,response.content,post_prompt,)).start()
 
 class Chat():
     """
@@ -159,6 +193,7 @@ class Chat():
                           'prompt files each time[/]')
         prompt_files = {
             'pre_prompt': 'pre_conditioner_prompt',
+            'post_prompt': 'tagging_prompt',
             'plot_prompt': 'plot_prompt'
         }
         for prompt_key, prompt_base in prompt_files.items():
@@ -229,6 +264,10 @@ class Chat():
         prompt = prompt_template.format_messages(history=history,
                                                  context=context,
                                                  question=question)
+        # pylint: disable=no-member # dynamic prompts (see self.__build_prompts)
+        post_prompt = (self.__get_prompt(f'{self.post_prompt_file}_system.txt')
+                                if self.debug else self.post_prompt_system)
+        # pylint: enable=no-member
         if self.debug:
             console.print(f'\n[italic dim grey7][DEBUG PROMPT]:\n{prompt}[/italic dim grey7]\n')
         try:
@@ -237,10 +276,16 @@ class Chat():
             loop = None
         if loop and loop.is_running():
             # If there's already a loop, create a task
-            return asyncio.ensure_future(self.llm.query_llm(prompt))
+            return asyncio.ensure_future(self.llm.query_llm(prompt,
+                                                            self.preconditioner,
+                                                            self.server,
+                                                            post_prompt))
         else:
             # If no loop is running, start one
-            asyncio.run(self.llm.query_llm(prompt))
+            asyncio.run(self.llm.query_llm(prompt,
+                                           self.preconditioner,
+                                           self.server,
+                                           post_prompt))
 
     def run(self):
         """Chat with the LLM using a fancy prompt_toolkit interface until Ctrl+C."""

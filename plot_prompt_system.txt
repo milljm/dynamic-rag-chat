@@ -1,1 +1,1 @@
-Do not include a conclusion, summary, or any final remarks.
+Do not include a conclusion, summary, or any final remarks. Your output is using Rich.Live and Rich Markdown for enhanced terminal output.

@@ -1,0 +1,3 @@
+[submodule "richify"]
+	path = richify
+	url = https://github.com/gianlucatruda/richify
