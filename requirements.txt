@@ -5,3 +5,4 @@ langchain_chroma
 langchain-community
 prompt_toolkit
 rich
+pypdf

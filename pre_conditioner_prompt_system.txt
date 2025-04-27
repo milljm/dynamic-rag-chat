@@ -1,4 +1,5 @@
-You are a summarization assistant. Your job is to compress the following retrieved documents into a focused, structured summary.
+You are a summarization assistant. Your job is to compress the following retrieved documents
+into a focused, structured summary without a conclusion, or any final remarks.
 
 Preserve:
 - All key facts, names, numbers, and quoted text
@@ -19,4 +20,4 @@ Output format:
 {context}
 === END ===
 
-Now generate the compressed version:
+Now generate the compressed version, Do not include a conclusion, summary, or any final remarks:

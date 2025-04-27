@@ -1,198 +1,178 @@
 #!/usr/bin/env python3
-""" simple chat with rag """
+# /// script
+# requires-python = ">=3.12"
+# dependencies = [
+#     "langchain",
+#     "langchain-core",
+#     "langchain_ollama",
+#     "langchain_chroma",
+#     "langchain-community",
+#     "prompt_toolkit",
+#     "rich",
+#     "pypdf",
+# ]
+# ///
 import os
 import sys
-import asyncio
-import logging
+import time
 import argparse
+import logging
 import threading
-from prompt_toolkit import PromptSession
-from prompt_toolkit.key_binding import KeyBindings
-from rich.console import Console
-from rich.live import Live
-from rich.markup import escape
-from langchain_chroma import Chroma
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain.prompts import ChatPromptTemplate
+from langchain.schema import Document
+from langchain_community.document_loaders import PyPDFLoader
 from langchain_ollama import ChatOllama
 from langchain_ollama import OllamaEmbeddings
-from langchain.schema import Document
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.callbacks.base import AsyncCallbackHandler
-from langchain.prompts import ChatPromptTemplate
-from richify import richify
-logging.getLogger("chromadb").setLevel(logging.ERROR)
+from langchain_chroma import Chroma
+from rich.live import Live
+from rich.markdown import Markdown
+from rich.text import Text
+from rich.console import Group
+from rich.console import Console
+from prompt_toolkit import PromptSession
+from prompt_toolkit.key_binding import KeyBindings
 current_dir = os.path.dirname(os.path.abspath(__file__))
-console = Console()
-live = Live(console=console, refresh_per_second=10, vertical_overflow="visible")
+console = Console(highlight=True)
 
-#class RichStreamingHandler(AsyncCallbackHandler):
-#    """
-#    Responsible for pretty console output during streaming.
-#    """
-#    async def on_llm_new_token(self, token: str, **kwargs):
-#        console.print(f"{token}", end="", soft_wrap=True)
-
-class LiveStreamingHandler(AsyncCallbackHandler):
-    """
-    Responsible for pretty console output during streaming.
-    """
-    def __init__(self):
-        self.buffer = ''
-
-    async def on_llm_new_token(self, token: str, **kwargs):
-        pass
-
-    #async def on_llm_new_token(self, token: str, **kwargs):
-    #    """ whatever """
-    #    self.buffer += token
-    #    with Live(Markdown(self.buffer), console=console, auto_refresh=True) as live:
-    #        live.update(Markdown(self.buffer))
+# Silence initial RAG database being empty
+logging.getLogger("chromadb").setLevel(logging.ERROR)
 
 class DynamicRAGManager():
     """
-    Responsible for producing key:value pairs on 'ideas' to return as a naminging convention for
-    RAG collection identification.
-    """
-    def update_rag_async(self, model, url, context, prompt):
-        """ regular expression through message and attempt to create key:value tuples """
-        pre_llm = OllamModel(model=model, url=url)
-        prompt_template = ChatPromptTemplate.from_messages([
-            ("system", prompt),
-            ("human", '')
-        ])
-        prompt_template.format_messages(context=context, question='')
-        results = pre_llm.query_llm_oneshot(f'{prompt}\n\n{context}', print_footer=False).content
-        with open('testing_output.txt', 'w', encoding='utf-8') as f:
-            f.write(f'model:\n{model}\n\nresponse:\n{context}\n\nprompt:\n{prompt}\n\nresults:\n{results}')
-        return
+    Dynamic RAG/Tag System
 
-class VectorData():
-    """ Responsible for dealing with vector database operations """
-    def __init__(self, vector_dir='',
-                 embedding='',
-                 url='http://localhost:11434',
-                 collection_name='plot',
-                 debug=False):
+    The idea is to use the responses from the heavy-weight LLM, run it through
+    a series of quick summarization queries with a light-weight 1B parameter LLM
+    to 'tag' things of interest. The hope is that all this information will
+    quickly pool into a tightly aware vector database, the more the heavy weight
+    LLM is used. Each 'tag' will spawn a new RAG (collection), that the
+    pre-conditioner prompt will quickly retrieve and thus, fill our context with
+    **very** relevant data.
+
+    Example: The leight-weight model tagged bob: {bob: is a king}. We are then going
+    to create (or append) to a new collection 'bob', with every thing about said
+    person. Thus eventually pulling in odd information about 'bob' the pre-processor
+    might not have matched.
+
+    {person: is a level 12 ranger...}
+    {location: sumerset isles...}
+    {weird: weird things mentioned about bob here...}
+    """
+    def update_rag_async(self, base_url, model, prompt_template, debug=False)->str:
+        """ regular expression through message and attempt to create key:value tuples """
+        pre_llm = OllamModel(base_url=base_url)
+        results = pre_llm.llm_query(model, prompt_template).content
+        if debug:
+            console.print(f'RAG/Tag Prompt:\n{prompt_template}\n\nRAG/Tag Results:\n{results}')
+        with open('testing_output.txt', 'w', encoding='utf-8') as f:
+            f.write(f'model:\n{model}\n\n'
+                    f'prompt:\n{prompt_template}\n\n'
+                    f'results:\n{results}')
+        return results
+
+class OllamModel():
+    """
+    Responsible for dealing directly with LLMs,
+    out side of the realm of the Chat class
+    """
+    def __init__(self, base_url):
+        self.base_url = base_url
+
+    def llm_query(self, model, prompt_template, temp=0.3)->object:
+        """ query the llm with a message, without streaming """
+        llm = ChatOllama(model=model,
+                         temperature=temp,
+                         base_url=self.base_url,
+                         streaming=False)
+        response = llm.invoke(prompt_template, stop=["\n\n", "###", "Conclusion"])
+        return response
+
+class RAG():
+    """ Responsible for RAG operations """
+    def __init__(self, base_url, embeddings, vector_dir, debug=False):
+        self.base_url = base_url
+        self.embeddings = embeddings
         self.vector_dir = vector_dir
-        self.embedding = embedding
-        self.url = url
-        self.collection_name = collection_name
         self.debug = debug
+        self.chroma = Chroma(persist_directory=self.vector_dir)
 
     def __get_embeddings(self):
-        embeddings = OllamaEmbeddings(base_url=self.url, model=self.embedding)
+        embeddings = OllamaEmbeddings(base_url=self.base_url, model=self.embeddings)
         chroma_db = Chroma(persist_directory=self.vector_dir,
-                           embedding_function=embeddings,
-                           collection_name=self.collection_name)
+                            embedding_function=embeddings,
+                            collection_name='default_for_now')
         return chroma_db
-
-    def store_data(self, data, chunk_size=1000, chunk_overlap=200):
-        """
-        Stores chunks into vector data base (1000 chunk size, 200 overlap)
-        Syntax:
-            store_data(data=str, chunk_size=int, chunk_overlap=int)
-        """
-        splitter = RecursiveCharacterTextSplitter(chunk_size=chunk_size,
-                                                  chunk_overlap=chunk_overlap)
-        docs = splitter.create_documents([data])
-        chroma = self.__get_embeddings()
-        chroma.add_documents(docs)
 
     def retrieve_data(self, query, k=5):
         """
         Return vector data as a list. Syntax:
             retrieve_data(query=str, k=int)->list
-              query: your question
-              k:     matches to return
+                query: your question
+                k:     matches to return
         """
         chroma = self.__get_embeddings()
         results = []
         results: list[Document] = chroma.similarity_search(query, k)
         return results
 
-class OllamModel():
-    """ Responsible for handling calls to the Ollama LLM """
-    def __init__(self, model, url='http://localhost:11434', debug=False):
-        self.model = model
-        self.url = url
-        self.chat_history = []
-        self.debug = debug
+    def store_data(self, data, chunk_size=1000, chunk_overlap=200):
+        """ store data into the RAG """
+        splitter = RecursiveCharacterTextSplitter(chunk_size=chunk_size,
+                                                  chunk_overlap=chunk_overlap)
+        docs = splitter.create_documents([data])
+        chroma = self.__get_embeddings()
+        chroma.add_documents(docs)
+        if self.debug:
+            console.print(f'CHUNKS STORED: {len(docs)}')
 
-    def __print_footer(self, response, tight=True):
-        """
-        Just a little flourish. Any self-respecting user of LLMs
-        wants to know this stuff :)
-        """
-        ms = response.response_metadata['total_duration'] / 1000000
-        level = "italic dim grey100" if self.debug else "italic dim grey7"
-        g = []
-        for k, v in response.usage_metadata.items():
-            g.append(f'{k}/{v}')
-        if tight:
-            model = escape(response.response_metadata["model"])
-            tokens = response.usage_metadata["total_tokens"]
-            console.print(
-            f"[{level}]summarization pre-processor {ms:.2f}/ms: {model} total_tokens:{tokens}[/]"
-            )
-            console.print('', style='')  # Reset after if needed
-        else:
-            console.print(f"\n[{level}]{ms:.2f}/ms {' '.join(g)}[/]")
-
-    def query_llm_oneshot(self, query, print_footer=True):
-        """ query the llm with a message, without streaming """
-        llm = ChatOllama(model=self.model,
-                         temperature=0.,
-                         base_url=self.url,
-                         streaming=False)
-        response = llm.invoke(query, stop=["\n\n", "###", "Conclusion"])
-        if print_footer:
-            self.__print_footer(response, print_footer)
-        return response
-
-    async def query_llm(self, query, pre_model=None, pre_url=None, post_prompt=None):
-        """ query the llm with a message, stream the message """
-        handler = LiveStreamingHandler()
-        llm = ChatOllama(model=self.model,
-                              temperature=1,
-                              base_url=self.url,
-                              streaming=True,
-                              callbacks=[handler])
-        console.print(f'[italic #FF8C00]{self.model}[/italic #FF8C00]:\n')
-        response = await llm.ainvoke(query)
-        self.chat_history.append(response.content)
-        self.__print_footer(response, tight=False)
-        # And the magical dynamic RAG creation starts here
-        update_rags = DynamicRAGManager()
-        threading.Thread(target=update_rags.update_rag_async,
-                         args=(pre_model,pre_url,response.content,post_prompt,)).start()
+    def extract_text_from_pdf(self, pdf_path):
+        """ extract text from PDFs """
+        loader = PyPDFLoader(pdf_path)
+        pages = []
+        for page in loader.lazy_load():
+            pages.append(page)
+        page_texts = list(map(lambda doc: doc.page_content, pages))
+        for page_text in page_texts:
+            if page_text:
+                self.store_data(page_text)
 
 class Chat():
-    """
-    Entry point. Instances LLMs, RAG, prompts.
-    """
+    """ Testing """
     def __init__(self, **kwargs):
         try:
-            self.llm_model = kwargs['llm']
+            self.model_name = kwargs['llm']
             self.preconditioner = kwargs['pre_llm']
             self.embedding_model = kwargs['embedding_llm']
             self.vector_dir = kwargs['history_dir']
             self.history_matches = kwargs['history_matches']
-            self.server = f'http://{kwargs["server"]}'
+            self.host = f'http://{kwargs["server"]}'
             self.debug = kwargs['debug']
         except KeyError as e:
             print(f'Incorrectly supplied arguments. See --help: {e}')
             sys.exit(1)
-
-        self.llm = OllamModel(self.llm_model, url=self.server, debug=self.debug)
-        self.pre_llm = OllamModel(model=self.preconditioner, url=self.server, debug=self.debug)
+        self.llm = ChatOllama(host=self.host,
+                              model=self.model_name,
+                              streaming=True)
+        self.chat_history_md = ''
+        self.chat_history_session = []
+        self.rag = RAG(self.host, self.embedding_model, self.vector_dir)
+        self.console = Console(highlight=True)
         self.__build_prompts()
 
     def __build_prompts(self):
-        """ a way to manage a growing number of prompts """
+        """
+        A way to manage a growing number of prompt templates dynamic RAG/Tagging
+        might introduce...
+
+          {key : value} pairs become self.key : contents-of-file
+          filenaming convention: {value}_system.txt / {value}_human.txt
+        """
         if self.debug:
             console.print('\n[italic dim grey50]Debug mode enabled. I will re-read the '
                           'prompt files each time[/]')
         prompt_files = {
-            'pre_prompt': 'pre_conditioner_prompt',
+            'pre_prompt':  'pre_conditioner_prompt',
             'post_prompt': 'tagging_prompt',
             'plot_prompt': 'plot_prompt'
         }
@@ -210,21 +190,60 @@ class Chat():
             print(f'Prompt not found! I expected to find it at:\n\n\t{path}')
             sys.exit(1)
 
-    def instance_rag(self, collection_name='plot'):
-        """
-        As the name implies, return a RAG with collection name established.
-        Defaults to the 'plot' collection.
-        """
-        return VectorData(vector_dir=self.vector_dir,
-                                     embedding=self.embedding_model,
-                                     url=self.server,
-                                     debug=self.debug,
-                                     collection_name=collection_name)
+    # Stream response as chunks
+    def stream_response(self, query: str, context: str):
+        """ Parse LLM Promp """
+        # pylint: disable=no-member # dynamic prompts (see self.__build_prompts)
+        sys_prmpt = (self.__get_prompt(f'{self.plot_prompt_file}_system.txt')
+                     if self.debug else self.plot_prompt_system)
 
-    def pre_processor(self, query):
-        """ lightweight LLM as a summarization pre-processor """
-        rag = self.instance_rag()
-        docs = rag.retrieve_data(query)
+        hum_prmpt = (self.__get_prompt(f'{self.plot_prompt_file}_human.txt')
+                     if self.debug else self.plot_prompt_human)
+        # pylint: enable=no-member
+        prompt = ChatPromptTemplate.from_messages([
+                ("system", sys_prmpt),
+                ("human", hum_prmpt)
+            ])
+        messages = prompt.format_messages(history=' '.join(self.chat_history_session[-3:]),
+                                          context=context,
+                                          question=query)
+        # pylint: enable=no-member
+        if self.debug:
+            console.print(f'PROMPTS: {messages}', style='color(233)')
+        for chunk in self.llm.stream(messages):
+            yield chunk.content
+
+    # Compose the full chat display with footer (model name, time taken, token count)
+    def render_chat(self, current_stream: str = "",
+                    time_taken: float = 0,
+                    token_count: int = 0,
+                    prompt_tokens: int = 0) -> Group:
+        """ render and return markdown/syntax """
+        # Create the full chat content using Markdown
+        full_md = f'{self.chat_history_md}\n\n{current_stream}'
+
+        # Create the footer text with model info, time, and token count
+        footer = Text('Model: ', style='color(233)')
+        footer.append(f'{self.model_name} ', style='color(202)')
+        footer.append('| Time: ', style='color(233)')
+        footer.append(f'{time_taken:.2f}', style='color(94)')
+        footer.append('s | Prompt Tokens:', style='color(233)')
+        footer.append(f' {prompt_tokens}', style='color(236)')
+        footer.append('| Tokens:', style='color(233)')
+        footer.append(f' {token_count}', style='color(236)')
+
+        # Render the chat content as Markdown (no panel, just the content)
+        chat_content = Markdown(full_md)
+
+        # Return everything as a Group (no borders, just the content)
+        return Group(chat_content, footer)
+
+
+    def pre_processor(self, query)->str:
+        """
+        lightweight LLM as a summarization/tagging pre-processor
+        """
+        docs = self.rag.retrieve_data(query, self.history_matches)
         context = "\n\n".join(doc.page_content for doc in docs if doc.page_content.strip())
         if self.debug:
             console.print(f'[italic dim grey7][DEBUG VECTOR]:\n{context}'
@@ -237,58 +256,54 @@ class Chat():
                                if self.debug else self.pre_prompt_human))
                 ])
         # pylint: enable=no-member
-        return prompt_template.format_messages(context=context, question='')
+        prompt = prompt_template.format_messages(context=context, question='')
+        pre_llm = OllamModel(base_url=self.host)
+        return pre_llm.llm_query(self.preconditioner, prompt).content
 
-    def run_async_task(self, question: str):
-        """ stream the output """
-        prompt = self.pre_processor(question)
-        if self.debug:
-            console.print(f'[italic dim grey7][DEBUG PRECONDITIONED PROMPT]:\n{prompt}'
-                            '[/italic dim grey7]\n')
-        context = self.pre_llm.query_llm_oneshot(prompt).content
-        if self.debug:
-            console.print(f'[italic dim grey7][DEBUG PRECONDITIONED CONTEXT]:\n{context}'
-                            '[/italic dim grey7]\n')
-        # pylint: disable=no-member # dynamic prompts (see self.__build_prompts)
-        prompt_template = ChatPromptTemplate.from_messages([
-        ("system", (self.__get_prompt(f'{self.plot_prompt_file}_system.txt')
-                    if self.debug else self.plot_prompt_system)),
-        ("human", (self.__get_prompt(f'{self.plot_prompt_file}_human.txt')
-                   if self.debug else self.plot_prompt_human))
-            ])
-        # pylint: enable=no-member
-        history = self.llm.chat_history[-self.history_matches:]
-        if self.debug:
-            console.print(f'\n[italic dim grey7][DEBUG CHAT HISTORY]:\n{history}'
-                              '[/italic dim grey7]\n')
-        prompt = prompt_template.format_messages(history=history,
-                                                 context=context,
-                                                 question=question)
+    def post_processing(self, response):
+        """
+        Dynamic RAG/Tag generation /Threaded non-blocking
+        """
         # pylint: disable=no-member # dynamic prompts (see self.__build_prompts)
         post_prompt = (self.__get_prompt(f'{self.post_prompt_file}_system.txt')
-                                if self.debug else self.post_prompt_system)
+                        if self.debug else self.post_prompt_system)
+        prompt_template = ChatPromptTemplate.from_messages([
+                    ("system", post_prompt),
+                    ("human", '{context}')
+                ])
+        prompt = prompt_template.format_messages(context=response, question='')
         # pylint: enable=no-member
-        if self.debug:
-            console.print(f'\n[italic dim grey7][DEBUG PROMPT]:\n{prompt}[/italic dim grey7]\n')
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            loop = None
-        if loop and loop.is_running():
-            # If there's already a loop, create a task
-            return asyncio.ensure_future(self.llm.query_llm(prompt,
-                                                            self.preconditioner,
-                                                            self.server,
-                                                            post_prompt))
-        else:
-            # If no loop is running, start one
-            asyncio.run(self.llm.query_llm(prompt,
-                                           self.preconditioner,
-                                           self.server,
-                                           post_prompt))
+        update_rags = DynamicRAGManager()
+        threading.Thread(target=update_rags.update_rag_async,
+                         args=(self.host,
+                               self.preconditioner,
+                               prompt),
+                         kwargs={'debug': self.debug}).start()
 
-    def run(self):
-        """Chat with the LLM using a fancy prompt_toolkit interface until Ctrl+C."""
+    def get_context(self, user_input)->str:
+        """ process to handle all the lovely context """
+        # Retrieve context from RAG for the current question
+        documents = self.rag.retrieve_data(user_input, self.history_matches)
+
+        # Retrieve data from pre-processor and query the RAG once more
+        pre_query = self.pre_processor(user_input)
+        documents.extend(self.rag.retrieve_data(pre_query, self.history_matches))
+
+        # Lambda function to extract page_content from each document, then
+        # a set to remove duplicates (eases up prompt tokens sometimes)
+        context = set(list(map(lambda doc: doc.page_content, documents)))
+
+        # If the context is empty (no documents found), provide a fallback message
+        if not context:
+            context = ""
+
+        # LLMs prefer strings separated by \n\n
+        context = '\n\n'.join(context)
+
+        return context
+
+    def chat(self):
+        """ Prompt the User for questions, and begin! """
         session = PromptSession()
         # Set up key bindings
         kb = KeyBindings()
@@ -299,21 +314,54 @@ class Chat():
                 event.app.exit(result=buffer.document.text.strip())
             else:
                 buffer.insert_text('\n')
-        console.print("💬 Chat started. Press [italic grey100]Esc+Enter[/italic grey100] to send."
-                      " [italic grey100]Ctrl+C[/italic grey100] to quit.\n")
+        console.print("💬 Press [italic grey100]Esc+Enter[/italic grey100] to send"
+                      " (multi-line, copy/paste safe) [italic grey100]Ctrl+C[/italic grey100]"
+                      " to quit.\n")
         try:
             while True:
-                question = session.prompt(">>> ", multiline=True, key_bindings=kb).strip()
-                if not question:
+                user_input = session.prompt(">>> ", multiline=True, key_bindings=kb).strip()
+                if not user_input:
                     continue
-                self.run_async_task(question)
-                if self.llm.chat_history:
-                    last_response = self.llm.chat_history[-1:][0]
-                    rag = self.instance_rag()
-                    rag.store_data(data=last_response)
+                #user_input = input("\n🧠 Ask something (or type 'exit'): ")
+                #if user_input.strip().lower() == "exit":
+                #    break
+
+                # Grab our lovely context
+                context = self.get_context(user_input)
+
+                # Gather all prompt tokens, to display as statitics
+                prompt_tokens = len([*context, *self.chat_history_session[-3:]])
+                console.print(f'Process {prompt_tokens} context tokens...', style='dim grey11')
+                if self.debug:
+                    console.print(f'HISTORY:\n{self.chat_history_session[-3:]}\n\n'
+                            f'CONTEXT:\n\n{context}\n\n'
+                            f'TOTAL TOKENS: {prompt_tokens}',
+                            style='color(233)')
+
+                start_time = time.time()
+                current_response = ""
+                token_count = 0
+                with Live(refresh_per_second=20) as live:
+                    self.chat_history_md = f"""**You:** *{user_input}*
+
+---
+"""
+                    #live.update(self.render_chat(self.chat_history_md))
+                    for piece in self.stream_response(user_input, context):
+                        current_response += piece
+                        # Update token count (a rough estimate based on the size of the chunk)
+                        token_count += len(piece.split())
+                        live.update(self.render_chat(current_response,
+                                                    time.time()-start_time,
+                                                    token_count,
+                                                    prompt_tokens))
+
+                self.chat_history_session.append(current_response)
+                self.rag.store_data(current_response)
+                # dynamic RAG creation starts here (non-blocking)
+                self.post_processing(current_response)
 
         except KeyboardInterrupt:
-            print("\n👋 Exiting chat.")
             sys.exit()
 
 def verify_args(args):
@@ -341,13 +389,14 @@ example:
                                      formatter_class=argparse.RawTextHelpFormatter)
     parser.add_argument('llm', default='',
                          help='Your heavy LLM Model ~27B to whatever you can afford')
-    parser.add_argument('--pre-llm', metavar='', nargs='?', default='gemma-3-1b-it-Q4_K_M',
+    parser.add_argument('--pre-llm', metavar='', nargs='?', default='gemma-3-1b',
                         type=str, help='1B-2B LLM model for preprocessor work '
                         '(default: %(default)s)')
-    parser.add_argument('--embedding_llm', metavar='', nargs='?', default='nomic-embed-text',
+    parser.add_argument('--embedding_llm', metavar='', nargs='?',
+                        default='nomic-embed-text-v1.5.f16',
                         type=str, help='LM embedding model (default: %(default)s)')
-    parser.add_argument('--history_dir', metavar='', nargs='?',
-                         default=os.path.join('.', 'vector_data'), type=str,
+    parser.add_argument('--history-dir', metavar='', nargs='?',
+                         default=os.path.join(current_dir, 'vector_data'), type=str,
                          help='a writable path for RAG (default: %(default)s)')
     parser.add_argument('--history-matches', metavar='', nargs='?', default=3, type=int,
                         help='Number of results to pull from each RAG (default: %(default)s)')
@@ -355,6 +404,8 @@ example:
                         help='ollama server address (default: %(default)s)')
     parser.add_argument('--import-pdf', metavar='', nargs='?', type=str,
                          help='Path to pdf to pre-populate main RAG')
+    parser.add_argument('--import-txt', metavar='', nargs='?', type=str,
+                         help='Path to txt to pre-populate main RAG')
     parser.add_argument('--debug', action='store_true', default=False,
                         help='Print preconditioning message, prompt, etc')
 
@@ -362,5 +413,24 @@ example:
 
 if __name__ == '__main__':
     args = parse_args(sys.argv[1:])
+    if args.import_txt:
+        doc_path = args.import_txt
+        if os.path.exists(doc_path):
+            with open(doc_path, 'r', encoding='utf-8') as file:
+                document_content = file.read()
+                rag = RAG(args.server, args.embedding_llm, args.history_dir, args.debug)
+                rag.store_data(document_content)
+            print(f"Document loaded from: {doc_path}")
+        else:
+            print(f"Error: The file at {doc_path} does not exist.")
+        sys.exit()
+    if args.import_pdf:
+        pdf_path = args.import_pdf
+        if os.path.exists(pdf_path):
+            rag = RAG(args.server, args.embedding_llm, args.history_dir, args.debug)
+            rag.extract_text_from_pdf(pdf_path)
+        else:
+            print(f"Error: The file at {pdf_path} does not exist.")
+        sys.exit()
     chat = Chat(**vars(args))
-    chat.run()
+    chat.chat()
