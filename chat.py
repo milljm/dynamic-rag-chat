@@ -154,6 +154,8 @@ class Chat():
         self.llm = ChatOllama(host=self.host,
                               model=self.model_name,
                               streaming=True)
+        # Color tone the prompt tokens
+        self.heat_map = {0: 123, 300: 51, 500: 46, 700: 42, 2000: 82, 3000: 154, 3500: 178, 4000: 208, 4200: 166, 4500: 203, 4700: 197, 5000: 196}
         self.chat_history_md = ''
         self.chat_history_session = []
         self.rag = RAG(self.host, self.embedding_model, self.vector_dir)
@@ -211,7 +213,7 @@ class Chat():
         if self.debug:
             console.print(f'PROMPTS: {messages}', style='color(233)')
         for chunk in self.llm.stream(messages):
-            yield chunk.content
+            yield chunk
 
     # Compose the full chat display with footer (model name, time taken, token count)
     def render_chat(self, current_stream: str = "",
@@ -222,15 +224,18 @@ class Chat():
         # Create the full chat content using Markdown
         full_md = f'{self.chat_history_md}\n\n{current_stream}'
 
+        heat = [v for k,v in self.heat_map.items() if k<=prompt_tokens][-1:][0]
+        produced = [v for k,v in self.heat_map.items() 
+                    if max(0, 5000-(token_count*8))>=k][-1:][0]
         # Create the footer text with model info, time, and token count
         footer = Text('Model: ', style='color(233)')
         footer.append(f'{self.model_name} ', style='color(202)')
         footer.append('| Time: ', style='color(233)')
         footer.append(f'{time_taken:.2f}', style='color(94)')
         footer.append('s | Prompt Tokens:', style='color(233)')
-        footer.append(f' {prompt_tokens}', style='color(236)')
+        footer.append(f' {prompt_tokens}', style=f'color({heat})')
         footer.append('| Tokens:', style='color(233)')
-        footer.append(f' {token_count}', style='color(236)')
+        footer.append(f' {token_count}', style=f'color({produced})')
 
         # Render the chat content as Markdown (no panel, just the content)
         chat_content = Markdown(full_md)
@@ -348,9 +353,12 @@ class Chat():
 """
                     #live.update(self.render_chat(self.chat_history_md))
                     for piece in self.stream_response(user_input, context):
-                        current_response += piece
+                        #print(dir(piece))
+                        #if piece.finish_reason == "token_limit":
+                        #    completion_count = piece.token_count
+                        current_response += piece.content
                         # Update token count (a rough estimate based on the size of the chunk)
-                        token_count += len(piece.split())
+                        token_count += len(piece.content.split())
                         live.update(self.render_chat(current_response,
                                                     time.time()-start_time,
                                                     token_count,
