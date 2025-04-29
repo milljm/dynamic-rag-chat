@@ -65,15 +65,14 @@ class DynamicRAGManager():
     def __init__(self):
         self.tag_pattern = re.compile(r'{\s*([a-zA-Z0-9_-]+)\s*:\s*([^\}]+)\s*}')
 
-    def update_rag_async(self, base_url, model, prompt_template, debug=False)->str:
+    def update_rag(self, base_url, model, prompt_template, debug=False)->str:
         """ regular expression through message and attempt to create key:value tuples """
         pre_llm = OllamModel(base_url=base_url)
         results = pre_llm.llm_query(model, prompt_template).content
         rag_tags = self.get_tags(results, debug=debug)
 
         if debug:
-            console.print(f'RAG/Tag Prompt:\n{prompt_template}\n\nRAG/Tag Results:\n{results}',
-                          style='color(233)')
+            console.print(f'RAG/Tag Results:\n{results}', style='color(233)')
         # debuging the output of rag/tagging for now
         with open('testing_output.txt', 'w', encoding='utf-8') as f:
             f.write(f'model:\n{model}\n\n'
@@ -171,7 +170,7 @@ class RAG():
         results: list[Document] = chroma.similarity_search(query, matches)
         return results
 
-    def store_data(self, data, collection='default', chunk_size=1000, chunk_overlap=200):
+    def store_data(self, data, collection='ai_response', chunk_size=300, chunk_overlap=150):
         """ store data into the RAG """
         splitter = RecursiveCharacterTextSplitter(chunk_size=chunk_size,
                                                   chunk_overlap=chunk_overlap)
@@ -190,7 +189,7 @@ class RAG():
         page_texts = list(map(lambda doc: doc.page_content, pages))
         for page_text in page_texts:
             if page_text:
-                self.store_data(page_text)
+                self.store_data(page_text, 'ai_response')
 
 class Chat():
     """ Begin initializing variables classes. Call .chat() to begin """
@@ -342,8 +341,8 @@ class Chat():
                 ])
         prompt = prompt_template.format_messages(context=response, question='')
         # pylint: enable=no-member
-        update_rags = DynamicRAGManager()
-        threading.Thread(target=update_rags.update_rag_async,
+        RAGTag = DynamicRAGManager()
+        threading.Thread(target=RAGTag.update_rag,
                          args=(self.host,
                                self.preconditioner,
                                prompt),
@@ -361,11 +360,8 @@ class Chat():
     @staticmethod
     def normalize_for_dedup(text: str) -> str:
         """ remove emojis and other markdown """
-        # Remove emojis
         text = re.sub(r'[\U0001F600-\U0001F64F\u2600-\u26FF\u2700-\u27BF]', '', text)
-        # Remove punctuation and markdown-style emphasis
         text = re.sub(r'[^\w\s]', '', text)
-        # Collapse whitespace, lowercase
         return ' '.join(text.lower().split())
 
     def deduplicate_texts(self, texts: list[str]) -> list[str]:
