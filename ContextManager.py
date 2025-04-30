@@ -18,9 +18,9 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 class ContextManager(PromptManager):
     """ A collection of methods aimed at producing/reducing the context """
     def __init__(self, console, **kwargs):
-        super().__init__(console, kwargs)
+        super().__init__(console)
         self.console = console
-        self.prompts = PromptManager(console, self.debug)
+        self.prompts = PromptManager(console, debug=self.debug)
         self.rag = RAG(console, **kwargs)
         self.rag_tagger = RAGTagManager(console, **kwargs)
         self.host = kwargs['host']
@@ -38,7 +38,7 @@ class ContextManager(PromptManager):
         docs = self.rag.retrieve_data(query, collection, matches=self.matches)
         context = "\n\n".join(doc.page_content for doc in docs if doc.page_content.strip())
         if self.debug:
-            self.console.print(f'DEBUG VECTOR:\n{context}', style='color(233)')
+            self.console.print(f'DEBUG VECTOR CONTENT:\n{context}', style='color(233)')
         # pylint: disable=no-member # dynamic prompts (see self.__build_prompts)
         prompt_template = ChatPromptTemplate.from_messages([
                     ("system", (prompts.get_prompt(f'{prompts.pre_prompt_file}_system.txt')
@@ -69,6 +69,8 @@ class ContextManager(PromptManager):
                     ("human", '{context}')
                 ])
         prompt = prompt_template.format_messages(context=response, question='')
+        if self.debug:
+            self.console.print(f'POST PROCESS PROMPT TEMPLATE:\n{prompt}\n\n', style='color(233)')
         # pylint: enable=no-member
         threading.Thread(target=self.rag_tagger.update_rag,
                          args=(self.host, self.preconditioner, prompt),

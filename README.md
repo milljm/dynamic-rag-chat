@@ -61,6 +61,8 @@ pip install -r requirements.txt
 ```
 
 ### Under the hood design process
+
+```pre
 [User Input] → [Regex Tags Parsed] → [Matching RAG Collection Queried]
      ↓
 [Pre-conditioner Model Summarizes RAG Output]
@@ -70,6 +72,7 @@ pip install -r requirements.txt
 [Heavyweight LLM Responds]
      ↓
 [Chat History + Context Saved] → [Regex Tags Parsed]→ [New RAG Collection]
+```
 
 ### Why am I doing this?
 Most RAG systems focus on question answering or document retrieval. This project takes a different approach — using LLMs to manage their own context through natural output cues (like {{lore:dragon_king}}), and pre-conditioning that knowledge before engaging in deeper conversation.

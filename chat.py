@@ -34,11 +34,11 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 class Chat(PromptManager):
     """ Begin initializing variables classes. Call .chat() to begin """
     def __init__(self, **kwargs):
-        super().__init__(console, kwargs)
+        super().__init__(console)
+        self.debug = kwargs['debug']
         self.host = kwargs['host']
         self.model = kwargs['model']
-        self.debug = kwargs['debug']
-        self.prompts = PromptManager(console, self.debug)
+        self.prompts = PromptManager(console, debug=self.debug)
         self.cm = ContextManager(console, **kwargs)
         self.llm = ChatOllama(host=self.host,
                               model=self.model,

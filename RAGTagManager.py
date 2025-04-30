@@ -37,8 +37,8 @@ class RAGTagManager():
     """
     def __init__(self, console, **kwargs):
         self.console = console
+        self.kwargs = kwargs
         self.debug = kwargs['debug']
-
         self.tag_pattern = re.compile(r'{\s*([a-zA-Z0-9_-]+)\s*:\s*([^\}]+)\s*}')
 
     def update_rag(self, base_url, model, prompt_template, debug=False)->str:
@@ -46,15 +46,20 @@ class RAGTagManager():
         pre_llm = OllamaModel(base_url)
         results = pre_llm.llm_query(model, prompt_template).content
         rag_tags = self.get_tags(results, debug=debug)
+        rag = RAG(self.console, **self.kwargs)
 
-        if debug:
-            self.console.print(f'RAG/Tag Results:\n{results}', style='color(233)')
-        # debuging the output of rag/tagging for now
-        with open('testing_output.txt', 'w', encoding='utf-8') as f:
-            f.write(f'model:\n{model}\n\n'
-                    f'prompt:\n{prompt_template}\n\n'
-                    f'results:\n{results}\n\n'
-                    f'rag_tags:\n{rag_tags}')
+        # we are most interested in names
+        collection = next((value for key, value in rag_tags if key in ['name', 'npc']), None)
+        if not collection:
+            for tag in rag_tags:
+                k, v = tag
+                rag.store_data(v, collection=k)
+        else:
+            for tag in rag_tags:
+                k, v = tag
+                rag.store_data(f'{k}:{v}', collection=collection)
+        if self.debug:
+            self.console.print(f'RAG/Tag Results:\n{rag_tags}', style='color(233)')
         return results
 
     def get_tags(self, content, debug=False) -> list:
@@ -127,6 +132,9 @@ class RAG():
         chroma = self._get_embeddings(collection)
         results = []
         results: list[Document] = chroma.similarity_search(query, matches)
+        if self.debug:
+            self.console.print(f'CHUNKS RETRIEVED:\n{collection}:{results}\n\n',
+                                style='color(233)')
         return results
 
     def store_data(self, data, collection='ai_response', chunk_size=300, chunk_overlap=150):

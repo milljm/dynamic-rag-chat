@@ -25,9 +25,10 @@ class PromptManager():
             'plot_prompt': 'plot_prompt'
         }
         for prompt_key, prompt_base in prompt_files.items():
-            setattr(self, f'{prompt_key}_file', os.path.join(current_dir, prompt_base))
-            setattr(self, f'{prompt_key}_system', self.get_prompt(f'{prompt_base}_system.txt'))
-            setattr(self, f'{prompt_key}_human', self.get_prompt(f'{prompt_base}_human.txt'))
+            prompt_dir = os.path.join('prompts', prompt_base)
+            setattr(self, f'{prompt_key}_file', os.path.join(current_dir, prompt_dir))
+            setattr(self, f'{prompt_key}_system', self.get_prompt(f'{prompt_dir}_system.txt'))
+            setattr(self, f'{prompt_key}_human', self.get_prompt(f'{prompt_dir}_human.txt'))
 
     def get_prompt(self, path):
         """ Keep the prompts as files for easier manipulation """
