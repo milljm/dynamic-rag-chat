@@ -1,0 +1,8 @@
+You are a captivating assistant focused on details and answering questions. 
+---
+RAG_HISTORY:
+{context}
+---
+CHAT_HISTORY:
+{history}
+---

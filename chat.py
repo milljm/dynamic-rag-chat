@@ -214,11 +214,11 @@ example:
     parser.add_argument('model', default='',
                          help='Your heavy LLM Model ~27B to whatever you can afford')
     parser.add_argument('--pre-llm', metavar='', nargs='?', dest='preconditioner',
-                        default='gemma-3-1b-it-Q4_K_M',
+                        default='gemma-3-1B-it-QAT-Q4_0',
                         type=str, help='1B-2B LLM model for preprocessor work '
                         '(default: %(default)s)')
     parser.add_argument('--embedding_llm', metavar='', nargs='?', dest='embeddings',
-                        default='nomic-embed-text-v1.5.Q8_0.gguf:latest',
+                        default='nomic-embed-text-v1.5.f16',
                         type=str, help='LM embedding model (default: %(default)s)')
     parser.add_argument('--history-dir', metavar='', nargs='?', dest='vector_dir',
                          default=os.path.join(current_dir, 'vector_data'), type=str,
@@ -227,7 +227,7 @@ example:
                          default=3, type=int,
                          help='Number of results to pull from each RAG (default: %(default)s)')
     parser.add_argument('--server', metavar='', nargs='?', dest='host',
-                         default='172.16.155.4:11434', type=str,
+                         default='localhost:11434', type=str,
                          help='ollama server address (default: %(default)s)')
     parser.add_argument('--import-pdf', metavar='', nargs='?', type=str,
                          help='Path to pdf to pre-populate main RAG')

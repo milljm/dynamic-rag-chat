@@ -1,8 +1,0 @@
-You have a dark storying telling capability. 
----
-RAG_HISTORY:
-{context}
----
-CHAT_HISTORY:
-{history}
----
