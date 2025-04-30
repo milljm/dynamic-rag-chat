@@ -8,72 +8,43 @@ being supplied to the LLM. It utilizing several methods:
 """
 import re
 import os
-import sys
 import hashlib
 import threading
 from langchain.prompts import ChatPromptTemplate
 from RAGTagManager import RAGTagManager, RAG
 from OllamaModel import OllamaModel
+from PromptManager import PromptManager
 current_dir = os.path.dirname(os.path.abspath(__file__))
-class ContextManager():
+class ContextManager(PromptManager):
     """ A collection of methods aimed at producing/reducing the context """
     def __init__(self, console, **kwargs):
-
-        for arg, value in kwargs.items():
-            setattr(self, arg, value)
-
+        super().__init__(console, kwargs)
+        self.console = console
+        self.prompts = PromptManager(console, self.debug)
         self.rag = RAG(console, **kwargs)
         self.rag_tagger = RAGTagManager(console, **kwargs)
-        self.console = console
-        self.build_prompts
-
-
-    def build_prompts(self):
-        """
-        A way to manage a growing number of prompt templates dynamic RAG/Tagging
-        might introduce...
-
-          {key : value} pairs become self.key : contents-of-file
-          filenaming convention: {value}_system.txt / {value}_human.txt
-        """
-        if self.debug:
-            self.console.print('[italic dim grey50]Debug mode enabled. I will re-read the '
-                          'prompt files each time[/]\n')
-        prompt_files = {
-            'pre_prompt':  'pre_conditioner_prompt',
-            'post_prompt': 'tagging_prompt',
-            'plot_prompt': 'plot_prompt'
-        }
-        for prompt_key, prompt_base in prompt_files.items():
-            setattr(self, f'{prompt_key}_file', os.path.join(current_dir, prompt_base))
-            setattr(self, f'{prompt_key}_system', self.get_prompt(f'{prompt_base}_system.txt'))
-            setattr(self, f'{prompt_key}_human', self.get_prompt(f'{prompt_base}_human.txt'))
-
-    def get_prompt(self, path):
-        """ Keep the prompts as files for easier manipulation """
-        if os.path.exists(path):
-            with open(path, 'r', encoding='utf-8') as prompt:
-                return prompt.read()
-        else:
-            print(f'Prompt not found! I expected to find it at:\n\n\t{path}')
-            sys.exit(1)
+        self.host = kwargs['host']
+        self.matches = kwargs['matches']
+        self.preconditioner = kwargs['preconditioner']
+        self.debug = kwargs['debug']
+        self.prompts.build_prompts()
 
     def pre_processor(self, query, collection='default')->str:
         """
         lightweight LLM as a summarization/tagging pre-processor
         """
+        prompts = self.prompts
         pre_llm = OllamaModel(self.host)
-
         docs = self.rag.retrieve_data(query, collection, matches=self.matches)
         context = "\n\n".join(doc.page_content for doc in docs if doc.page_content.strip())
         if self.debug:
             self.console.print(f'DEBUG VECTOR:\n{context}', style='color(233)')
         # pylint: disable=no-member # dynamic prompts (see self.__build_prompts)
         prompt_template = ChatPromptTemplate.from_messages([
-                    ("system", (self.get_prompt(f'{self.pre_prompt_file}_system.txt')
-                                if self.debug else self.pre_prompt_system)),
-                    ("human", (self.get_prompt(f'{self.pre_prompt_file}_human.txt')
-                               if self.debug else self.pre_prompt_human))
+                    ("system", (prompts.get_prompt(f'{prompts.pre_prompt_file}_system.txt')
+                                if self.debug else prompts.pre_prompt_system)),
+                    ("human", (prompts.get_prompt(f'{prompts.pre_prompt_file}_human.txt')
+                               if self.debug else prompts.pre_prompt_human))
                 ])
         # pylint: enable=no-member
         prompt = prompt_template.format_messages(context=context, question='')
@@ -89,9 +60,10 @@ class ContextManager():
         more vectors are established, allowing the pre-processing step to draw
         in more nuanced context.
         """
+        prompts = self.prompts
         # pylint: disable=no-member # dynamic prompts (see self.__build_prompts)
-        post_prompt = (self.get_prompt(f'{self.post_prompt_file}_system.txt')
-                        if self.debug else self.post_prompt_system)
+        post_prompt = (prompts.get_prompt(f'{prompts.post_prompt_file}_system.txt')
+                        if self.debug else prompts.post_prompt_system)
         prompt_template = ChatPromptTemplate.from_messages([
                     ("system", post_prompt),
                     ("human", '{context}')
@@ -99,9 +71,7 @@ class ContextManager():
         prompt = prompt_template.format_messages(context=response, question='')
         # pylint: enable=no-member
         threading.Thread(target=self.rag_tagger.update_rag,
-                         args=(self.host,
-                               self.preconditioner,
-                               prompt),
+                         args=(self.host, self.preconditioner, prompt),
                          kwargs={'debug': self.debug}).start()
 
     @staticmethod
@@ -138,7 +108,6 @@ class ContextManager():
         if direction == 'query':
             documents = []
             for collection in ['ai_response', 'user_queries']:
-                print(f'DEBUG handle context: {data}, {collection}, {self.matches}')
                 documents.extend(self.rag.retrieve_data(data,
                                                         collection,
                                                         matches=self.matches))

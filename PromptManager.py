@@ -4,17 +4,16 @@ import sys
 current_dir = os.path.dirname(os.path.abspath(__file__))
 class PromptManager():
     """ Handle all the possible prompt files we may introduce with RAG/Tagging """
-    def __init__(self, console, **kwargs):
-        for arg, value in kwargs.items():
-            setattr(self, arg, value)
+    def __init__(self, console, debug=False):
         self.console = console
+        self.debug = debug
 
     def build_prompts(self):
         """
         A way to manage a growing number of prompt templates dynamic RAG/Tagging
         might introduce...
 
-          {key : value} pairs become self.key : contents-of-file
+          {key : value} pairs become self.key_* : contents-of-file
           filenaming convention: {value}_system.txt / {value}_human.txt
         """
         if self.debug:

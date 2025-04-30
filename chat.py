@@ -27,68 +27,40 @@ from prompt_toolkit import PromptSession
 from prompt_toolkit.key_binding import KeyBindings
 from ContextManager import ContextManager
 from RAGTagManager import RAG
+from PromptManager import PromptManager
 console = Console(highlight=True)
 current_dir = os.path.dirname(os.path.abspath(__file__))
 
-class Chat():
+class Chat(PromptManager):
     """ Begin initializing variables classes. Call .chat() to begin """
     def __init__(self, **kwargs):
-        for arg, value in kwargs.items():
-            setattr(self, arg, value)
-        # pylint: disable=no-value-for-parameter
+        super().__init__(console, kwargs)
+        self.host = kwargs['host']
+        self.model = kwargs['model']
+        self.debug = kwargs['debug']
+        self.prompts = PromptManager(console, self.debug)
         self.cm = ContextManager(console, **kwargs)
-
         self.llm = ChatOllama(host=self.host,
                               model=self.model,
                               streaming=True)
-
+        self.prompts.build_prompts()
         # Class variables
         # TODO: we can generate this much cleaner...
         self.heat_map = {0: 123, 300: 51, 500: 46, 700: 42, 2000: 82, 3000: 154,
                          3500: 178, 4000: 208, 4200: 166, 4500: 203, 4700: 197, 5000: 196}
         self.chat_history_md = ''
         self.chat_history_session = []
-        self.build_prompts()
-
-    def build_prompts(self):
-        """
-        A way to manage a growing number of prompt templates dynamic RAG/Tagging
-        might introduce...
-
-          {key : value} pairs become self.key : contents-of-file
-          filenaming convention: {value}_system.txt / {value}_human.txt
-        """
-        if self.debug:
-            console.print('[italic dim grey50]Debug mode enabled. I will re-read the '
-                          'prompt files each time[/]\n')
-        prompt_files = {
-            'pre_prompt':  'pre_conditioner_prompt',
-            'post_prompt': 'tagging_prompt',
-            'plot_prompt': 'plot_prompt'
-        }
-        for prompt_key, prompt_base in prompt_files.items():
-            setattr(self, f'{prompt_key}_file', os.path.join(current_dir, prompt_base))
-            setattr(self, f'{prompt_key}_system', self.get_prompt(f'{prompt_base}_system.txt'))
-            setattr(self, f'{prompt_key}_human', self.get_prompt(f'{prompt_base}_human.txt'))
-
-    def get_prompt(self, path):
-        """ Keep the prompts as files for easier manipulation """
-        if os.path.exists(path):
-            with open(path, 'r', encoding='utf-8') as prompt:
-                return prompt.read()
-        else:
-            print(f'Prompt not found! I expected to find it at:\n\n\t{path}')
-            sys.exit(1)
 
     # Stream response as chunks
     def stream_response(self, query: str, context: str):
         """ Parse LLM Promp """
+        prompts = self.prompts
         # pylint: disable=no-member # dynamic prompts (see self.__build_prompts)
-        sys_prmpt = (self.__get_prompt(f'{self.plot_prompt_file}_system.txt')
-                     if self.debug else self.plot_prompt_system)
+        sys_prmpt = (prompts.get_prompt(f'{prompts.plot_prompt_file}_system.txt')
+                     if self.debug else prompts.plot_prompt_system)
 
-        hum_prmpt = (self.__get_prompt(f'{self.plot_prompt_file}_human.txt')
-                     if self.debug else self.plot_prompt_human)
+        hum_prmpt = (prompts.get_prompt(f'{prompts.plot_prompt_file}_human.txt')
+                     if self.debug else prompts.plot_prompt_human)
         # pylint: enable=no-member
         prompt = ChatPromptTemplate.from_messages([
                 ("system", sys_prmpt),
@@ -126,7 +98,7 @@ class Chat():
 
         # Create the footer text with model info, time, and token count
         footer = Text('Model: ', style='color(233)')
-        footer.append(f'{self.model_name} ', style='color(202)')
+        footer.append(f'{self.model} ', style='color(202)')
         footer.append('| Time: ', style='color(233)')
         footer.append(f'{time_taken:.2f}', style='color(94)')
         footer.append('s | Tokens: Cleaned/', style='color(233)')
@@ -268,16 +240,15 @@ example:
 
 if __name__ == '__main__':
     args = parse_args(sys.argv[1:])
-    print(args)
+    rag = RAG(console, host=args.host,
+              embeddings=args.embeddings,
+              vector_dir=args.vector_dir,
+              debug=args.debug)
     if args.import_txt:
         doc_path = args.import_txt
         if os.path.exists(doc_path):
             with open(doc_path, 'r', encoding='utf-8') as file:
                 document_content = file.read()
-                rag = RAG(console, args.server,
-                          args.embedding_llm,
-                          args.history_dir,
-                          args.debug)
                 rag.store_data(document_content)
             print(f"Document loaded from: {doc_path}")
         else:
@@ -286,10 +257,6 @@ if __name__ == '__main__':
     if args.import_pdf:
         pdf_file = args.import_pdf
         if os.path.exists(pdf_file):
-            rag = RAG(console, args.server,
-                      args.embedding_llm,
-                      args.history_dir,
-                      args.debug)
             rag.extract_text_from_pdf(pdf_file)
         else:
             print(f"Error: The file at {pdf_file} does not exist.")

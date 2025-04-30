@@ -37,6 +37,8 @@ class RAGTagManager():
     """
     def __init__(self, console, **kwargs):
         self.console = console
+        self.debug = kwargs['debug']
+
         self.tag_pattern = re.compile(r'{\s*([a-zA-Z0-9_-]+)\s*:\s*([^\}]+)\s*}')
 
     def update_rag(self, base_url, model, prompt_template, debug=False)->str:
@@ -73,9 +75,11 @@ class RAGTagManager():
 class RAG():
     """ Responsible for RAG operations """
     def __init__(self, console, **kwargs):
-        for arg, value in kwargs.items():
-            setattr(self, arg, value)
         self.console = console
+        self.host = kwargs['host']
+        self.embeddings = kwargs['embeddings']
+        self.vector_dir = kwargs['vector_dir']
+        self.debug = kwargs['debug']
 
     @staticmethod
     def _normalize_collection_name(name: str,
@@ -122,7 +126,6 @@ class RAG():
         """
         chroma = self._get_embeddings(collection)
         results = []
-        print(f'DEBUG: {query}, {matches}')
         results: list[Document] = chroma.similarity_search(query, matches)
         return results
 
