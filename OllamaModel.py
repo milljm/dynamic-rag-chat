@@ -15,5 +15,6 @@ class OllamaModel():
                          temperature=temp,
                          base_url=self.base_url,
                          streaming=False)
+        #response = llm.invoke(prompt_template)
         response = llm.invoke(prompt_template, stop=["\n\n", "###", "Conclusion"])
         return response

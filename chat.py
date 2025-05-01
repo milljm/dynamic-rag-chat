@@ -97,17 +97,17 @@ class Chat(PromptManager):
             tokens_per_second = 0
 
         # Create the footer text with model info, time, and token count
-        footer = Text('Model: ', style='color(233)')
+        footer = Text('', style='color(233)')
         footer.append(f'{self.model} ', style='color(202)')
-        footer.append('| Time: ', style='color(233)')
+        footer.append(' Time:', style='color(233)')
         footer.append(f'{time_taken:.2f}', style='color(94)')
-        footer.append('s | Tokens: Cleaned/', style='color(233)')
+        footer.append('s Tokens(cleaned:', style='color(233)')
         footer.append(f'{token_reduction}', style='color(27)')
-        footer.append(' Context/', style='color(233)')
+        footer.append(' context:', style='color(233)')
         footer.append(f'{prompt_tokens}', style=f'color({heat})')
-        footer.append(' Tokens/', style='color(233)')
+        footer.append(' completion:', style='color(233)')
         footer.append(f'{token_count}', style=f'color({produced})')
-        footer.append(f' ({tokens_per_second:.1f}T/s)', style='color(234)')
+        footer.append(f') {tokens_per_second:.1f}T/s', style='color(233)')
 
         # Render the chat content as Markdown (no panel, just the content)
         chat_content = Markdown(full_md)
@@ -150,10 +150,9 @@ class Chat(PromptManager):
                 context_tokens = self.cm.token_retreiver(context.split())
 
                 if self.debug:
-                    console.print(f'HISTORY:\n{self.chat_history_session[-3:]}\n',
-                                  f'HISTORY TOKENS: {prompt_tokens}\n\n',
-                                  f'CONTEXT:\n{context}\n',
-                                  f'CONTEXT TOKENS: {context_tokens}\n\n',
+                    console.print(f'HISTORY:\n{self.chat_history_session[-3:]}\n\n',
+                                  f'CONTEXT:\n{context}\n\n',
+                                  f'HISTORY + CONTEXT TOKENS: {context_tokens}\n\n',
                                   style='color(233)')
 
                 prompt_tokens += context_tokens

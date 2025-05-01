@@ -29,7 +29,7 @@ class ContextManager(PromptManager):
         self.debug = kwargs['debug']
         self.prompts.build_prompts()
 
-    def pre_processor(self, query, collection='default')->str:
+    def pre_processor(self, query, tagging=False, collection='default')->tuple:
         """
         lightweight LLM as a summarization/tagging pre-processor
         """
@@ -38,14 +38,22 @@ class ContextManager(PromptManager):
         docs = self.rag.retrieve_data(query, collection, matches=self.matches)
         context = "\n\n".join(doc.page_content for doc in docs if doc.page_content.strip())
         if self.debug:
-            self.console.print(f'DEBUG VECTOR CONTENT:\n{context}', style='color(233)')
+            self.console.print(f'RAG CONTENT:\n{context}', style='color(233)')
         # pylint: disable=no-member # dynamic prompts (see self.__build_prompts)
+        if tagging:
+            system_prompt = (prompts.get_prompt(f'{prompts.tag_prompt_file}_system.txt')
+                             if self.debug else prompts.tag_prompt_system)
+        else:
+            system_prompt = (prompts.get_prompt(f'{prompts.pre_prompt_file}_system.txt')
+                             if self.debug else prompts.pre_prompt_system)
+
         prompt_template = ChatPromptTemplate.from_messages([
-                    ("system", (prompts.get_prompt(f'{prompts.pre_prompt_file}_system.txt')
-                                if self.debug else prompts.pre_prompt_system)),
-                    ("human", (prompts.get_prompt(f'{prompts.pre_prompt_file}_human.txt')
-                               if self.debug else prompts.pre_prompt_human))
+                    ("system", system_prompt),
+                    ("human", '{context}')
                 ])
+        if self.debug:
+            self.console.print(f'PRE-PROCESSOR PROMPT:\n{prompt_template}\n\n',
+                                style='color(233)')
         # pylint: enable=no-member
         prompt = prompt_template.format_messages(context=context, question='')
         content = pre_llm.llm_query(self.preconditioner, prompt).content
@@ -62,8 +70,8 @@ class ContextManager(PromptManager):
         """
         prompts = self.prompts
         # pylint: disable=no-member # dynamic prompts (see self.__build_prompts)
-        post_prompt = (prompts.get_prompt(f'{prompts.post_prompt_file}_system.txt')
-                        if self.debug else prompts.post_prompt_system)
+        post_prompt = (prompts.get_prompt(f'{prompts.tag_prompt_file}_system.txt')
+                        if self.debug else prompts.tag_prompt_system)
         prompt_template = ChatPromptTemplate.from_messages([
                     ("system", post_prompt),
                     ("human", '{context}')
@@ -114,18 +122,33 @@ class ContextManager(PromptManager):
                                                         collection,
                                                         matches=self.matches))
 
-            # Retrieve data from fast pre-processor and query the RAG once more
+            # Retrieve tags from fast pre-processor and query the RAG once more
             # This is where things get interesting. Has a knack for bringing
             # in otherwise missed but relevant context at the cost of ~1-2 seconds.
-            (pre_query, rag_tags) = self.pre_processor(data, 'ai_response')
+            (_, rag_tags) = self.pre_processor(data,
+                                               tagging=True,
+                                               collection='ai_response')
+            # could be relevant...
+            (_, incomming) = self.pre_processor(data,
+                                               tagging=True,
+                                               collection='user_queries')
+            rag_tags.extend(incomming)
+
+            # Based on those tags, retrieve information from its dynamic collection.All
+            # information gleaned here is very relevant. Or at the very least, was part
+            # of the same conversation/response that generated the RAG/Tag collection.
             for tag in rag_tags:
+                if self.debug:
+                    self.console.print(f'RAG/TAG Collection:{tag.tag}', style='color(233)')
                 documents.extend(self.rag.retrieve_data(tag.content,
                                                         tag.tag,
                                                         matches=self.matches))
 
-            documents.extend(self.rag.retrieve_data(pre_query,
-                                                    'ai_response',
-                                                    matches=self.matches))
+                # Now search the default AI's RAG once more based on content from
+                # the dynamic RAG. This effectivily connects the dots for nuances.
+                documents.extend(self.rag.retrieve_data(tag.content,
+                                                        'ai_response',
+                                                        matches=self.matches))
 
             # Lambda function to extract page_content from each document, then
             # a set() to remove any duplicates(you'd be surpised how many tokens this saves).
@@ -138,6 +161,12 @@ class ContextManager(PromptManager):
             if token_reduction and self.debug:
                 self.console.print(f'RAG TOKEN REDUCTION:\n{_pre} --> '
                               f'{_post} = {token_reduction}\n\n', style='color(233)')
+
+            # Store the users query to their RAG, now that we are done pre-processing
+            self.rag.store_data(data,
+                                collection='user_queries',
+                                chunk_size=150,
+                                chunk_overlap=50)
 
             # If the context is empty (no documents found), well, wow. Nothing.
             if not context:
@@ -152,4 +181,3 @@ class ContextManager(PromptManager):
         self.rag.store_data(data, collection='ai_response', chunk_size=150, chunk_overlap=50)
         # dynamic RAG creation starts here (non-blocking)
         self.post_processing(data)
-

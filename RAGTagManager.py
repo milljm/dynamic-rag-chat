@@ -49,17 +49,19 @@ class RAGTagManager():
         rag = RAG(self.console, **self.kwargs)
 
         # we are most interested in names
-        collection = next((value for key, value in rag_tags if key in ['name', 'npc']), None)
-        if not collection:
-            for tag in rag_tags:
-                k, v = tag
-                rag.store_data(v, collection=k)
-        else:
+        collections = [value for key, value in rag_tags if key in ['name', 'npc']]
+        for collection in collections:
+            if self.debug:
+                self.console.print(f'PRIORITY TAG:\n{collection}\n\n', style='color(233)')
             for tag in rag_tags:
                 k, v = tag
                 rag.store_data(f'{k}:{v}', collection=collection)
-        if self.debug:
-            self.console.print(f'RAG/Tag Results:\n{rag_tags}', style='color(233)')
+            if self.debug:
+                self.console.print(f'RAG/Tag Results:\n{rag_tags}', style='color(233)')
+        # Handle them in the normal way as well
+        for tag in rag_tags:
+            k, v = tag
+            rag.store_data(v, collection=k)
         return results
 
     def get_tags(self, content, debug=False) -> list:
@@ -70,7 +72,7 @@ class RAGTagManager():
         # Use the precompiled regex pattern
         matches = self.tag_pattern.findall(content)
         if debug:
-            self.console.print(f'DEBUG RAG/TAG MATCHES:\n{matches}\n', style='color(233)')
+            self.console.print(f'RAG/Tag MATCHES:\n{matches}\n', style='color(233)')
         # Add matches to rag_tags
         for match in matches:
             rag_tags.append(tagging(match[0], match[1]))

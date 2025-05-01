@@ -21,7 +21,7 @@ class PromptManager():
                           'prompt files each time[/]\n')
         prompt_files = {
             'pre_prompt':  'pre_conditioner_prompt',
-            'post_prompt': 'tagging_prompt',
+            'tag_prompt': 'tagging_prompt',
             'plot_prompt': 'plot_prompt'
         }
         for prompt_key, prompt_base in prompt_files.items():
