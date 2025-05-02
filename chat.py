@@ -187,6 +187,7 @@ class Chat(PromptManager):
                 if not user_input:
                     continue
 
+                start_time = time.time()
                 # Grab our lovely context
                 (ai_context,
                 user_context,
@@ -215,7 +216,6 @@ class Chat(PromptManager):
                 cleaned_color = [v for k,v in self.create_heatmap(half_tokens,
                                                                   reverse=True).items()
                                  if k<=token_reduction][-1:][0]
-                start_time = time.time()
                 token_count = 0
                 with Live(refresh_per_second=20) as live:
                     self.chat_history_md = f"""**You:** {user_input}\n\n---\n\n"""

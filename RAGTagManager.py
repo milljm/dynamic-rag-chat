@@ -128,8 +128,9 @@ class RAG():
         """
         Return vector data as a list. Syntax:
             retrieve_data(query=str, collection=str, matches=int)->list
-                query: your question
-                k:     matches to return
+                query:      your query
+                collection: a collection to pull from
+                matches:    matches to return
         """
         chroma = self._get_embeddings(collection)
         results = []
