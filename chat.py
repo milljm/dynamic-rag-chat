@@ -15,6 +15,7 @@
 import os
 import sys
 import time
+import pickle
 import argparse
 from langchain.prompts import ChatPromptTemplate
 from langchain_ollama import ChatOllama
@@ -38,6 +39,7 @@ class Chat(PromptManager):
         self.debug = kwargs['debug']
         self.host = kwargs['host']
         self.model = kwargs['model']
+        self.history_dir = kwargs['vector_dir']
         self.prompts = PromptManager(console, debug=self.debug)
         self.cm = ContextManager(console, **kwargs)
         self.llm = ChatOllama(host=self.host,
@@ -45,11 +47,59 @@ class Chat(PromptManager):
                               streaming=True)
         self.prompts.build_prompts()
         # Class variables
-        # TODO: we can generate this much cleaner...
-        self.heat_map = {0: 123, 300: 51, 500: 46, 700: 42, 2000: 82, 3000: 154,
-                         3500: 178, 4000: 208, 4200: 166, 4500: 203, 4700: 197, 5000: 196}
+        self.heat_map = 0
+        self.prompt_map = self.create_heatmap(5000)
+        # Demonstrating its use in the program:
+        self.cleaned_map = self.create_heatmap(1000)
         self.chat_history_md = ''
-        self.chat_history_session = []
+        self.chat_history_session = self.load_chat(self.history_dir)
+
+    @staticmethod
+    def create_heatmap(hot_max: int = 0, reverse: bool =False)->dict[int:int]:
+        """
+        Return a dictionary of ten color ascii codes (values) with the keys representing
+        the maximum integer for said color code:
+        ./heat_map(10) --> {0: 123, 1: 51, 2: 46, 3: 42, 4: 82, 5: 154,
+                            6: 178, 7: 208, 8: 166, 9: 203, 10: 196}
+        Options: reverse = True for oppisite effect
+        """
+        heat = {0: 123} # declare a zero
+        colors = [51, 46, 42, 82, 154, 178, 208, 166, 203, 196]
+        if reverse:
+            colors = colors[::-1]
+            heat = {0: 196} # declare a zero
+        for i in range(10):
+            x = int(((i+1)/10) * hot_max)
+            heat[x] = colors[i]
+        return heat
+
+    @staticmethod
+    def save_chat(chat_history, history_path):
+        """ Persist chat history (save) """
+        history_file = os.path.join(history_path, 'chat_history.pkl')
+        try:
+            with open(history_file, "wb") as f:
+                pickle.dump(chat_history, f)
+        except FileNotFoundError as e:
+            print(f'Error saving chat. Check --history-dir\n{e}')
+
+    @staticmethod
+    def load_chat(history_path):
+        """ Persist chat history (load) """
+        loaded_list = []
+        history_file = os.path.join(history_path, 'chat_history.pkl')
+        try:
+            with open(history_file, "rb") as f:
+                loaded_list = pickle.load(f)
+        except FileNotFoundError:
+            pass
+        except pickle.UnpicklingError as e:
+            print(f'Chat history file {history_file} not a pickle file:\n{e}')
+            sys.exit(1)
+        # pylint: disable=broad-exception-caught  # so many ways to fail, catch them all
+        except Exception as e:
+            print(f'Warning: Error loading chat: {e}')
+        return loaded_list
 
     # Stream response as chunks
     def stream_response(self, query: str, context: str):
@@ -80,15 +130,15 @@ class Chat(PromptManager):
                     time_taken: float = 0,
                     token_count: int = 0,
                     prompt_tokens: int = 0,
-                    token_reduction: int = 0) -> Group:
+                    token_reduction: int = 0,
+                    cleaned_color: int = 123) -> Group:
         """ render and return markdown/syntax """
         # Create the full chat content using Markdown
         full_md = f'{self.chat_history_md}\n\n{current_stream}'
 
         # Calculate heat map
-        heat = [v for k,v in self.heat_map.items() if k<=prompt_tokens][-1:][0]
-        produced = [v for k,v in self.heat_map.items()
-                    if max(0, 5000-(token_count*8))>=k][-1:][0]
+        context_size = [v for k,v in self.prompt_map.items() if k<=prompt_tokens][-1:][0]
+        produced = [v for k,v in self.heat_map.items() if token_count>=k][-1:][0]
 
         # Calculate Tokens/s
         if time_taken > 0:
@@ -102,9 +152,9 @@ class Chat(PromptManager):
         footer.append(' Time:', style='color(233)')
         footer.append(f'{time_taken:.2f}', style='color(94)')
         footer.append('s Tokens(cleaned:', style='color(233)')
-        footer.append(f'{token_reduction}', style='color(27)')
+        footer.append(f'{token_reduction}', style=f'color({cleaned_color})')
         footer.append(' context:', style='color(233)')
-        footer.append(f'{prompt_tokens}', style=f'color({heat})')
+        footer.append(f'{prompt_tokens}', style=f'color({context_size})')
         footer.append(' completion:', style='color(233)')
         footer.append(f'{token_count}', style=f'color({produced})')
         footer.append(f') {tokens_per_second:.1f}T/s', style='color(233)')
@@ -136,53 +186,54 @@ class Chat(PromptManager):
                 user_input = session.prompt(">>> ", multiline=True, key_bindings=kb).strip()
                 if not user_input:
                     continue
-                #user_input = input("\n🧠 Ask something (or type 'exit'): ")
-                #if user_input.strip().lower() == "exit":
-                #    break
 
                 # Grab our lovely context
-                (context, token_reduction) = self.cm.handle_context(data=user_input)
+                (ai_context,
+                user_context,
+                token_reduction) = self.cm.handle_context(data=user_input)
 
                 # Gather all prompt tokens, to display as statitics
                 prompt_tokens = self.cm.token_retreiver([user_input])
                 if self.chat_history_session[-3:]:
                     prompt_tokens = self.cm.token_retreiver(self.chat_history_session[-3:])
-                context_tokens = self.cm.token_retreiver(context.split())
+                context_tokens = self.cm.token_retreiver(ai_context.split())
 
                 if self.debug:
                     console.print(f'HISTORY:\n{self.chat_history_session[-3:]}\n\n',
-                                  f'CONTEXT:\n{context}\n\n',
-                                  f'HISTORY + CONTEXT TOKENS: {context_tokens}\n\n',
+                                  f'RAG USER CONTEXT:\n{user_context}\n\n',
+                                  f'RAG AI CONTEXT:\n{ai_context}\n\n',
+                                  f'HISTORY + ALL CONTEXT TOKENS: {context_tokens}\n\n',
                                   style='color(233)')
 
                 prompt_tokens += context_tokens
                 console.print(f'Process {prompt_tokens} context tokens...', style='dim grey37')
-
-                # Set timers, and completion token counter
-                start_time = time.time()
                 current_response = ""
+
+                # Set timers, and completion token counter, colors...
+                self.heat_map = self.create_heatmap(prompt_tokens, reverse=True)
+                half_tokens = prompt_tokens / 4
+                cleaned_color = [v for k,v in self.create_heatmap(half_tokens,
+                                                                  reverse=True).items()
+                                 if k<=token_reduction][-1:][0]
+                start_time = time.time()
                 token_count = 0
                 with Live(refresh_per_second=20) as live:
-                    self.chat_history_md = f"""**You:** *{user_input}*
-
----
-"""
+                    self.chat_history_md = f"""**You:** {user_input}\n\n---\n\n"""
                     #live.update(self.render_chat(self.chat_history_md))
-                    for piece in self.stream_response(user_input, context):
-                        #print(dir(piece))
-                        #if piece.finish_reason == "token_limit":
-                        #    completion_count = piece.token_count
+                    for piece in self.stream_response(user_input, ai_context):
                         current_response += piece.content
                         # Update token count (a rough estimate based on the size of the chunk)
                         token_count += len(piece.content.split())
                         live.update(self.render_chat(current_response,
-                                                    time.time()-start_time,
-                                                    token_count,
-                                                    prompt_tokens,
-                                                    token_reduction))
+                                                     time.time()-start_time,
+                                                     token_count,
+                                                     prompt_tokens,
+                                                     token_reduction,
+                                                     cleaned_color))
 
                 self.chat_history_session.append(current_response)
                 self.cm.handle_context(current_response, direction='store')
+                self.save_chat(self.chat_history_session, self.history_dir)
 
         except KeyboardInterrupt:
             sys.exit()

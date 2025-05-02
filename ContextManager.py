@@ -62,7 +62,7 @@ class ContextManager(PromptManager):
 
     def post_processing(self, response):
         """
-        Send LLM's resoonse off for post processing as a thread. This allows the
+        Send LLM's response off for post processing as a thread. This allows the
         user to begin formulating a response (and even sending a new message
         before this has completed). This step will begin to shine as more and
         more vectors are established, allowing the pre-processing step to draw
@@ -112,55 +112,63 @@ class ContextManager(PromptManager):
                 unique.append(text)
         return unique
 
-    def handle_context(self, data, direction='query')->tuple:
+    def doc_summarizer(self, documents)->tuple:
+        """
+        Take incomming documents and remove the fluff. Return both the
+        final product designed to be served to the LLM, and the token
+        counts (before/after):
+             .doc_summarizer(documents) -> (str, pre_count, post_count)
+        """
+        pre = self.token_retreiver(list(map(lambda doc: doc.page_content, documents)))
+        context = list(set(list(map(lambda doc: doc.page_content, documents))))
+        context = self.deduplicate_texts(context)
+        # TODO: get this working better. It's stripping too much context
+        # (context, _) = self.pre_processor(context)
+        post = self.token_retreiver(context)
+        return (context, pre, post)
+
+    def handle_context(self, data, direction='query')->tuple[list,list,int]:
         """ Method to handle all the lovely context """
         # Retrieve context from AI and User RAG
         if direction == 'query':
-            documents = []
+            ai_documents = []
+            user_documents = []
             for collection in ['ai_response', 'user_queries']:
-                documents.extend(self.rag.retrieve_data(data,
-                                                        collection,
-                                                        matches=self.matches))
-
-            # Retrieve tags from fast pre-processor and query the RAG once more
-            # This is where things get interesting. Has a knack for bringing
-            # in otherwise missed but relevant context at the cost of ~1-2 seconds.
-            (_, rag_tags) = self.pre_processor(data,
-                                               tagging=True,
-                                               collection='ai_response')
-            # could be relevant...
-            (_, incomming) = self.pre_processor(data,
-                                               tagging=True,
-                                               collection='user_queries')
-            rag_tags.extend(incomming)
-
-            # Based on those tags, retrieve information from its dynamic collection.All
-            # information gleaned here is very relevant. Or at the very least, was part
-            # of the same conversation/response that generated the RAG/Tag collection.
-            for tag in rag_tags:
+                ai_documents.extend(self.rag.retrieve_data(data,
+                                                           collection,
+                                                           matches=self.matches))
+            # AI Tags/Documents
+            (_, ai_tags) = self.pre_processor(data, tagging=True, collection='ai_response')
+            for tag in ai_tags:
                 if self.debug:
-                    self.console.print(f'RAG/TAG Collection:{tag.tag}', style='color(233)')
-                documents.extend(self.rag.retrieve_data(tag.content,
-                                                        tag.tag,
-                                                        matches=self.matches))
+                    self.console.print(f'AI RAG/TAG Collection:{tag.tag}', style='color(233)')
+                ai_documents.extend(self.rag.retrieve_data(tag.content,
+                                                           tag.tag,
+                                                           matches=self.matches))
+                # Search once more in the default RAG (brings in some nuances)
+                ai_documents.extend(self.rag.retrieve_data(tag.content,
+                                                           'ai_response',
+                                                            matches=self.matches))
+            (ai_context, ai_pre, ai_post) = self.doc_summarizer(ai_documents)
 
-                # Now search the default AI's RAG once more based on content from
-                # the dynamic RAG. This effectivily connects the dots for nuances.
-                documents.extend(self.rag.retrieve_data(tag.content,
-                                                        'ai_response',
-                                                        matches=self.matches))
+            # User Tags/Documents
+            (_, user_tags) = self.pre_processor(data, tagging=True, collection='user_queries')
+            for tag in user_tags:
+                if self.debug:
+                    self.console.print(f'USER RAG/TAG Collection:{tag.tag}', style='color(233)')
+                user_documents.extend(self.rag.retrieve_data(tag.content,
+                                                             tag.tag,
+                                                             matches=self.matches))
+            (user_context, user_pre, user_post) = self.doc_summarizer(user_documents)
 
-            # Lambda function to extract page_content from each document, then
-            # a set() to remove any duplicates(you'd be surpised how many tokens this saves).
-            token_reduction = 0
-            _pre = self.token_retreiver(list(map(lambda doc: doc.page_content,documents)))
-            context = list(set(list(map(lambda doc: doc.page_content, documents))))
-            context = self.deduplicate_texts(context)
-            _post = self.token_retreiver(context)
-            token_reduction = _pre - _post
+            # token math
+            pre_total = ai_pre + user_pre
+            post_total = ai_post + user_post
+            token_reduction = pre_total - post_total
+
             if token_reduction and self.debug:
-                self.console.print(f'RAG TOKEN REDUCTION:\n{_pre} --> '
-                              f'{_post} = {token_reduction}\n\n', style='color(233)')
+                self.console.print(f'RAG TOKEN REDUCTION:\n{pre_total} --> '
+                                f'{post_total} = {token_reduction}\n\n', style='color(233)')
 
             # Store the users query to their RAG, now that we are done pre-processing
             self.rag.store_data(data,
@@ -169,11 +177,11 @@ class ContextManager(PromptManager):
                                 chunk_overlap=50)
 
             # If the context is empty (no documents found), well, wow. Nothing.
-            if not context:
-                return ('', token_reduction)
+            if not ai_context and not user_context:
+                return ('', '', token_reduction)
 
             # LLMs prefer strings separated by \n\n
-            return ('\n\n'.join(context), token_reduction)
+            return ('\n\n'.join(ai_context), '\n\n'.join(user_context), token_reduction)
 
         # Store Context to AI RAG
         # Aggresively fragment the response from heavy-weight LLM responses
