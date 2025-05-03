@@ -17,6 +17,7 @@ import sys
 import time
 import pickle
 import argparse
+import threading
 from langchain.prompts import ChatPromptTemplate
 from langchain_ollama import ChatOllama
 from rich.live import Live
@@ -49,10 +50,16 @@ class Chat(PromptManager):
         # Class variables
         self.heat_map = 0
         self.prompt_map = self.create_heatmap(5000)
-        # Demonstrating its use in the program:
         self.cleaned_map = self.create_heatmap(1000)
         self.chat_history_md = ''
         self.chat_history_session = self.load_chat(self.history_dir)
+
+        # Thinking animation
+        self.pulsing_chars = ["⠇", "⠋", "⠙", "⠸", "⠴", "⠦"]
+        self.pulse_index = 0
+        self.thinking = False
+        self.animation_active = False
+        self.animation_thread = threading.Thread(target=self.update_animation)
 
     @staticmethod
     def create_heatmap(hot_max: int = 0, reverse: bool =False)->dict[int:int]:
@@ -101,28 +108,61 @@ class Chat(PromptManager):
             print(f'Warning: Error loading chat: {e}')
         return loaded_list
 
+    def start_thinking(self):
+        """ method to start thinking animation """
+        self.thinking = True
+        self.animation_active = True
+        self.animation_thread.daemon = True
+        self.animation_thread.start()
+
+    def stop_thinking(self):
+        """ method to stop thining animation """
+        self.thinking = False
+        self.animation_active = False
+
+    def update_animation(self):
+        """ a threaded method to run the thinking animation """
+        while self.animation_active:
+            time.sleep(0.1)  # Adjust speed (0.1 seconds per frame)
+            self.pulse_index = (self.pulse_index + 1) % len(self.pulsing_chars)
+            self.render_chat()
+
     # Stream response as chunks
-    def stream_response(self, query: str, context: str):
+    def stream_response(self, query: str,
+                              ai_context: str,
+                              user_context: str,
+                              chat_history: str):
         """ Parse LLM Promp """
         prompts = self.prompts
         # pylint: disable=no-member # dynamic prompts (see self.__build_prompts)
-        sys_prmpt = (prompts.get_prompt(f'{prompts.plot_prompt_file}_system.txt')
+        system_prompt = (prompts.get_prompt(f'{prompts.plot_prompt_file}_system.txt')
                      if self.debug else prompts.plot_prompt_system)
 
-        hum_prmpt = (prompts.get_prompt(f'{prompts.plot_prompt_file}_human.txt')
+        human_prompt = (prompts.get_prompt(f'{prompts.plot_prompt_file}_human.txt')
                      if self.debug else prompts.plot_prompt_human)
         # pylint: enable=no-member
-        prompt = ChatPromptTemplate.from_messages([
-                ("system", sys_prmpt),
-                ("human", hum_prmpt)
+        prompt_template = ChatPromptTemplate.from_messages([
+                ("system", system_prompt),
+                ("human", human_prompt)
             ])
-        messages = prompt.format_messages(history=' '.join(self.chat_history_session[-3:]),
-                                          context=context,
-                                          question=query)
+        prompt = prompt_template.format_messages(user_context=user_context,
+                                                 ai_context=ai_context,
+                                                 chat_history=chat_history,
+                                                 question=query)
         # pylint: enable=no-member
         if self.debug:
-            console.print(f'RAW PROMPT (llm.stream()):\n{messages}\n\n', style='color(233)')
-        for chunk in self.llm.stream(messages):
+            console.print(f'LLM PROMPT (llm.stream()):\n{prompt}\n\n',
+                          style='color(233)',
+                          highlight=False)
+        for chunk in self.llm.stream(prompt):
+            if self.thinking and '</think>' in chunk.content:
+                chunk.content = ''
+                self.stop_thinking()
+            elif not self.thinking and '<think>' in chunk.content:
+                self.start_thinking()
+                chunk.content = ''
+            elif self.thinking:
+                chunk.content = ''
             yield chunk
 
     # Compose the full chat display with footer (model name, time taken, token count)
@@ -133,6 +173,7 @@ class Chat(PromptManager):
                     token_reduction: int = 0,
                     cleaned_color: int = 123) -> Group:
         """ render and return markdown/syntax """
+
         # Create the full chat content using Markdown
         full_md = f'{self.chat_history_md}\n\n{current_stream}'
 
@@ -146,9 +187,13 @@ class Chat(PromptManager):
         else:
             tokens_per_second = 0
 
+        # Implement a thinking emoji
+        emoji = self.pulsing_chars[self.pulse_index] if self.thinking else ""
+
         # Create the footer text with model info, time, and token count
         footer = Text('', style='color(233)')
         footer.append(f'{self.model} ', style='color(202)')
+        footer.append(emoji, style='color(51)')
         footer.append(' Time:', style='color(233)')
         footer.append(f'{time_taken:.2f}', style='color(94)')
         footer.append('s Tokens(cleaned:', style='color(233)')
@@ -187,7 +232,6 @@ class Chat(PromptManager):
                 if not user_input:
                     continue
 
-                start_time = time.time()
                 # Grab our lovely context
                 (ai_context,
                 user_context,
@@ -204,7 +248,8 @@ class Chat(PromptManager):
                                   f'RAG USER CONTEXT:\n{user_context}\n\n',
                                   f'RAG AI CONTEXT:\n{ai_context}\n\n',
                                   f'HISTORY + ALL CONTEXT TOKENS: {context_tokens}\n\n',
-                                  style='color(233)')
+                                  style='color(233)',
+                                  highlight=False)
 
                 prompt_tokens += context_tokens
                 console.print(f'Process {prompt_tokens} context tokens...', style='dim grey37')
@@ -216,11 +261,15 @@ class Chat(PromptManager):
                 cleaned_color = [v for k,v in self.create_heatmap(half_tokens,
                                                                   reverse=True).items()
                                  if k<=token_reduction][-1:][0]
+                start_time = time.time()
                 token_count = 0
                 with Live(refresh_per_second=20) as live:
                     self.chat_history_md = f"""**You:** {user_input}\n\n---\n\n"""
                     #live.update(self.render_chat(self.chat_history_md))
-                    for piece in self.stream_response(user_input, ai_context):
+                    for piece in self.stream_response(user_input,
+                                                      ai_context,
+                                                      user_context,
+                                                      "\n".join(self.chat_history_session[-3:])):
                         current_response += piece.content
                         # Update token count (a rough estimate based on the size of the chunk)
                         token_count += len(piece.content.split())
@@ -267,7 +316,7 @@ example:
                         default='gemma-3-1B-it-QAT-Q4_0',
                         type=str, help='1B-2B LLM model for preprocessor work '
                         '(default: %(default)s)')
-    parser.add_argument('--embedding_llm', metavar='', nargs='?', dest='embeddings',
+    parser.add_argument('--embedding-llm', metavar='', nargs='?', dest='embeddings',
                         default='nomic-embed-text-v1.5.f16',
                         type=str, help='LM embedding model (default: %(default)s)')
     parser.add_argument('--history-dir', metavar='', nargs='?', dest='vector_dir',

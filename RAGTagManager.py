@@ -52,12 +52,16 @@ class RAGTagManager():
         collections = [value for key, value in rag_tags if key in ['name', 'npc']]
         for collection in collections:
             if self.debug:
-                self.console.print(f'PRIORITY TAG:\n{collection}\n\n', style='color(233)')
+                self.console.print(f'PRIORITY TAG:\n{collection}\n\n',
+                                   style='color(233)',
+                                   highlight=False)
             for tag in rag_tags:
                 k, v = tag
                 rag.store_data(f'{k}:{v}', collection=collection)
             if self.debug:
-                self.console.print(f'RAG/Tag Results:\n{rag_tags}', style='color(233)')
+                self.console.print(f'RAG/Tag Results:\n{rag_tags}',
+                                   style='color(233)',
+                                   highlight=False)
         # Handle them in the normal way as well
         for tag in rag_tags:
             k, v = tag
@@ -128,16 +132,16 @@ class RAG():
         """
         Return vector data as a list. Syntax:
             retrieve_data(query=str, collection=str, matches=int)->list
-                query:      your query
-                collection: a collection to pull from
-                matches:    matches to return
+                query: your question
+                k:     matches to return
         """
         chroma = self._get_embeddings(collection)
         results = []
         results: list[Document] = chroma.similarity_search(query, matches)
         if self.debug:
             self.console.print(f'CHUNKS RETRIEVED:\n{collection}:{results}\n\n',
-                                style='color(233)')
+                                style='color(233)',
+                                highlight=False)
         return results
 
     def store_data(self, data, collection='ai_response', chunk_size=300, chunk_overlap=150):
@@ -148,7 +152,9 @@ class RAG():
         chroma = self._get_embeddings(collection)
         chroma.add_documents(docs)
         if self.debug:
-            self.console.print(f'CHUNKS STORED: {len(docs)}', style='color(233)')
+            self.console.print(f'CHUNKS STORED: {len(docs)}',
+                               style='color(233)',
+                               highlight=False)
 
     def extract_text_from_pdf(self, pdf_path):
         """ extract text from PDFs """

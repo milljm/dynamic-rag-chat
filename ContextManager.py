@@ -39,26 +39,30 @@ class ContextManager(PromptManager):
         if tagging:
             system_prompt = (prompts.get_prompt(f'{prompts.tag_prompt_file}_system.txt')
                              if self.debug else prompts.tag_prompt_system)
+            human_prompt = (prompts.get_prompt(f'{prompts.tag_prompt_file}_human.txt')
+                            if self.debug else prompts.tag_prompt_human)
             docs = self.rag.retrieve_data(query, collection, matches=self.matches)
             context = "\n\n".join(doc.page_content for doc in docs if doc.page_content.strip())
         else:
             system_prompt = (prompts.get_prompt(f'{prompts.pre_prompt_file}_system.txt')
                              if self.debug else prompts.pre_prompt_system)
+            human_prompt = (prompts.get_prompt(f'{prompts.pre_prompt_file}_human.txt')
+                            if self.debug else prompts.pre_prompt_human)
             context = query
 
         prompt_template = ChatPromptTemplate.from_messages([
                     ("system", system_prompt),
-                    ("human", '{context}')
+                    ("human", human_prompt)
                 ])
-
+        prompt = prompt_template.format_messages(context=context)
         if self.debug:
-            self.console.print(f'PRE-PROCESSOR PROMPT: Tagging:{tagging}:\n{prompt_template}\n\n',
-                                style='color(233)')
+            self.console.print(f'PRE-PROCESSOR PROMPT:\n{prompt}\n\n',
+                                style='color(233)', highlight=False)
         # pylint: enable=no-member
-        prompt = prompt_template.format_messages(context=context, question='')
         content = pre_llm.llm_query(self.preconditioner, prompt).content
         if self.debug:
-            self.console.print(f'PRE-PROCESSOR RETURN:\n{content}\n\n')
+            self.console.print(f'PRE-PROCESSOR RESPONSE:\n{content}\n\n',
+                                style='color(233)', highlight=False)
         tags = self.rag_tagger.get_tags(content, debug=self.debug)
         return (content, tags)
 
@@ -80,7 +84,8 @@ class ContextManager(PromptManager):
                 ])
         prompt = prompt_template.format_messages(context=response, question='')
         if self.debug:
-            self.console.print(f'POST PROCESS PROMPT TEMPLATE:\n{prompt}\n\n', style='color(233)')
+            self.console.print(f'POST PROCESS PROMPT TEMPLATE:\n{prompt}\n\n',
+                               style='color(233)', highlight=False)
         # pylint: enable=no-member
         threading.Thread(target=self.rag_tagger.update_rag,
                          args=(self.host, self.preconditioner, prompt),
@@ -124,6 +129,8 @@ class ContextManager(PromptManager):
         pre = self.token_retreiver(list(map(lambda doc: doc.page_content, documents)))
         context = list(set(list(map(lambda doc: doc.page_content, documents))))
         context = self.deduplicate_texts(context)
+        # TODO: get this working better. It's stripping too much context
+        # (context, _) = self.pre_processor(context)
         post = self.token_retreiver(context)
         return (context, pre, post)
 
@@ -141,35 +148,28 @@ class ContextManager(PromptManager):
             (_, ai_tags) = self.pre_processor(data, tagging=True, collection='ai_response')
             for tag in ai_tags:
                 if self.debug:
-                    self.console.print(f'AI RAG/TAG Collection:{tag.tag}', style='color(233)')
-                if tag.content:
-                    ai_documents.extend(self.rag.retrieve_data(tag.content,
-                                                               tag.tag,
-                                                               matches=self.matches))
+                    self.console.print(f'AI RAG/TAG Collection:{tag.tag}',
+                                       style='color(233)',
+                                       highlight=False)
+                ai_documents.extend(self.rag.retrieve_data(tag.content,
+                                                           tag.tag,
+                                                           matches=self.matches))
                 # Search once more in the default RAG (brings in some nuances)
                 ai_documents.extend(self.rag.retrieve_data(tag.content,
                                                            'ai_response',
                                                             matches=self.matches))
             (ai_context, ai_pre, ai_post) = self.doc_summarizer(ai_documents)
 
-            # Summarize the summarizer!
-            if self.debug:
-                self.console.print(f'BEFORE SUMMARIZER LLM:{ai_context}', style='color(233)')
-            (ai_context, _) = self.pre_processor(ai_context, collection='ai_response')
-            ai_context = ai_context.split('\n')
-            ai_post = self.token_retreiver(ai_context)
-            if self.debug:
-                self.console.print(f'AFTER SUMMARIZER LLM:{ai_context}', style='color(233)')
-
             # User Tags/Documents
             (_, user_tags) = self.pre_processor(data, tagging=True, collection='user_queries')
             for tag in user_tags:
                 if self.debug:
-                    self.console.print(f'USER RAG/TAG Collection:{tag.tag}', style='color(233)')
-                if tag.content:
-                    user_documents.extend(self.rag.retrieve_data(tag.content,
-                                                                 tag.tag,
-                                                                 matches=self.matches))
+                    self.console.print(f'USER RAG/TAG Collection:{tag.tag}',
+                                       style='color(233)',
+                                       highlight=False)
+                user_documents.extend(self.rag.retrieve_data(tag.content,
+                                                             tag.tag,
+                                                             matches=self.matches))
             (user_context, user_pre, user_post) = self.doc_summarizer(user_documents)
 
             # token math
@@ -179,7 +179,9 @@ class ContextManager(PromptManager):
 
             if token_reduction and self.debug:
                 self.console.print(f'RAG TOKEN REDUCTION:\n{pre_total} --> '
-                                f'{post_total} = {token_reduction}\n\n', style='color(233)')
+                                f'{post_total} = {token_reduction}\n\n',
+                                style='color(233)',
+                                highlight=False)
 
             # Store the users query to their RAG, now that we are done pre-processing
             self.rag.store_data(data,
