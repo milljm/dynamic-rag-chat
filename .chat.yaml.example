@@ -1,0 +1,11 @@
+# Make changes, and then save the file as: .chat.yaml
+# Supplied command line arguments override settings here, allowing you to
+# store common arguments like server, yet pass --model on the fly.
+chat:
+  model: qwen3:235b-a22b-q4_K_M
+  pre_llm: gemma-3-1B-it-QAT-Q4_0
+  embedding_llm: nomic-embed-text-v1.5.f16
+  history_dir: /some/writable/path
+  history_matches: 20
+  server: localhost:11434
+  debug: False

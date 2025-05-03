@@ -12,12 +12,15 @@
 #     "pypdf",
 # ]
 # ///
+import re
 import os
 import sys
 import time
 import pickle
 import argparse
 import threading
+from threading import Thread
+import yaml
 from langchain.prompts import ChatPromptTemplate
 from langchain_ollama import ChatOllama
 from rich.live import Live
@@ -33,6 +36,18 @@ from PromptManager import PromptManager
 console = Console(highlight=True)
 current_dir = os.path.dirname(os.path.abspath(__file__))
 
+class AnimationThread(Thread):
+    """ Allow pulsing animation to run as a thread """
+    def __init__(self, owner):
+        super().__init__()
+        self.owner = owner
+
+    def run(self):
+        while self.owner.animation_active:
+            self.owner.update_animation()
+            time.sleep(0.5)
+
+# pylint: disable=too-many-instance-attributes
 class Chat(PromptManager):
     """ Begin initializing variables classes. Call .chat() to begin """
     def __init__(self, **kwargs):
@@ -48,6 +63,7 @@ class Chat(PromptManager):
                               streaming=True)
         self.prompts.build_prompts()
         # Class variables
+        self.model_re = re.compile(r'(\w+)\W+')
         self.heat_map = 0
         self.prompt_map = self.create_heatmap(5000)
         self.cleaned_map = self.create_heatmap(1000)
@@ -110,13 +126,16 @@ class Chat(PromptManager):
 
     def start_thinking(self):
         """ method to start thinking animation """
+        if hasattr(self, 'animation_thread') and self.animation_thread.is_alive():
+            self.animation_thread.join(timeout=0.1)
         self.thinking = True
         self.animation_active = True
+        self.animation_thread = AnimationThread(self)
         self.animation_thread.daemon = True
         self.animation_thread.start()
 
     def stop_thinking(self):
-        """ method to stop thining animation """
+        """ method to stop thinking animation """
         self.thinking = False
         self.animation_active = False
 
@@ -191,8 +210,9 @@ class Chat(PromptManager):
         emoji = self.pulsing_chars[self.pulse_index] if self.thinking else ""
 
         # Create the footer text with model info, time, and token count
+        model = '-'.join(self.model_re.findall(self.model)[:3])
         footer = Text('', style='color(233)')
-        footer.append(f'{self.model} ', style='color(202)')
+        footer.append(f'{model} ', style='color(202)')
         footer.append(emoji, style='color(51)')
         footer.append(' Time:', style='color(233)')
         footer.append(f'{time_taken:.2f}', style='color(94)')
@@ -210,11 +230,50 @@ class Chat(PromptManager):
         # Return everything as a Group (no borders, just the content)
         return Group(chat_content, footer)
 
+    def token_manager(self, user_input: str,
+                            ai_context: str,
+                            user_context: str,
+                            token_reduction: int)->tuple[int,int]:
+        """ Handle token counts and token colors for statistical printing """
+        token_generators = [[user_input],
+                            self.chat_history_session[-3:],
+                            ai_context.split(),
+                            user_context.split()]
+        tokens = 0
+        for token_generator in token_generators:
+            tokens += self.cm.token_retreiver(token_generator)
+
+        if self.debug:
+            console.print(f'HISTORY:\n{self.chat_history_session[-3:]}\n\n',
+                            f'RAG USER CONTEXT:\n{user_context}\n\n',
+                            f'RAG AI CONTEXT:\n{ai_context}\n\n',
+                            f'HISTORY + ALL CONTEXT TOKENS: {tokens}\n\n',
+                            style='color(233)',
+                            highlight=False)
+
+        # Set timers, and completion token counter, colors...
+        self.heat_map = self.create_heatmap(tokens, reverse=True)
+        cleaned_color = [v for k,v in self.create_heatmap(tokens / 4,
+                                                          reverse=True).items()
+                            if k<=token_reduction][-1:][0]
+        return (tokens, cleaned_color)
+
+    @staticmethod
+    def response_count(response):
+        """
+        Attempt to return a token count in response. Caveats: Some models 'think'
+        before responding. Allow this response to not count against the token/s
+        performance. Make an assumption: Any return should be considered as 1 token
+        at minimum. See the for loop in self.stream_response for details why response
+        is empty.
+        """
+        if response:
+            return len(response.split())
+        return 1
+
     def chat(self):
         """ Prompt the User for questions, and begin! """
         session = PromptSession()
-
-        # Set up key bindings
         kb = KeyBindings()
         @kb.add('enter')
         def _(event):
@@ -237,42 +296,26 @@ class Chat(PromptManager):
                 user_context,
                 token_reduction) = self.cm.handle_context(data=user_input)
 
-                # Gather all prompt tokens, to display as statitics
-                prompt_tokens = self.cm.token_retreiver([user_input])
-                if self.chat_history_session[-3:]:
-                    prompt_tokens = self.cm.token_retreiver(self.chat_history_session[-3:])
-                context_tokens = self.cm.token_retreiver(ai_context.split())
+                # Do token management
+                (prompt_tokens, cleaned_color) = self.token_manager(user_input,
+                                                                    ai_context,
+                                                                    user_context,
+                                                                    token_reduction)
 
-                if self.debug:
-                    console.print(f'HISTORY:\n{self.chat_history_session[-3:]}\n\n',
-                                  f'RAG USER CONTEXT:\n{user_context}\n\n',
-                                  f'RAG AI CONTEXT:\n{ai_context}\n\n',
-                                  f'HISTORY + ALL CONTEXT TOKENS: {context_tokens}\n\n',
-                                  style='color(233)',
-                                  highlight=False)
-
-                prompt_tokens += context_tokens
-                console.print(f'Process {prompt_tokens} context tokens...', style='dim grey37')
-                current_response = ""
-
-                # Set timers, and completion token counter, colors...
-                self.heat_map = self.create_heatmap(prompt_tokens, reverse=True)
-                half_tokens = prompt_tokens / 4
-                cleaned_color = [v for k,v in self.create_heatmap(half_tokens,
-                                                                  reverse=True).items()
-                                 if k<=token_reduction][-1:][0]
-                start_time = time.time()
+                current_response = ''
                 token_count = 0
+                start_time = time.time()
+                console.print(f'Submitting {prompt_tokens} context tokens to LLM, awaiting'
+                              ' repsonse...',
+                              style='dim grey37')
                 with Live(refresh_per_second=20) as live:
                     self.chat_history_md = f"""**You:** {user_input}\n\n---\n\n"""
-                    #live.update(self.render_chat(self.chat_history_md))
                     for piece in self.stream_response(user_input,
                                                       ai_context,
                                                       user_context,
                                                       "\n".join(self.chat_history_session[-3:])):
                         current_response += piece.content
-                        # Update token count (a rough estimate based on the size of the chunk)
-                        token_count += len(piece.content.split())
+                        token_count += self.response_count(piece.content)
                         live.update(self.render_chat(current_response,
                                                      time.time()-start_time,
                                                      token_count,
@@ -305,34 +348,52 @@ content generation.
 """
     epilog = f"""
 example:
-  ./{os.path.basename(__file__)} gemma3-27B
+  ./{os.path.basename(__file__)} -m gemma3-27b -p gemma3-1b -e nomic-embed-text
+
+Chat can read a .chat.yaml file to import your arguments.
+See .chat.yaml.example for details.
     """
+    # Allow loading a users options pre-set in a .chat.yaml file
+    rc_file = os.path.join(current_dir, '.chat.yaml')
+    options = {}
+    if os.path.exists(rc_file):
+        with open(rc_file, 'r', encoding='utf-8') as f:
+            options = yaml.safe_load(f) or {}
+    arg_dict = options.get('chat', {})
+    model = arg_dict.get('model', '')
+    preconditioner = arg_dict.get('pre_llm', 'gemma-3-1B-it-QAT-Q4_0')
+    embeddings = arg_dict.get('embedding_llm', 'nomic-embed-text-v1.5.f16')
+    vector_dir = arg_dict.get('history_dir', None)
+    matches = int(arg_dict.get('history_matches', 3))
+    host = arg_dict.get('server', 'localhost:11434')
+    debug = arg_dict.get('debug', False)
+    if vector_dir is None:
+        vector_dir = os.path.join(current_dir, 'vector_data')
     parser = argparse.ArgumentParser(description=f'{about}',
                                      epilog=f'{epilog}',
                                      formatter_class=argparse.RawTextHelpFormatter)
-    parser.add_argument('model', default='',
-                         help='Your heavy LLM Model ~27B to whatever you can afford')
-    parser.add_argument('--pre-llm', metavar='', nargs='?', dest='preconditioner',
-                        default='gemma-3-1B-it-QAT-Q4_0',
-                        type=str, help='1B-2B LLM model for preprocessor work '
-                        '(default: %(default)s)')
-    parser.add_argument('--embedding-llm', metavar='', nargs='?', dest='embeddings',
-                        default='nomic-embed-text-v1.5.f16',
+    parser.add_argument('-m', '--model', default=model, metavar='',
+                         help='LLM Model (default: %(default)s)')
+    parser.add_argument('-p', '--pre-llm', metavar='', nargs='?', dest='preconditioner',
+                        default=preconditioner, type=str, help='pre-processor LLM'
+                        ' (default: %(default)s)')
+    parser.add_argument('-e', '--embedding-llm', metavar='', nargs='?', dest='embeddings',
+                        default=embeddings,
                         type=str, help='LM embedding model (default: %(default)s)')
     parser.add_argument('--history-dir', metavar='', nargs='?', dest='vector_dir',
-                         default=os.path.join(current_dir, 'vector_data'), type=str,
-                         help='a writable path for RAG (default: %(default)s)')
+                         default=vector_dir, type=str, help='history directory'
+                         ' (default: %(default)s)')
     parser.add_argument('--history-matches', metavar='', nargs='?', dest='matches',
-                         default=3, type=int,
+                         default=matches, type=int,
                          help='Number of results to pull from each RAG (default: %(default)s)')
     parser.add_argument('--server', metavar='', nargs='?', dest='host',
-                         default='localhost:11434', type=str,
+                         default=host, type=str,
                          help='ollama server address (default: %(default)s)')
     parser.add_argument('--import-pdf', metavar='', nargs='?', type=str,
                          help='Path to pdf to pre-populate main RAG')
     parser.add_argument('--import-txt', metavar='', nargs='?', type=str,
                          help='Path to txt to pre-populate main RAG')
-    parser.add_argument('--debug', action='store_true', default=False,
+    parser.add_argument('--debug', action='store_true', default=debug,
                         help='Print preconditioning message, prompt, etc')
 
     return verify_args(parser.parse_args(argv))
