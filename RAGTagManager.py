@@ -146,7 +146,7 @@ class RAG():
                                 highlight=False)
         return results
 
-    def store_data(self, data, collection='ai_response', chunk_size=300, chunk_overlap=150):
+    def store_data(self, data, collection='ai_response', chunk_size=100, chunk_overlap=50):
         """ store data into the RAG """
         splitter = RecursiveCharacterTextSplitter(chunk_size=chunk_size,
                                                   chunk_overlap=chunk_overlap)
@@ -154,7 +154,8 @@ class RAG():
         chroma = self._get_embeddings(collection)
         chroma.add_documents(docs)
         if self.debug:
-            self.console.print(f'CHUNKS STORED: {len(docs)}',
+            self.console.print(f'CHUNKS STORED: {len(docs)} / chunk size {chunk_size} '
+                               f'/ olverlap {chunk_overlap} : collection {collection}',
                                style='color(233)',
                                highlight=False)
 

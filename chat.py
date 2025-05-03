@@ -58,20 +58,23 @@ class Chat(PromptManager):
         self.history_dir = kwargs['vector_dir']
         self.prompts = PromptManager(console, debug=self.debug)
         self.cm = ContextManager(console, **kwargs)
-        self.llm = ChatOllama(host=self.host,
+        self.llm = ChatOllama(base_url=self.host,
                               model=self.model,
+                              temperature=1.0,
+                              repeat_penalty=1.1,
                               streaming=True)
         self.prompts.build_prompts()
         # Class variables
+        self.verbose = kwargs['verbose']
         self.model_re = re.compile(r'(\w+)\W+')
         self.heat_map = 0
         self.prompt_map = self.create_heatmap(5000)
         self.cleaned_map = self.create_heatmap(1000)
-        self.chat_history_md = ''
         self.chat_history_session = self.load_chat(self.history_dir)
 
         # Thinking animation
         self.pulsing_chars = ["⠇", "⠋", "⠙", "⠸", "⠴", "⠦"]
+        self.do_once = False
         self.pulse_index = 0
         self.thinking = False
         self.animation_active = False
@@ -124,11 +127,25 @@ class Chat(PromptManager):
             print(f'Warning: Error loading chat: {e}')
         return loaded_list
 
+    def reveal_thinking(self, chunk: str = '', show: bool = False):
+        """ return thinking chunk if verbose """
+        content = chunk.content
+        if self.thinking and '</think>' in chunk.content:
+            chunk.content = ''
+            self.stop_thinking()
+        elif not self.thinking and '<think>' in chunk.content:
+            self.start_thinking()
+            chunk.content = 'AI thinking...'
+        elif self.thinking:
+            chunk.content = content if show else ''
+        return chunk
+
     def start_thinking(self):
         """ method to start thinking animation """
         if hasattr(self, 'animation_thread') and self.animation_thread.is_alive():
             self.animation_thread.join(timeout=0.1)
         self.thinking = True
+        self.do_once = True
         self.animation_active = True
         self.animation_thread = AnimationThread(self)
         self.animation_thread.daemon = True
@@ -174,28 +191,15 @@ class Chat(PromptManager):
                           style='color(233)',
                           highlight=False)
         for chunk in self.llm.stream(prompt):
-            if self.thinking and '</think>' in chunk.content:
-                chunk.content = ''
-                self.stop_thinking()
-            elif not self.thinking and '<think>' in chunk.content:
-                self.start_thinking()
-                chunk.content = ''
-            elif self.thinking:
-                chunk.content = ''
+            chunk = self.reveal_thinking(chunk, self.verbose)
             yield chunk
 
-    # Compose the full chat display with footer (model name, time taken, token count)
-    def render_chat(self, current_stream: str = "",
-                    time_taken: float = 0,
-                    token_count: int = 0,
-                    prompt_tokens: int = 0,
-                    token_reduction: int = 0,
-                    cleaned_color: int = 123) -> Group:
-        """ render and return markdown/syntax """
-
-        # Create the full chat content using Markdown
-        full_md = f'{self.chat_history_md}\n\n{current_stream}'
-
+    def render_footer(self, time_taken: float = 0,
+                            token_count: int = 0,
+                            prompt_tokens: int = 0,
+                            token_reduction: int = 0,
+                            cleaned_color: int = 123)->Text:
+        """ Handle the footer statistics """
         # Calculate heat map
         context_size = [v for k,v in self.prompt_map.items() if k<=prompt_tokens][-1:][0]
         produced = [v for k,v in self.heat_map.items() if token_count>=k][-1:][0]
@@ -207,14 +211,14 @@ class Chat(PromptManager):
             tokens_per_second = 0
 
         # Implement a thinking emoji
-        emoji = self.pulsing_chars[self.pulse_index] if self.thinking else ""
+        emoji = f' {self.pulsing_chars[self.pulse_index]} ' if self.thinking else ' '
 
         # Create the footer text with model info, time, and token count
         model = '-'.join(self.model_re.findall(self.model)[:3])
-        footer = Text('', style='color(233)')
-        footer.append(f'{model} ', style='color(202)')
+        footer = Text('\n', style='color(233)')
+        footer.append(f'{model}', style='color(202)')
         footer.append(emoji, style='color(51)')
-        footer.append(' Time:', style='color(233)')
+        footer.append('Time:', style='color(233)')
         footer.append(f'{time_taken:.2f}', style='color(94)')
         footer.append('s Tokens(cleaned:', style='color(233)')
         footer.append(f'{token_reduction}', style=f'color({cleaned_color})')
@@ -223,12 +227,17 @@ class Chat(PromptManager):
         footer.append(' completion:', style='color(233)')
         footer.append(f'{token_count}', style=f'color({produced})')
         footer.append(f') {tokens_per_second:.1f}T/s', style='color(233)')
+        return footer
 
-        # Render the chat content as Markdown (no panel, just the content)
-        chat_content = Markdown(full_md)
+    # Compose the full chat display with footer (model name, time taken, token count)
+    def render_chat(self, current_stream: str = "")->Text|Markdown:
+        """ render and return markdown/syntax """
+        if self.thinking and self.verbose:
+            chat_content = Text(current_stream, style='color(233)')
+        else:
+            chat_content = Markdown(current_stream)
 
-        # Return everything as a Group (no borders, just the content)
-        return Group(chat_content, footer)
+        return chat_content
 
     def token_manager(self, user_input: str,
                             ai_context: str,
@@ -278,10 +287,7 @@ class Chat(PromptManager):
         @kb.add('enter')
         def _(event):
             buffer = event.current_buffer
-            if buffer.document.text.strip().endswith("\n\n"):
-                event.app.exit(result=buffer.document.text.strip())
-            else:
-                buffer.insert_text('\n')
+            buffer.insert_text('\n')
         console.print("💬 Press [italic grey100]Esc+Enter[/italic grey100] to send"
                       " (multi-line, copy/paste safe) [italic grey100]Ctrl+C[/italic grey100]"
                       " to quit.\n")
@@ -301,28 +307,39 @@ class Chat(PromptManager):
                                                                     ai_context,
                                                                     user_context,
                                                                     token_reduction)
-
                 current_response = ''
                 token_count = 0
                 start_time = time.time()
-                console.print(f'Submitting {prompt_tokens} context tokens to LLM, awaiting'
+                console.print(f'\nSubmitting {prompt_tokens} context tokens to LLM, awaiting'
                               ' repsonse...',
                               style='dim grey37')
-                with Live(refresh_per_second=20) as live:
-                    self.chat_history_md = f"""**You:** {user_input}\n\n---\n\n"""
+                query = Markdown(f"""**You:** {user_input}\n\n---\n\n""")
+                with Live(refresh_per_second=20, console=console) as live:
                     for piece in self.stream_response(user_input,
                                                       ai_context,
                                                       user_context,
                                                       "\n".join(self.chat_history_session[-3:])):
                         current_response += piece.content
                         token_count += self.response_count(piece.content)
-                        live.update(self.render_chat(current_response,
-                                                     time.time()-start_time,
-                                                     token_count,
-                                                     prompt_tokens,
-                                                     token_reduction,
-                                                     cleaned_color))
+                        response = self.render_chat(current_response)
+                        footer = self.render_footer(time.time()-start_time,
+                                                    token_count,
+                                                    prompt_tokens,
+                                                    token_reduction,
+                                                    cleaned_color)
+                        # create our theme in the following order
+                        rich_content = Group(query, response, footer)
+                        # replace 'thinking' output with Mode's Markdown response
+                        if isinstance(response, Markdown) and self.do_once:
+                            self.do_once = False
+                            # Reset (erase) the thinking output
+                            current_response = ''
+                            rich_content = Group(query,
+                                                 response,
+                                                 footer)
+                        live.update(rich_content)
 
+                # Finish by saving chat history, finding and storing new RAG/Tags
                 self.chat_history_session.append(current_response)
                 self.cm.handle_context(current_response, direction='store')
                 self.save_chat(self.chat_history_session, self.history_dir)
@@ -364,7 +381,7 @@ See .chat.yaml.example for details.
     preconditioner = arg_dict.get('pre_llm', 'gemma-3-1B-it-QAT-Q4_0')
     embeddings = arg_dict.get('embedding_llm', 'nomic-embed-text-v1.5.f16')
     vector_dir = arg_dict.get('history_dir', None)
-    matches = int(arg_dict.get('history_matches', 3))
+    matches = int(arg_dict.get('history_matches', 80))
     host = arg_dict.get('server', 'localhost:11434')
     debug = arg_dict.get('debug', False)
     if vector_dir is None:
@@ -395,6 +412,9 @@ See .chat.yaml.example for details.
                          help='Path to txt to pre-populate main RAG')
     parser.add_argument('--debug', action='store_true', default=debug,
                         help='Print preconditioning message, prompt, etc')
+    parser.add_argument('-v','--verbose', action='store_true', default=debug,
+                        help='Do not hide what the model is thinking (if the model supports'
+                        ' thinking)')
 
     return verify_args(parser.parse_args(argv))
 

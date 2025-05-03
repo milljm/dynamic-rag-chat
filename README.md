@@ -1,31 +1,42 @@
 # 🧠 dynamic-rag-chat
 
-**A dynamic, context-aware chat system powered by LLMs, RAGs, and memory.**
+**A dynamic, context-aware chat system powered by LLMs, RAGs, and Contex Management.**
 _Built for immersive role-playing experiences with evolving knowledge and deep context._
 
 ---
 
 ## ✨ What is it?
 
-`dynamic-rag-chat` is an open-source chat tool making use of several interesting technologies surounding retrieval-augmented generation (RAG) sources, based on context, and uses lightweight pre-conditioners to summarize relevant information before handing it off to a heavyweight LLM.
+`dynamic-rag-chat` is an open-source chat tool making use of several interesting technologies surrounding retrieval-augmented generation (RAG) sources, based on context tagging. By using a lightweight pre-conditioners to 'tag' relevant information, we create an entire (often times new) collection based on the value (not the key which is traditional of RAG/tagging) of a tag. Example:
+```yaml
+{{lore: is in winterfell}}
+{{name: John}}
+{{lore: winterfell is in ruin}}
+{{weather: clear}}
+{{npc: William}}
+{{location: mountians}}
+```
+Will create (or append to) RAG collections 'john' and 'william'. All other 'tags' that were discovered during the response will fill these two collections. That said, the tool is geared towards discovering names, npcs, etc.
+
+ When 'john' is encountered later, we pull a massive retrieval from the 'john' collection, filtering out redundancies (where another feature: Context Management comes in), and pass that to the LLM for reference.
 
 This allows the LLM model to:
 
 - Remember plot points, characters, and lore across long sessions
-- Provides nuances to chats
-- Efficiently use local or remote LLMs in a modular setup
+- Provides nuances that would otherwise be missed in a general RAG retrieval
+- Clutter removed to help the LLM avoid hallucinations
 
-Perfect for storytelling, worldbuilding, AI roleplay, and narrative design tools.
+Perfect for storytelling, world building, AI role-play, and narrative design tools. Or just place fun in tinkering with RAGs and LLMs.
 
 ---
 
 ## 🧩 Features
 
-- 🧠 **Dynamic RAGs**: Contextual retrieval is triggered by LLM output or user actions
-- ✍️ **Preconditioning layer**: Light LLMs summarize fetched data before handing off to larger models (decreasing context box without losing details)
 - ⌨️ **Terminal-first UI**: Clean and rich CLI interface using `prompt_toolkit` and `rich`
 - 🔁 **Streaming responses**: Get tokens as the model generates them, async-ready
-- 🧾 **Chat history tracking**: Maintains memory across turns for better long-term interactions
+- 🧾 **Chat history tracking**: Maintains history after you exit the tool
+- 🧠 **Dynamic RAGs**: Contextual retrieval is triggered by LLM output or user actions
+- ✍️ **Preconditioning layer**: Light LLMs summarize fetched data before handing off to larger models (decreasing context box without losing details) -NOT Complete yet!
 - 🧪 **Debug mode**: Visualize what the model sees, including RAG hits and prompt stages
 
 ---
@@ -45,27 +56,60 @@ conda activate dynamic-rag
 ```
 _you will need to activate this environment each time you wish to use this tool_
 
-Next, you're going to need Ollama running (or at some location you can access remotely), and hosting several LLMs. I have found the following works very well:
-
-- Heavy Weight LLM [gemma-3-27b-it](https://huggingface.co/google/gemma-3-27b-it)
-- Light Weight LLM (preprosser) [gemma-3-1b-it](https://huggingface.co/google/gemma-3-1b-it)
-- Embedding LLM (for RAG work) [nomic-embed-text](https://huggingface.co/nomic-ai/nomic-embed-text-v1.5-GGUF)
-
 _and then proceed to do the following_
 ```bash
 git clone https://github.com/milljm/dynamic-rag-chat.git
 cd dynamic-rag-chat
-pip install -r requirements.txt
-./chat.py <your-favorite-llm-on-ollama>
+uv pip install -r requirements.txt
+```
+
+### Optional. Obtain/Use Ollama how you see fit
+
+Next, you're going to need Ollama running (or can access remotely), and hosting several LLMs. I have found the following work very well:
+
+- Heavy Weight LLM [gemma-3-27b-it](https://ollama.com/library/gemma3:27b)
+- Light Weight LLM (preprosser) [gemma-3-1b-it](https://ollama.com/library/gemma3:1b)
+- Embedding LLM (for RAG work) [nomic-embed-text](https://ollama.com/library/nomic-embed-text)
+
+If you choose to run your own:
+conda-forge has Ollama pre-built, and up to date. You can choose the following method, or obtain/use Ollama any way you wish.
+```bash
+conda install ollama
+export OLLAMA_MAX_LOADED_MODELS=3  # We are working with three LLMs simultaneously!
+ollama serve
+```
+*This will launch the Ollama server, serving on localhost:11434*
+Leave Ollama running, and open a new terminal, activate the same environment (remember you have to do this each time you wish to use this chat tool) and perform the following:
+```bash
+conda activate dynamic-rag
+# as a test, see if Ollama responds:
+ollama list
+# should either produce a list of your LLMs or an emty table.
+ollama pull nomic-embed-text
+ollama pull gemma3:1b
+ollama pull gemma3:27b
+ollama list
+```
+`ollama list` needs to display all the models necessary to run this utility. That being: A heavy LLM (whatever your machine can afford), a light-weight LLM (used for TAG gathering and in the future when I get the system prompts working: a summarizer filter), and an embedding model (this is used when dealing with the many RAG collections this tool will generate).
+
+```bash
+./chat.py --model gemma3:27b \
+          --pre-llm gemma3:1b \
+          --embedding-llm nomic-embed-text \
+          --server localhost:11434
 ./chat.py --help  # for more details on available options
 ```
+You can manage all those arguments by creating a `.chat.yaml` file. See `.chat.yaml.example` for details.
+
 
 ### Under the hood design process
 
 ```pre
 [User Input] → [Regex Tags Parsed] → [Matching RAG Collection Queried]
                                         ↓
-[Pre-conditioner Model Summarizes RAG Output]
+                                     [Contextual Management]
+                                        ↓
+[Pre-conditioner Model Summarizes RAG Output] # not complete, its too aggressive at present
      ↓
 [Final Prompt Constructed with Summarized Context]
      ↓
@@ -75,7 +119,7 @@ pip install -r requirements.txt
 ```
 
 ### Why am I doing this?
-Most RAG systems focus on question answering or document retrieval (1000/200 chunk size/overlap). This project takes a different approach — 200/50 chunk size/overlap, using LLMs to manage their own context through natural output cues (like {{lore:dragon_king}}), and pre-conditioning that knowledge before engaging in deeper conversation. If you're after a story telling LLM, you want to keep details while allowing your LLM to embellish.
+Most RAG systems focus on question answering or document retrieval (1000/200 chunk size/overlap). This project takes a different approach — 100/50 chunk size/overlap, using LLMs to manage their own context through natural output cues (like {{lore:dragon_king}}), and pre-conditioning that knowledge before engaging in deeper conversation. If you're after a story telling LLM, you want to keep details while allowing your LLM to embellish.
 
 My hope is for the retrieval of pertinent information for the task at hand allowing the LLM to 'never forget' the details that matter most.
 
