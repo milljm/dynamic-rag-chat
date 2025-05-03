@@ -315,6 +315,8 @@ class Chat(PromptManager):
                               style='dim grey37')
                 query = Markdown(f"""**You:** {user_input}\n\n---\n\n""")
                 with Live(refresh_per_second=20, console=console) as live:
+                    live.console.clear(home=True)
+                    live.update(query)
                     for piece in self.stream_response(user_input,
                                                       ai_context,
                                                       user_context,
