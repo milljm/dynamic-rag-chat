@@ -2,8 +2,10 @@
 """
 RAGTagManager aims at handling the RAGs and the Collection(s) process (tagging)
 """
+import sys
 import re
 import logging
+import pypdf # for error handling of PyPDFLoader
 from collections import namedtuple
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.schema import Document
@@ -160,9 +162,13 @@ class RAG():
         """ extract text from PDFs """
         loader = PyPDFLoader(pdf_path)
         pages = []
-        for page in loader.lazy_load():
-            pages.append(page)
-        page_texts = list(map(lambda doc: doc.page_content, pages))
-        for page_text in page_texts:
-            if page_text:
-                self.store_data(page_text, 'ai_response')
+        try:
+            for page in loader.lazy_load():
+                pages.append(page)
+            page_texts = list(map(lambda doc: doc.page_content, pages))
+            for page_text in page_texts:
+                if page_text:
+                    self.store_data(page_text, 'ai_response')
+        except pypdf.errors.PdfStreamError as e:
+            print(f'Error loading PDF:\n\n\t{e}\n\nIs this a valid PDF?')
+            sys.exit(1)
