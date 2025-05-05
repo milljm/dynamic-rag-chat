@@ -1,6 +1,8 @@
 # Make changes, and then save the file as: .chat.yaml
 # Supplied command line arguments override settings here, allowing you to
 # store common arguments like server, yet pass --model on the fly.
+# NOTE: The values below should match the full options name (see --help) with
+#       underscores instead of dashes. (eg: context_window not context-window)
 chat:
   model: qwen3:235b-a22b-q4_K_M
   pre_llm: gemma-3-1B-it-QAT-Q4_0

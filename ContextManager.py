@@ -8,8 +8,6 @@ being supplied to the LLM. It utilizing several methods:
 """
 import re
 import os
-import sys
-import hashlib
 import threading
 from collections import namedtuple
 from langchain.schema import Document
@@ -64,39 +62,23 @@ class ContextManager(PromptManager):
         flat_strings = process(nested_list)
         return '\n\n'.join(flat_strings)
 
-    def pre_processor(self, query,
-                            pre_behavior='',
-                            collection='default')->tuple[str,list[namedtuple]]:
+    def pre_processor(self, query)->tuple[str,list[namedtuple]]:
         """
-        lightweight LLM as a summarization/tagging pre-processor
+        lightweight LLM as a tagging pre-processor
         """
         prompts = self.prompts
         pre_llm = OllamaModel(self.host)
         # pylint: disable=no-member # dynamic prompts (see self.__build_prompts)
-        if pre_behavior == 'tag':
-            system_prompt = (prompts.get_prompt(f'{prompts.tag_prompt_file}_system.txt')
-                             if self.debug else prompts.tag_prompt_system)
-            human_prompt = (prompts.get_prompt(f'{prompts.tag_prompt_file}_human.txt')
-                            if self.debug else prompts.tag_prompt_human)
-            docs = self.rag.retrieve_data(query, collection, matches=self.matches)
-            # short circuit, as there is nothing to do
-            if not docs:
-                return ('', [])
-            context = self.stringigy_lists([doc.page_content for
-                                            doc in docs if doc.page_content.strip()])
-            # context = self.stringigy_lists(query)
-        else:
-            system_prompt = (prompts.get_prompt(f'{prompts.pre_prompt_file}_system.txt')
-                             if self.debug else prompts.pre_prompt_system)
-            human_prompt = (prompts.get_prompt(f'{prompts.pre_prompt_file}_human.txt')
-                            if self.debug else prompts.pre_prompt_human)
-            context = self.stringigy_lists(query)
+        system_prompt = (prompts.get_prompt(f'{prompts.tag_prompt_file}_system.txt')
+                            if self.debug else prompts.tag_prompt_system)
+        human_prompt = (prompts.get_prompt(f'{prompts.tag_prompt_file}_human.txt')
+                        if self.debug else prompts.tag_prompt_human)
 
         prompt_template = ChatPromptTemplate.from_messages([
                     ("system", system_prompt),
                     ("human", human_prompt)
                 ])
-        prompt = prompt_template.format_messages(context=context)
+        prompt = prompt_template.format_messages(context=query)
         if self.debug:
             self.console.print(f'PRE-PROCESSOR PROMPT:\n{prompt}\n\n',
                                 style='color(233)', highlight=False)
@@ -108,57 +90,53 @@ class ContextManager(PromptManager):
         tags = self.rag_tagger.get_tags(content, debug=self.debug)
         return (content, tags)
 
-    def post_processing(self, response)->None:
-        """
-        Send LLM's response off for post processing as a thread. This allows the
-        user to begin formulating a response (and even sending a new message
-        before this has completed). This step will begin to shine as more and
-        more vectors are established, allowing the pre-processing step to draw
-        in more nuanced context.
-        """
-        prompts = self.prompts
-        # pylint: disable=no-member # dynamic prompts (see self.__build_prompts)
-        post_prompt = (prompts.get_prompt(f'{prompts.tag_prompt_file}_system.txt')
-                        if self.debug else prompts.tag_prompt_system)
-        prompt_template = ChatPromptTemplate.from_messages([
-                    ("system", post_prompt),
-                    ("human", '{context}')
-                ])
-        prompt = prompt_template.format_messages(context=response, question='')
-        if self.debug:
-            self.console.print(f'POST PROCESS PROMPT TEMPLATE:\n{prompt}\n\n',
-                               style='color(233)', highlight=False)
-        # pylint: enable=no-member
-        threading.Thread(target=self.rag_tagger.update_rag,
-                         args=(self.host, self.preconditioner, prompt),
-                         kwargs={'debug': self.debug}).start()
+    def post_process(self, response)->None:
+        """ Start a thread to process LLMs response """
+        threading.Thread(target=self.rag_tagger.update_rag, args=(response,),
+                         kwargs={'debug': self.debug},
+                         daemon=True).start()
 
-    def gather_context(self, query: str, collection: str)->list[Document]:
-        """ perform gathering routines based on incoming collection """
+    def gather_context(self, query: str,
+                             collection: str,
+                             response: str = '')->list[Document]:
+        """
+        perform gathering routines based on incoming collection
+        """
         documents = []
-        (_, tags) = self.pre_processor(query,
-                                       pre_behavior='tag')
+        (_, tags) = self.pre_processor(f'{query}\n\n{response}')
         # Search for 'important' tags, and query those collections for 'data'
-        # This is going to be highly relevant data, so expand the matches x2
-        priorities = [value for key, value in tags if key in ['name', 'npc', 'item']]
-        for priority in priorities:
-            for rag_tuple in tags:
-                # this will be the most pertinent information, so grab a ton of data
-                documents.extend(self.rag.retrieve_data(query,
-                                                        rag_tuple.content,
-                                                        matches=self.matches*4))
-                # relax the matches for trival rag_tuple.tag. May bring in some other nuance
-                documents.extend(self.rag.retrieve_data(rag_tuple.content,
-                                                        priority,
-                                                        matches=(max(1,int(self.matches/4)))))
-                # Search once more in the default RAG for 'john' regardless of 'data'
-                # (brings in older chat history about 'john') (relax matches)
-                documents.extend(self.rag.retrieve_data(rag_tuple.content,
-                                                        collection,
-                                                        matches=max(1,int(self.matches/2))))
+        # This is going to be highly relevant data, so expand the matches x4
+        for meta_data in tags:
+            if self.debug:
+                self.console.print(f'GATHER CONTEXT: meta_data:{meta_data}'
+                                   f'collection: {collection}',
+                                   style='color(233)')
+            meta = dict({meta_data.tag:meta_data.content})
+            # this will be the most pertinent information, so grab a ton of data
+            documents.extend(self.rag.retrieve_data(query,
+                                                    collection,
+                                                    meta_data=meta,
+                                                    matches=max(1, int(self.matches*4))))
+            if self.debug:
+                self.console.print('DOCUMENT GATHER QUERY:'
+                                   f'query: {query}'
+                                   f'collection: {collection}'
+                                   f'documents: {documents}',
+                                   style='color(233)')
+            # relax the matches for trival meta_data content. May bring in some other nuance
+            documents.extend(self.rag.retrieve_data(meta_data.content,
+                                                    collection,
+                                                    matches=(max(1, int(self.matches/4)))))
+            if self.debug:
+                self.console.print('DOCUMENT GATHER META:'
+                                   f'meta_data: {meta_data.content}'
+                                   f'collection: {collection}'
+                                   f'documents: {documents}',
+                                   style='color(233)')
         return documents
 
     def handle_context(self, data_set: list,
+                             last_response: str = '',
                              direction='query')->tuple[dict[str,list], int]:
         """ Method to handle all the lovely context """
         # Retrieve context from AI and User RAG
@@ -170,16 +148,17 @@ class ContextManager(PromptManager):
             for data in data_set:
                 if not data:
                     continue
-                data = self.stringigy_lists(data)
+                query = self.stringigy_lists(data) # lists -> strings (in case its not)
                 storage = []
                 for collection in collection_list:
                     # General RAG retreival on default collections
-                    storage.extend(self.rag.retrieve_data(data,
+                    storage.extend(self.rag.retrieve_data(query,
                                                           collection,
-                                                          matches=self.matches))
+                                                          matches=max(1, int(self.matches/4))))
                     # Extensive RAG retreival
-                    storage.extend(self.gather_context(data, collection))
-
+                    storage.extend(self.gather_context(query,
+                                                       collection,
+                                                       response=last_response))
                     # Record pre-token counts
                     pages = list(map(lambda doc: doc.page_content, storage))
                     for page in pages:
@@ -192,6 +171,10 @@ class ContextManager(PromptManager):
                     for page in documents[collection]:
                         post_tokens += self.token_retreiver(page)
 
+                    if self.debug:
+                        self.console.print(f'CONTEXT RETRIEVAL:\n{documents}\n\n')
+            documents['user_documents'] = []
+            documents['history_documents'] = []
             # Store the users query to their RAG, now that we are done pre-processing
             # (so as not to bring back identical information in their query)
             # A little unorthodox, but the first item in the list is ther user's query
@@ -199,14 +182,8 @@ class ContextManager(PromptManager):
                                 collection='user_documents',
                                 chunk_size=100,
                                 chunk_overlap=50)
+            # Return data collected
             return (documents, pre_tokens, post_tokens)
-
-        # Store Context to AI RAG
-        # Aggresively fragment the response from heavy-weight LLM responses
-        # We can afford to do this due to the dynamic RAG/Tagging in post_processing
-        self.rag.store_data(self.stringigy_lists(data_set[0]),
-                            collection='ai_documents',
-                            chunk_size=150,
-                            chunk_overlap=50)
-        # dynamic RAG creation starts here (non-blocking)
-        return self.post_processing(data_set[0])
+        # Store data (non-blocking)
+        #self.rag_tagger.update_rag(str(data_set[0]))
+        return self.post_process(data_set[0])

@@ -12,7 +12,6 @@ from langchain.schema import Document
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_ollama import OllamaEmbeddings
 from langchain_chroma import Chroma
-from OllamaModel import OllamaModel
 # Silence initial RAG database being empty
 logging.getLogger("chromadb").setLevel(logging.ERROR)
 
@@ -42,47 +41,52 @@ class RAGTagManager():
         self.kwargs = kwargs
         self.debug = kwargs['debug']
         self.tag_pattern = re.compile(r'{\s*([a-zA-Z0-9_-]+)\s*:\s*([^\}]+)\s*}')
+        self.find_all = re.compile(r'LLM-SAVE:(.*)')
+        self.split_pattern = re.compile(r'\s*[;,]\s*')
 
-    def update_rag(self, base_url, model, prompt_template, debug=False)->str:
+    def find_tags(self, response: str)->list[tuple]:
+        """ parse LLMs response for tags """
+        # Match the LLM-SAVE: prefix followed by key:value pairs
+        match = self.find_all.findall(response)
+        if not match:
+            return []  # Return empty list if pattern is not found
+        content = match[0]  # Extract everything after 'LLM-SAVE:'
+        # Split the string by semicolons or commas, allowing optional whitespace
+        parts = self.split_pattern.split(content)
+        result = []
+        for part in parts:
+            if not part.strip():
+                continue  # Skip empty entries
+            key_value = part.split(':', 1)  # Split on the first colon only
+            if len(key_value) == 2:
+                key, value = key_value
+                result.append((key.strip(), value.strip()))
+        return result
+
+    def update_rag(self, response, collection: str='ai_documents', debug=False)->None:
         """ regular expression through message and attempt to create key:value tuples """
-        pre_llm = OllamaModel(base_url)
-        results = pre_llm.llm_query(model, prompt_template).content
-        rag_tags = self.get_tags(results, debug=debug)
+        rag_tags = self.get_tags(response, debug=debug)
         rag = RAG(self.console, **self.kwargs)
+        # New way: Of course its practically built in. Note to self: Never pretend
+        # to think you are planting a flag somewhere when it comes to coding.
+        rag.store_data(response, tags_metadata=rag_tags, collection=collection)
 
-        # we are most interested in names
-        collections = [value for key, value in rag_tags if key in ['name', 'npc']]
-        for collection in collections:
-            if self.debug:
-                self.console.print(f'PRIORITY TAG:\n{collection}\n\n',
-                                   style='color(233)',
-                                   highlight=False)
-            for tag in rag_tags:
-                k, v = tag
-                rag.store_data(f'{k}:{v}', collection=collection)
-            if self.debug:
-                self.console.print(f'RAG/Tag Results:\n{rag_tags}',
-                                   style='color(233)',
-                                   highlight=False)
-        # Handle them in the normal way as well
-        for tag in rag_tags:
-            k, v = tag
-            rag.store_data(v, collection=k)
-        return results
-
-    def get_tags(self, content, debug=False) -> list[namedtuple]:
+    def get_tags(self, response, debug=False) -> list[namedtuple]:
         """Convert content into tags to be used for collection identification."""
         rag_tags = []
         tagging = namedtuple('RAGTAG', ('tag', 'content'))
+        # If the LLM happened to output in actual {key:value} format
+        matches = self.tag_pattern.findall(response)
 
-        # Use the precompiled regex pattern
-        matches = self.tag_pattern.findall(content)
+        # Our instructed way laid forth in plot_prompt_system.txt
+        matches.extend(self.find_tags(response))
+
         if debug:
-            self.console.print(f'RAG/Tag MATCHES:\n{matches}\n', style='color(233)')
+            self.console.print(f'RAG/Tag MATCHES:\n{matches}\n\nresponse:'
+                               f'\n{response}[END]\n\n', style='color(233)')
         # Add matches to rag_tags
         for match in matches:
             rag_tags.append(tagging(match[0], match[1]))
-
         return rag_tags
 
 class RAG():
@@ -122,7 +126,7 @@ class RAG():
 
         return name
 
-    def _get_embeddings(self, collection):
+    def _get_embeddings(self, collection)->Chroma:
         collection = self._normalize_collection_name(collection)
         embeddings = OllamaEmbeddings(base_url=self.host, model=self.embeddings)
         chroma_db = Chroma(persist_directory=self.vector_dir,
@@ -130,7 +134,10 @@ class RAG():
                             collection_name=collection)
         return chroma_db
 
-    def retrieve_data(self, query, collection, matches=5):
+    def retrieve_data(self, query: str,
+                            collection: str,
+                            meta_data: dict = None,
+                            matches=5)->list[Document]:
         """
         Return vector data as a list. Syntax:
             retrieve_data(query=str, collection=str, matches=int)->list
@@ -139,27 +146,41 @@ class RAG():
         """
         chroma = self._get_embeddings(collection)
         results = []
-        results: list[Document] = chroma.similarity_search(query, matches)
+        results: list[Document] = chroma.similarity_search(query, matches, filter=meta_data)
         if self.debug:
-            self.console.print(f'CHUNKS RETRIEVED:\n{collection}:{results}\n\n',
+            self.console.print(f'CHUNKS RETRIEVED FROM {collection} with filter:'
+                               f'matches: {matches}',
+                               f' {meta_data}:\n{results}\n\n',
+                               f'SUPER CURIOUS:\n[START]{chroma.similarity_search(query, matches, filter=meta_data)}[END]\n\n\n\n',
                                 style='color(233)',
                                 highlight=False)
         return results
 
-    def store_data(self, data, collection='ai_response', chunk_size=100, chunk_overlap=50):
+    def store_data(self, data,
+                         tags_metadata: list[namedtuple] = None,
+                         collection: str = 'ai_documents',
+                         chunk_size=200, chunk_overlap=100)->None:
         """ store data into the RAG """
+        meta_dict = {}
+        if tags_metadata:
+            for tag in tags_metadata:
+                meta_dict[tag.tag] = tag.content
+        doc = Document(page_content=data, metadata=meta_dict)
         splitter = RecursiveCharacterTextSplitter(chunk_size=chunk_size,
                                                   chunk_overlap=chunk_overlap)
-        docs = splitter.create_documents([data])
+        docs = splitter.split_documents([doc])
         chroma = self._get_embeddings(collection)
         chroma.add_documents(docs)
         if self.debug:
-            self.console.print(f'CHUNKS STORED: {len(docs)} / chunk size {chunk_size} '
-                               f'/ olverlap {chunk_overlap} : collection {collection}',
+            self.console.print(f'CHUNKS STORED TO collection:{collection}: {len(docs)} '
+                               f'/ chunk size {chunk_size} '
+                               f'/ olverlap {chunk_overlap} '
+                               f'meta_data: {meta_dict}'
+                               f'\nDOCS:{docs}\n',
                                style='color(233)',
                                highlight=False)
 
-    def extract_text_from_pdf(self, pdf_path):
+    def extract_text_from_pdf(self, pdf_path)->None:
         """ extract text from PDFs """
         loader = PyPDFLoader(pdf_path)
         pages = []
@@ -169,7 +190,7 @@ class RAG():
             page_texts = list(map(lambda doc: doc.page_content, pages))
             for page_text in page_texts:
                 if page_text:
-                    self.store_data(page_text, 'ai_response')
+                    self.store_data(page_text, 'ai_documents')
         except pypdf.errors.PdfStreamError as e:
             print(f'Error loading PDF:\n\n\t{e}\n\nIs this a valid PDF?')
             sys.exit(1)

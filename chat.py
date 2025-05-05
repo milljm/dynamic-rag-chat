@@ -66,6 +66,7 @@ class Chat(PromptManager):
                               streaming=True)
         self.prompts.build_prompts()
         # Class variables
+        self.name = kwargs['name']
         self.verbose = kwargs['verbose']
         self.model_re = re.compile(r'(\w+)\W+')
         self.heat_map = 0
@@ -80,6 +81,9 @@ class Chat(PromptManager):
         self.thinking = False
         self.animation_active = False
         self.animation_thread = threading.Thread(target=self.update_animation)
+
+        # self changing prompt
+        self.find_prompt = re.compile(r'llm_prompt:(.*);')
 
     @staticmethod
     def create_heatmap(hot_max: int = 0, reverse: bool =False)->dict[int:int]:
@@ -128,7 +132,7 @@ class Chat(PromptManager):
             print(f'Warning: Error loading chat: {e}')
         return loaded_list
 
-    def reveal_thinking(self, chunk: str = '', show: bool = False):
+    def reveal_thinking(self, chunk, show: bool = False):
         """ return thinking chunk if verbose """
         content = chunk.content
         if self.thinking and '</think>' in chunk.content:
@@ -269,6 +273,12 @@ class Chat(PromptManager):
             return len(response.split())
         return 1
 
+    def get_lastcommand(self, last_message):
+        """ allow the LLM to add to its own system prompt """
+        prompt_message = self.find_prompt.findall(last_message)
+        message = prompt_message if prompt_message else ''
+        return message
+
     def chat(self):
         """ Prompt the User for questions, and begin! """
         session = PromptSession()
@@ -290,10 +300,17 @@ class Chat(PromptManager):
                 (documents,
                  pre_t,
                  post_t) = self.cm.handle_context([user_input,
-                                                   self.chat_history_session[-20:]])
+                                                   self.chat_history_session[-5:]])
 
                 documents['query'] = user_input
-                documents['chat_history'] = '\n\n'.join(self.chat_history_session[-20:])
+                documents['name'] = self.name
+                documents['chat_history'] = self.chat_history_session[-5:]
+                # allow the next response to contain LLM's prompt changes
+                documents['llm_prompt'] = self.get_lastcommand(
+                                self.cm.stringigy_lists(self.chat_history_session[-1:]))
+                # Stringify everything
+                for k, v in documents.items():
+                    documents[k] = self.cm.stringigy_lists(v)
 
                 # Do heat map stuff
                 (prompt_tokens, cleaned_color) = self.token_manager(documents,
@@ -341,7 +358,7 @@ class Chat(PromptManager):
                 # Finish by saving chat history, finding and storing new RAG/Tags
                 self.chat_history_session.append(f'USER:{user_input}\n\n'
                                                  f'AI:{current_response}\n\n')
-                self.cm.handle_context([f'{current_response}'],
+                self.cm.handle_context([current_response],
                                         direction='store')
                 self.save_chat(self.chat_history_session, self.history_dir)
 
@@ -385,6 +402,7 @@ See .chat.yaml.example for details.
     matches = int(arg_dict.get('history_matches', 10))
     host = arg_dict.get('server', 'localhost:11434')
     num_ctx = arg_dict.get('context_window', 2048)
+    name = arg_dict.get('name', 'assistant')
     debug = arg_dict.get('debug', False)
     if vector_dir is None:
         vector_dir = os.path.join(current_dir, 'vector_data')
@@ -408,6 +426,9 @@ See .chat.yaml.example for details.
     parser.add_argument('--server', metavar='', nargs='?', dest='host',
                         default=host, type=str,
                         help='ollama server address (default: %(default)s)')
+    parser.add_argument('-n','--name', metavar='', nargs='?', dest='name',
+                        default=name, type=str,
+                        help='your assistants name (default: %(default)s)')
     parser.add_argument('--context-window', metavar='', nargs='?', dest='num_ctx',
                         default=num_ctx, type=int,
                         help='the maximum context window size (default: %(default)s)')
