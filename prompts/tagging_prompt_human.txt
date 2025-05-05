@@ -1,1 +1,1 @@
-summarize and tag the following:\[{context}]\n\n
+{context}

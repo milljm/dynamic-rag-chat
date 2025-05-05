@@ -62,6 +62,7 @@ class Chat(PromptManager):
                               model=self.model,
                               temperature=1.0,
                               repeat_penalty=1.1,
+                              num_ctx=kwargs['num_ctx'],
                               streaming=True)
         self.prompts.build_prompts()
         # Class variables
@@ -164,11 +165,8 @@ class Chat(PromptManager):
             self.render_chat()
 
     # Stream response as chunks
-    def stream_response(self, query: str,
-                              ai_context: str,
-                              user_context: str,
-                              chat_history: str):
-        """ Parse LLM Promp """
+    def stream_response(self, documents: dict):
+        """ Parse LLM Prompt """
         prompts = self.prompts
         # pylint: disable=no-member # dynamic prompts (see self.__build_prompts)
         system_prompt = (prompts.get_prompt(f'{prompts.plot_prompt_file}_system.txt')
@@ -181,13 +179,13 @@ class Chat(PromptManager):
                 ("system", system_prompt),
                 ("human", human_prompt)
             ])
-        prompt = prompt_template.format_messages(user_context=user_context,
-                                                 ai_context=ai_context,
-                                                 chat_history=chat_history,
-                                                 question=query)
+
+        if self.debug:
+            console.print(f'LLM DOCUMENTS: {documents.keys()}\n{documents["performance"]}\n')
+        prompt = prompt_template.format_messages(**documents)
         # pylint: enable=no-member
         if self.debug:
-            console.print(f'LLM PROMPT (llm.stream()):\n{prompt}\n\n',
+            console.print(f'HEAVY LLM PROMPT (llm.stream()):\n{prompt}\n\n',
                           style='color(233)',
                           highlight=False)
         for chunk in self.llm.stream(prompt):
@@ -200,7 +198,7 @@ class Chat(PromptManager):
                             token_reduction: int = 0,
                             cleaned_color: int = 123)->Text:
         """ Handle the footer statistics """
-        # Calculate heat map
+        # Calculate real-time heat maps
         context_size = [v for k,v in self.prompt_map.items() if k<=prompt_tokens][-1:][0]
         produced = [v for k,v in self.heat_map.items() if token_count>=k][-1:][0]
 
@@ -239,26 +237,17 @@ class Chat(PromptManager):
 
         return chat_content
 
-    def token_manager(self, user_input: str,
-                            ai_context: str,
-                            user_context: str,
+    def token_counter(self, documents: dict):
+        """ report each document token counts """
+        for key, value in documents.items():
+            yield (key, self.cm.token_retreiver(value))
+
+    def token_manager(self, documents: dict,
                             token_reduction: int)->tuple[int,int]:
         """ Handle token counts and token colors for statistical printing """
-        token_generators = [[user_input],
-                            self.chat_history_session[-3:],
-                            ai_context.split(),
-                            user_context.split()]
         tokens = 0
-        for token_generator in token_generators:
-            tokens += self.cm.token_retreiver(token_generator)
-
-        if self.debug:
-            console.print(f'HISTORY:\n{self.chat_history_session[-3:]}\n\n',
-                            f'RAG USER CONTEXT:\n{user_context}\n\n',
-                            f'RAG AI CONTEXT:\n{ai_context}\n\n',
-                            f'HISTORY + ALL CONTEXT TOKENS: {tokens}\n\n',
-                            style='color(233)',
-                            highlight=False)
+        for _, token_cnt in self.token_counter(documents):
+            tokens += token_cnt
 
         # Set timers, and completion token counter, colors...
         self.heat_map = self.create_heatmap(tokens, reverse=True)
@@ -298,36 +287,44 @@ class Chat(PromptManager):
                     continue
 
                 # Grab our lovely context
-                (ai_context,
-                user_context,
-                token_reduction) = self.cm.handle_context(data=user_input)
+                (documents,
+                 pre_t,
+                 post_t) = self.cm.handle_context([user_input,
+                                                   self.chat_history_session[-20:]])
 
-                # Do token management
-                (prompt_tokens, cleaned_color) = self.token_manager(user_input,
-                                                                    ai_context,
-                                                                    user_context,
-                                                                    token_reduction)
+                documents['query'] = user_input
+                documents['chat_history'] = '\n\n'.join(self.chat_history_session[-20:])
+
+                # Do heat map stuff
+                (prompt_tokens, cleaned_color) = self.token_manager(documents,
+                                                                    max(0, pre_t - post_t))
+
+                performance_summary = ''
+                for k, v in self.token_counter(documents):
+                    performance_summary += f'{k}:{v}\n'
+
+                # Supply the LLM with its own performances
+                documents['performance'] = (f'Total tokens gathered from all RAG sources: {pre_t}\n'
+                                            f'Duplicates Removed: {max(0, pre_t - post_t)}\n'
+                                            f'Breakdown from each RAG:\n{performance_summary}\n')
                 current_response = ''
                 token_count = 0
                 start_time = time.time()
-                console.print(f'\nSubmitting {prompt_tokens} context tokens to LLM, awaiting'
-                              ' repsonse...',
-                              style='dim grey37')
                 query = Markdown(f"""**You:** {user_input}\n\n---\n\n""")
                 with Live(refresh_per_second=20, console=console) as live:
                     live.console.clear(home=True)
                     live.update(query)
-                    for piece in self.stream_response(user_input,
-                                                      ai_context,
-                                                      user_context,
-                                                      "\n".join(self.chat_history_session[-3:])):
+                    console.print(f'\nSubmitting {prompt_tokens} context tokens to LLM, awaiting'
+                              ' repsonse...',
+                              style='dim grey37')
+                    for piece in self.stream_response(documents):
                         current_response += piece.content
                         token_count += self.response_count(piece.content)
                         response = self.render_chat(current_response)
                         footer = self.render_footer(time.time()-start_time,
                                                     token_count,
                                                     prompt_tokens,
-                                                    token_reduction,
+                                                    max(0, pre_t - post_t),
                                                     cleaned_color)
                         # create our theme in the following order
                         rich_content = Group(query, response, footer)
@@ -342,8 +339,10 @@ class Chat(PromptManager):
                         live.update(rich_content)
 
                 # Finish by saving chat history, finding and storing new RAG/Tags
-                self.chat_history_session.append(current_response)
-                self.cm.handle_context(current_response, direction='store')
+                self.chat_history_session.append(f'USER:{user_input}\n\n'
+                                                 f'AI:{current_response}\n\n')
+                self.cm.handle_context([f'{current_response}'],
+                                        direction='store')
                 self.save_chat(self.chat_history_session, self.history_dir)
 
         except KeyboardInterrupt:
@@ -383,8 +382,9 @@ See .chat.yaml.example for details.
     preconditioner = arg_dict.get('pre_llm', 'gemma-3-1B-it-QAT-Q4_0')
     embeddings = arg_dict.get('embedding_llm', 'nomic-embed-text-v1.5.f16')
     vector_dir = arg_dict.get('history_dir', None)
-    matches = int(arg_dict.get('history_matches', 80))
+    matches = int(arg_dict.get('history_matches', 10))
     host = arg_dict.get('server', 'localhost:11434')
+    num_ctx = arg_dict.get('context_window', 2048)
     debug = arg_dict.get('debug', False)
     if vector_dir is None:
         vector_dir = os.path.join(current_dir, 'vector_data')
@@ -392,26 +392,29 @@ See .chat.yaml.example for details.
                                      epilog=f'{epilog}',
                                      formatter_class=argparse.RawTextHelpFormatter)
     parser.add_argument('-m', '--model', default=model, metavar='',
-                         help='LLM Model (default: %(default)s)')
+                        help='LLM Model (default: %(default)s)')
     parser.add_argument('-p', '--pre-llm', metavar='', nargs='?', dest='preconditioner',
-                        default=preconditioner, type=str, help='pre-processor LLM'
-                        ' (default: %(default)s)')
+                        default=preconditioner, type=str,
+                        help='pre-processor LLM (default: %(default)s)')
     parser.add_argument('-e', '--embedding-llm', metavar='', nargs='?', dest='embeddings',
-                        default=embeddings,
-                        type=str, help='LM embedding model (default: %(default)s)')
+                        default=embeddings, type=str,
+                        help='LM embedding model (default: %(default)s)')
     parser.add_argument('--history-dir', metavar='', nargs='?', dest='vector_dir',
-                         default=vector_dir, type=str, help='history directory'
-                         ' (default: %(default)s)')
+                        default=vector_dir, type=str,
+                        help='history directory (default: %(default)s)')
     parser.add_argument('--history-matches', metavar='', nargs='?', dest='matches',
-                         default=matches, type=int,
-                         help='Number of results to pull from each RAG (default: %(default)s)')
+                        default=matches, type=int,
+                        help='Number of results to pull from each RAG (default: %(default)s)')
     parser.add_argument('--server', metavar='', nargs='?', dest='host',
-                         default=host, type=str,
-                         help='ollama server address (default: %(default)s)')
+                        default=host, type=str,
+                        help='ollama server address (default: %(default)s)')
+    parser.add_argument('--context-window', metavar='', nargs='?', dest='num_ctx',
+                        default=num_ctx, type=int,
+                        help='the maximum context window size (default: %(default)s)')
     parser.add_argument('--import-pdf', metavar='', nargs='?', type=str,
-                         help='Path to pdf to pre-populate main RAG')
+                        help='Path to pdf to pre-populate main RAG')
     parser.add_argument('--import-txt', metavar='', nargs='?', type=str,
-                         help='Path to txt to pre-populate main RAG')
+                        help='Path to txt to pre-populate main RAG')
     parser.add_argument('--debug', action='store_true', default=debug,
                         help='Print preconditioning message, prompt, etc')
     parser.add_argument('-v','--verbose', action='store_true', default=debug,

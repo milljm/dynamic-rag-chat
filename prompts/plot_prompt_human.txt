@@ -1,1 +1,1 @@
-Using context from your system prompt, answer the users question:{question}
+Using context from your system prompt, answer the users question. Or comment on the users query if there is no question: {query}

@@ -5,8 +5,8 @@ RAGTagManager aims at handling the RAGs and the Collection(s) process (tagging)
 import sys
 import re
 import logging
-import pypdf # for error handling of PyPDFLoader
 from collections import namedtuple
+import pypdf # for error handling of PyPDFLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.schema import Document
 from langchain_community.document_loaders import PyPDFLoader
@@ -70,7 +70,7 @@ class RAGTagManager():
             rag.store_data(v, collection=k)
         return results
 
-    def get_tags(self, content, debug=False) -> list:
+    def get_tags(self, content, debug=False) -> list[namedtuple]:
         """Convert content into tags to be used for collection identification."""
         rag_tags = []
         tagging = namedtuple('RAGTAG', ('tag', 'content'))
