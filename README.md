@@ -7,7 +7,7 @@ _Built for immersive role-playing experiences with evolving knowledge and deep c
 
 ## ✨ What is it?
 
-`dynamic-rag-chat` is an open-source chat tool making use of several interesting technologies surrounding retrieval-augmented generation (RAG) sources, based on context tagging metadata field filtering. By using a lightweight pre-conditioners to 'tag' relevant information along the users query, we can populate the context window with highly relevant data.
+`dynamic-rag-chat` is an open-source chat tool making use of several interesting technologies surrounding retrieval-augmented generation (RAG) sources, based on context tagging metadata field filtering. By using a lightweight pre-conditioner to 'tag' relevant information along the users query, we can populate the context window with highly relevant data.
 
 This allows the LLM model to:
 
