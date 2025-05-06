@@ -1,2 +1,4 @@
 vector_data/
 testing_output.txt
+__pycache__/
+.chat.yaml
