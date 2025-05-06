@@ -7,26 +7,15 @@ _Built for immersive role-playing experiences with evolving knowledge and deep c
 
 ## ✨ What is it?
 
-`dynamic-rag-chat` is an open-source chat tool making use of several interesting technologies surrounding retrieval-augmented generation (RAG) sources, based on context tagging. By using a lightweight pre-conditioners to 'tag' relevant information, we create an entire (often times new) collection based on the value (not the key which is traditional of RAG/tagging) of a tag. Example:
-```yaml
-{{lore: is in winterfell}}
-{{name: John}}
-{{lore: winterfell is in ruin}}
-{{weather: clear}}
-{{npc: William}}
-{{location: mountians}}
-```
-Will create (or append to) RAG collections 'john' and 'william'. All other 'tags' that were discovered during the response will fill these two collections. That said, the tool is geared towards discovering names, npcs, etc.
-
- When 'john' is encountered later, we pull a massive retrieval from the 'john' collection, filtering out redundancies (where another feature: Context Management comes in), and pass that to the LLM for reference.
+`dynamic-rag-chat` is an open-source chat tool making use of several interesting technologies surrounding retrieval-augmented generation (RAG) sources, based on context tagging metadata field filtering. By using a lightweight pre-conditioners to 'tag' relevant information along the users query, we can populate the context window with highly relevant data.
 
 This allows the LLM model to:
 
 - Remember plot points, characters, and lore across long sessions
 - Provides nuances that would otherwise be missed in a general RAG retrieval
-- Clutter removed to help the LLM avoid hallucinations
+- Clutter removed to help the LLM avoid hallucinations while achieving a quicker response
 
-Perfect for storytelling, world building, AI role-play, and narrative design tools. Or just place fun in tinkering with RAGs and LLMs.
+Perfect for storytelling, world building, AI role-play, and narrative design tools. Or just a tool to tinker with RAGs and LLMs.
 
 ---
 
