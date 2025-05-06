@@ -72,6 +72,7 @@ class Chat(PromptManager):
         self.heat_map = 0
         self.prompt_map = self.create_heatmap(5000)
         self.cleaned_map = self.create_heatmap(1000)
+        self.chat_max = kwargs['chat_max']
         self.chat_history_session = self.load_chat(self.history_dir)
 
         # Thinking animation
@@ -114,14 +115,15 @@ class Chat(PromptManager):
         except FileNotFoundError as e:
             print(f'Error saving chat. Check --history-dir\n{e}')
 
-    @staticmethod
-    def load_chat(history_path):
+    def load_chat(self, history_path):
         """ Persist chat history (load) """
         loaded_list = []
         history_file = os.path.join(history_path, 'chat_history.pkl')
         try:
             with open(history_file, "rb") as f:
                 loaded_list = pickle.load(f)
+                # trunacate to max ammount
+                loaded_list = loaded_list[-self.chat_max:]
         except FileNotFoundError:
             pass
         except pickle.UnpicklingError as e:
@@ -275,7 +277,7 @@ class Chat(PromptManager):
 
     def get_lastcommand(self, last_message):
         """ allow the LLM to add to its own system prompt """
-        prompt_message = self.find_prompt.findall(last_message)
+        prompt_message = self.find_prompt.findall(last_message)[-1:]
         message = prompt_message if prompt_message else ''
         return message
 
@@ -307,10 +309,10 @@ class Chat(PromptManager):
                 documents['chat_history'] = self.chat_history_session[-5:]
                 # allow the next response to contain LLM's prompt changes
                 documents['llm_prompt'] = self.get_lastcommand(
-                                self.cm.stringigy_lists(self.chat_history_session[-1:]))
+                                self.cm.stringify_lists(self.chat_history_session[-20:]))
                 # Stringify everything
                 for k, v in documents.items():
-                    documents[k] = self.cm.stringigy_lists(v)
+                    documents[k] = self.cm.stringify_lists(v)
 
                 # Do heat map stuff
                 (prompt_tokens, cleaned_color) = self.token_manager(documents,
@@ -402,6 +404,7 @@ See .chat.yaml.example for details.
     matches = int(arg_dict.get('history_matches', 10))
     host = arg_dict.get('server', 'localhost:11434')
     num_ctx = arg_dict.get('context_window', 2048)
+    chat_history = arg_dict.get('chat_history_max', 1000)
     name = arg_dict.get('name', 'assistant')
     debug = arg_dict.get('debug', False)
     if vector_dir is None:
@@ -429,6 +432,9 @@ See .chat.yaml.example for details.
     parser.add_argument('-n','--name', metavar='', nargs='?', dest='name',
                         default=name, type=str,
                         help='your assistants name (default: %(default)s)')
+    parser.add_argument('--chat-history-max', metavar='', nargs='?', dest='chat_max',
+                        default=chat_history, type=int,
+                        help='Chat history responses to save to disk (default: %(default)s)')
     parser.add_argument('--context-window', metavar='', nargs='?', dest='num_ctx',
                         default=num_ctx, type=int,
                         help='the maximum context window size (default: %(default)s)')

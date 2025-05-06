@@ -49,7 +49,7 @@ class ContextManager(PromptManager):
         return ' '.join(text.lower().split())
 
     @staticmethod
-    def stringigy_lists(nested_list)->str:
+    def stringify_lists(nested_list)->str:
         """ return a flat string """
         def process(item):
             result = []
@@ -148,7 +148,7 @@ class ContextManager(PromptManager):
             for data in data_set:
                 if not data:
                     continue
-                query = self.stringigy_lists(data) # lists -> strings (in case its not)
+                query = self.stringify_lists(data) # lists -> strings (in case its not)
                 storage = []
                 for collection in collection_list:
                     # General RAG retreival on default collections
@@ -178,7 +178,7 @@ class ContextManager(PromptManager):
             # Store the users query to their RAG, now that we are done pre-processing
             # (so as not to bring back identical information in their query)
             # A little unorthodox, but the first item in the list is ther user's query
-            self.rag.store_data(self.stringigy_lists(data_set[0]),
+            self.rag.store_data(self.stringify_lists(data_set[0]),
                                 collection='user_documents',
                                 chunk_size=100,
                                 chunk_overlap=50)
