@@ -21,6 +21,7 @@ import pickle
 import argparse
 import threading
 import datetime
+import pytz
 from threading import Thread
 import yaml
 from langchain.prompts import ChatPromptTemplate
@@ -59,6 +60,7 @@ class Chat(PromptManager):
         self.model = kwargs['model']
         self.history_dir = kwargs['vector_dir']
         self.num_ctx = kwargs['num_ctx']
+        self.time_zone = kwargs['time_zone']
         self.prompts = PromptManager(console, debug=self.debug)
         self.cm = ContextManager(console, **kwargs)
         self.llm = ChatOllama(base_url=self.host,
@@ -89,6 +91,15 @@ class Chat(PromptManager):
 
         # self changing prompt
         self.find_prompt = re.compile(r'llm_prompt[\{:"](.*)[\.;"\}]', re.DOTALL)
+
+    @staticmethod
+    def get_time(tzone):
+        """ return the time """
+        mdt_timezone = pytz.timezone(tzone)
+        utc_time = datetime.datetime.now(mdt_timezone)
+        return (f'{utc_time.year}-{utc_time.month}-{utc_time.day}'
+                                    f':{utc_time.hour}:{utc_time.minute}:{utc_time.second}'
+                                    f'.{utc_time.microsecond}')
 
     @staticmethod
     def create_heatmap(hot_max: int = 0, reverse: bool =False)->dict[int:int]:
@@ -328,10 +339,7 @@ class Chat(PromptManager):
         documents['query'] = user_input
         documents['name'] = self.name
         documents['chat_history'] = self.chat_history_session[-10:]
-        utc_time = datetime.datetime.now(datetime.UTC)
-        documents['date_time'] = (f'{utc_time.year}-{utc_time.month}-{utc_time.day}'
-                                    f':{utc_time.hour}:{utc_time.minute}:{utc_time.second}'
-                                    f'.{utc_time.microsecond}')
+        documents['date_time'] = self.get_time(self.time_zone)
         documents['num_ctx'] = self.num_ctx
         # Stringify everything
         for k, v in documents.items():
@@ -463,6 +471,7 @@ See .chat.yaml.example for details.
     num_ctx = arg_dict.get('context_window', 2048)
     chat_history = arg_dict.get('chat_history_max', 1000)
     name = arg_dict.get('name', 'assistant')
+    time_zone = arg_dict.get('time_zone', 'GMT')
     debug = arg_dict.get('debug', False)
     if vector_dir is None:
         vector_dir = os.path.join(current_dir, 'vector_data')
@@ -488,6 +497,9 @@ See .chat.yaml.example for details.
                         help='ollama server address (default: %(default)s)')
     parser.add_argument('-n','--name', metavar='', nargs='?', dest='name',
                         default=name, type=str,
+                        help='your assistants name (default: %(default)s)')
+    parser.add_argument('-t','--time-zone', metavar='', nargs='?', dest='time_zone',
+                        default=time_zone, type=str,
                         help='your assistants name (default: %(default)s)')
     parser.add_argument('--chat-history-max', metavar='', nargs='?', dest='chat_max',
                         default=chat_history, type=int,

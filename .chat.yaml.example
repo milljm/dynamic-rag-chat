@@ -10,4 +10,5 @@ chat:
   history_dir: /some/writable/path
   history_matches: 20
   server: localhost:11434
+  time_zone: 'America/Denver'
   debug: False
