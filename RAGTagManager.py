@@ -41,7 +41,7 @@ class RAGTagManager():
         self.kwargs = kwargs
         self.debug = kwargs['debug']
         self.tag_pattern = re.compile(r'{\s*([a-zA-Z0-9_-]+)\s*:\s*([^\}]+)\s*}')
-        self.find_all = re.compile(r'LLM-SAVE:(.*)')
+        self.find_all = re.compile(r'LLM-SAVE:(.*)', re.DOTALL)
         self.split_pattern = re.compile(r'\s*[;,]\s*')
 
     def find_tags(self, response: str)->list[tuple]:

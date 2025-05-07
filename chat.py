@@ -77,6 +77,7 @@ class Chat(PromptManager):
         self.cleaned_map = self.create_heatmap(1000)
         self.chat_max = kwargs['chat_max']
         self.chat_history_session = self.load_chat(self.history_dir)
+        self.llm_prompt = self.load_prompt(self.history_dir)
 
         # Thinking animation
         self.pulsing_chars = ["⠇", "⠋", "⠙", "⠸", "⠴", "⠦"]
@@ -87,7 +88,7 @@ class Chat(PromptManager):
         self.animation_thread = threading.Thread(target=self.update_animation)
 
         # self changing prompt
-        self.find_prompt = re.compile(r'llm_prompt:(.*);')
+        self.find_prompt = re.compile(r'llm_prompt[\{:"](.*)[\.;"\}]', re.DOTALL)
 
     @staticmethod
     def create_heatmap(hot_max: int = 0, reverse: bool =False)->dict[int:int]:
@@ -109,7 +110,7 @@ class Chat(PromptManager):
         return heat
 
     @staticmethod
-    def save_chat(chat_history, history_path):
+    def save_chat(history_path, chat_history) ->None:
         """ Persist chat history (save) """
         history_file = os.path.join(history_path, 'chat_history.pkl')
         try:
@@ -118,7 +119,7 @@ class Chat(PromptManager):
         except FileNotFoundError as e:
             print(f'Error saving chat. Check --history-dir\n{e}')
 
-    def load_chat(self, history_path):
+    def load_chat(self, history_path)->list:
         """ Persist chat history (load) """
         loaded_list = []
         history_file = os.path.join(history_path, 'chat_history.pkl')
@@ -136,6 +137,33 @@ class Chat(PromptManager):
         except Exception as e:
             print(f'Warning: Error loading chat: {e}')
         return loaded_list
+
+    def save_prompt(self, prompt)->str:
+        """ Save the LLMs prompt, overwriting the previous one """
+        prompt_file = os.path.join(self.history_dir, 'llm_prompt.pkl')
+        try:
+            with open(prompt_file, "wb") as f:
+                pickle.dump(prompt, f)
+        except FileNotFoundError as e:
+            print(f'Error saving LLM prompt. Check --history-dir\n{e}')
+        return prompt
+
+    @staticmethod
+    def load_prompt(history_path)->str:
+        """ Persist LLM dynamic prompt (load) """
+        prompt_file = os.path.join(history_path, 'llm_prompt.pkl')
+        try:
+            with open(prompt_file, "rb") as f:
+                prompt_str = pickle.load(f)
+        except FileNotFoundError:
+            return ''
+        except pickle.UnpicklingError as e:
+            print(f'Chat history file {prompt_file} not a pickle file:\n{e}')
+            sys.exit(1)
+        # pylint: disable=broad-exception-caught  # so many ways to fail, catch them all
+        except Exception as e:
+            print(f'Warning: Error loading chat: {e}')
+        return prompt_str
 
     def reveal_thinking(self, chunk, show: bool = False):
         """ return thinking chunk if verbose """
@@ -278,11 +306,13 @@ class Chat(PromptManager):
             return len(response.split())
         return 1
 
-    def get_lastcommand(self, last_message)->str:
+    def check_prompt(self, last_message):
         """ allow the LLM to add to its own system prompt """
-        prompt_message = self.find_prompt.findall(last_message)[-1:]
-        message = prompt_message if prompt_message else ''
-        return message
+        prompt = self.find_prompt.findall(last_message)[-1:]
+        if prompt:
+            prompt = self.cm.stringify_lists(prompt)
+            prompt = ' '.join(prompt.split()).replace('"', '').replace('\'', '')
+            self.llm_prompt = self.save_prompt(prompt)
 
     def get_documents(self, user_input)->tuple[dict,int,int,int]:
         """
@@ -292,14 +322,12 @@ class Chat(PromptManager):
         (documents,
             pre_t,
             post_t) = self.cm.handle_context([user_input,
-                                            self.chat_history_session[-20:]])
+                                              self.chat_history_session[-10:]])
         token_savings = max(0, pre_t - post_t)
+        documents['llm_prompt'] = self.llm_prompt
         documents['query'] = user_input
         documents['name'] = self.name
-        documents['chat_history'] = self.chat_history_session[-20:]
-        # allow the next response to contain LLM's prompt changes
-        documents['llm_prompt'] = self.get_lastcommand(
-                        self.cm.stringify_lists(self.chat_history_session[-20:]))
+        documents['chat_history'] = self.chat_history_session[-10:]
         utc_time = datetime.datetime.now(datetime.UTC)
         documents['date_time'] = (f'{utc_time.year}-{utc_time.month}-{utc_time.day}'
                                     f':{utc_time.hour}:{utc_time.minute}:{utc_time.second}'
@@ -363,7 +391,8 @@ class Chat(PromptManager):
                                          f'AI:{current_response}\n\n')
         self.cm.handle_context([current_response],
                                 direction='store')
-        self.save_chat(self.chat_history_session, self.history_dir)
+        self.save_chat(self.history_dir, self.chat_history_session, )
+        self.check_prompt(current_response)
 
     def chat(self):
         """ Prompt the User for questions, and begin! """
