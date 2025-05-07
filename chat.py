@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+""" Chat Main executable/entry point """
 # /// script
 # requires-python = ">=3.12"
 # dependencies = [
@@ -19,6 +20,7 @@ import time
 import pickle
 import argparse
 import threading
+import datetime
 from threading import Thread
 import yaml
 from langchain.prompts import ChatPromptTemplate
@@ -56,13 +58,14 @@ class Chat(PromptManager):
         self.host = kwargs['host']
         self.model = kwargs['model']
         self.history_dir = kwargs['vector_dir']
+        self.num_ctx = kwargs['num_ctx']
         self.prompts = PromptManager(console, debug=self.debug)
         self.cm = ContextManager(console, **kwargs)
         self.llm = ChatOllama(base_url=self.host,
                               model=self.model,
                               temperature=1.0,
                               repeat_penalty=1.1,
-                              num_ctx=kwargs['num_ctx'],
+                              num_ctx=self.num_ctx,
                               streaming=True)
         self.prompts.build_prompts()
         # Class variables
@@ -198,12 +201,12 @@ class Chat(PromptManager):
             chunk = self.reveal_thinking(chunk, self.verbose)
             yield chunk
 
-    def render_footer(self, time_taken: float = 0,
-                            token_count: int = 0,
-                            prompt_tokens: int = 0,
-                            token_reduction: int = 0,
-                            cleaned_color: int = 123)->Text:
+    def render_footer(self, time_taken: float = 0, **kwargs)->Text:
         """ Handle the footer statistics """
+        prompt_tokens = kwargs['prompt_tokens']
+        token_count = kwargs['token_count']
+        cleaned_color = kwargs['cleaned_color']
+        token_savings = kwargs['token_savings']
         # Calculate real-time heat maps
         context_size = [v for k,v in self.prompt_map.items() if k<=prompt_tokens][-1:][0]
         produced = [v for k,v in self.heat_map.items() if token_count>=k][-1:][0]
@@ -225,7 +228,7 @@ class Chat(PromptManager):
         footer.append('Time:', style='color(233)')
         footer.append(f'{time_taken:.2f}', style='color(94)')
         footer.append('s Tokens(cleaned:', style='color(233)')
-        footer.append(f'{token_reduction}', style=f'color({cleaned_color})')
+        footer.append(f'{token_savings}', style=f'color({cleaned_color})')
         footer.append(' context:', style='color(233)')
         footer.append(f'{prompt_tokens}', style=f'color({context_size})')
         footer.append(' completion:', style='color(233)')
@@ -263,7 +266,7 @@ class Chat(PromptManager):
         return (tokens, cleaned_color)
 
     @staticmethod
-    def response_count(response):
+    def response_count(response)->int:
         """
         Attempt to return a token count in response. Caveats: Some models 'think'
         before responding. Allow this response to not count against the token/s
@@ -275,11 +278,92 @@ class Chat(PromptManager):
             return len(response.split())
         return 1
 
-    def get_lastcommand(self, last_message):
+    def get_lastcommand(self, last_message)->str:
         """ allow the LLM to add to its own system prompt """
         prompt_message = self.find_prompt.findall(last_message)[-1:]
         message = prompt_message if prompt_message else ''
         return message
+
+    def get_documents(self, user_input)->tuple[dict,int,int,int]:
+        """
+        Populate documents, the object which is fed to prompt formaters, and
+        ultimately is what makes up the context for the LLM
+        """
+        (documents,
+            pre_t,
+            post_t) = self.cm.handle_context([user_input,
+                                            self.chat_history_session[-20:]])
+        token_savings = max(0, pre_t - post_t)
+        documents['query'] = user_input
+        documents['name'] = self.name
+        documents['chat_history'] = self.chat_history_session[-20:]
+        # allow the next response to contain LLM's prompt changes
+        documents['llm_prompt'] = self.get_lastcommand(
+                        self.cm.stringify_lists(self.chat_history_session[-20:]))
+        utc_time = datetime.datetime.now(datetime.UTC)
+        documents['date_time'] = (f'{utc_time.year}-{utc_time.month}-{utc_time.day}'
+                                    f':{utc_time.hour}:{utc_time.minute}:{utc_time.second}'
+                                    f'.{utc_time.microsecond}')
+        documents['num_ctx'] = self.num_ctx
+        # Stringify everything
+        for k, v in documents.items():
+            documents[k] = self.cm.stringify_lists(v)
+
+        # Do heat map stuff
+        (prompt_tokens, cleaned_color) = self.token_manager(documents,
+                                                            token_savings)
+
+        performance_summary = ''
+        for k, v in self.token_counter(documents):
+            performance_summary += f'{k}:{v}\n'
+
+        # Supply the LLM with its own performances
+        documents['performance'] = (f'Total tokens gathered from all RAG sources: {pre_t}\n'
+                                    f'Duplicates Removed: {max(0, pre_t - post_t)}\n'
+                                    f'Breakdown from each RAG:\n{performance_summary}\n')
+
+        return (documents, token_savings, prompt_tokens, cleaned_color)
+
+    def live_stream(self, documents: dict,
+                          token_savings: int,
+                          prompt_tokens: int,
+                          cleaned_color: int)->None:
+        """ Handle the Rich Live updating process """
+        current_response = ''
+        footer_meta = {'token_savings' : token_savings,
+                       'prompt_tokens' : prompt_tokens,
+                       'cleaned_color' : cleaned_color,
+                       'token_count'   : 0}
+
+        start_time = time.time()
+        query = Markdown(f'**You:** {documents["query"]}\n\n---\n\n')
+        with Live(refresh_per_second=20, console=console) as live:
+            live.console.clear(home=True)
+            live.update(query)
+            console.print(f'\nSubmitting {footer_meta["prompt_tokens"]} context tokens to LLM,'
+                          ' awaiting repsonse...', style='dim grey37')
+            for piece in self.stream_response(documents):
+                current_response += piece.content
+                footer_meta['token_count'] += self.response_count(piece.content)
+                response = self.render_chat(current_response)
+                footer = self.render_footer(time.time()-start_time, **footer_meta)
+                # create our theme in the following order
+                rich_content = Group(query, response, footer)
+                # replace 'thinking' output with Mode's Markdown response
+                if isinstance(response, Markdown) and self.do_once:
+                    self.do_once = False
+                    # Reset (erase) the thinking output
+                    current_response = ''
+                    rich_content = Group(query, response, footer)
+                live.update(rich_content)
+
+        # Finish by saving chat history, finding and storing new RAG/Tags
+        self.chat_history_session.append(f'DATE TIMESTAMP:{documents["date_time"]}'
+                                         f'\nUSER:{documents["query"]}\n'
+                                         f'AI:{current_response}\n\n')
+        self.cm.handle_context([current_response],
+                                direction='store')
+        self.save_chat(self.chat_history_session, self.history_dir)
 
     def chat(self):
         """ Prompt the User for questions, and begin! """
@@ -300,69 +384,12 @@ class Chat(PromptManager):
 
                 # Grab our lovely context
                 (documents,
-                 pre_t,
-                 post_t) = self.cm.handle_context([user_input,
-                                                   self.chat_history_session[-5:]])
+                 token_savings,
+                 prompt_tokens,
+                 cleaned_color) = self.get_documents(user_input)
 
-                documents['query'] = user_input
-                documents['name'] = self.name
-                documents['chat_history'] = self.chat_history_session[-5:]
-                # allow the next response to contain LLM's prompt changes
-                documents['llm_prompt'] = self.get_lastcommand(
-                                self.cm.stringify_lists(self.chat_history_session[-20:]))
-                # Stringify everything
-                for k, v in documents.items():
-                    documents[k] = self.cm.stringify_lists(v)
-
-                # Do heat map stuff
-                (prompt_tokens, cleaned_color) = self.token_manager(documents,
-                                                                    max(0, pre_t - post_t))
-
-                performance_summary = ''
-                for k, v in self.token_counter(documents):
-                    performance_summary += f'{k}:{v}\n'
-
-                # Supply the LLM with its own performances
-                documents['performance'] = (f'Total tokens gathered from all RAG sources: {pre_t}\n'
-                                            f'Duplicates Removed: {max(0, pre_t - post_t)}\n'
-                                            f'Breakdown from each RAG:\n{performance_summary}\n')
-                current_response = ''
-                token_count = 0
-                start_time = time.time()
-                query = Markdown(f"""**You:** {user_input}\n\n---\n\n""")
-                with Live(refresh_per_second=20, console=console) as live:
-                    live.console.clear(home=True)
-                    live.update(query)
-                    console.print(f'\nSubmitting {prompt_tokens} context tokens to LLM, awaiting'
-                              ' repsonse...',
-                              style='dim grey37')
-                    for piece in self.stream_response(documents):
-                        current_response += piece.content
-                        token_count += self.response_count(piece.content)
-                        response = self.render_chat(current_response)
-                        footer = self.render_footer(time.time()-start_time,
-                                                    token_count,
-                                                    prompt_tokens,
-                                                    max(0, pre_t - post_t),
-                                                    cleaned_color)
-                        # create our theme in the following order
-                        rich_content = Group(query, response, footer)
-                        # replace 'thinking' output with Mode's Markdown response
-                        if isinstance(response, Markdown) and self.do_once:
-                            self.do_once = False
-                            # Reset (erase) the thinking output
-                            current_response = ''
-                            rich_content = Group(query,
-                                                 response,
-                                                 footer)
-                        live.update(rich_content)
-
-                # Finish by saving chat history, finding and storing new RAG/Tags
-                self.chat_history_session.append(f'USER:{user_input}\n\n'
-                                                 f'AI:{current_response}\n\n')
-                self.cm.handle_context([current_response],
-                                        direction='store')
-                self.save_chat(self.chat_history_session, self.history_dir)
+                # handoff to rich live
+                self.live_stream(documents, token_savings, prompt_tokens, cleaned_color)
 
         except KeyboardInterrupt:
             sys.exit()
@@ -372,6 +399,7 @@ def verify_args(p_args):
     # The issue added to the feature tracker: nothing to verify yet
     return p_args
 
+# pylint: disable=too-many-locals  # would force the user to use unfriendly names
 def parse_args(argv):
     """ parse arguments """
     about = """
