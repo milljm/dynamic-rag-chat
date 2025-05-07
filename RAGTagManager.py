@@ -151,7 +151,6 @@ class RAG():
             self.console.print(f'CHUNKS RETRIEVED FROM {collection} with filter:'
                                f'matches: {matches}',
                                f' {meta_data}:\n{results}\n\n',
-                               f'SUPER CURIOUS:\n[START]{chroma.similarity_search(query, matches, filter=meta_data)}[END]\n\n\n\n',
                                 style='color(233)',
                                 highlight=False)
         return results

@@ -98,15 +98,18 @@ class ContextManager(PromptManager):
 
     def gather_context(self, query: str,
                              collection: str,
-                             response: str = '')->list[Document]:
+                             tags: list)->list[Document]:
         """
         perform gathering routines based on incoming collection
         """
-        documents = []
-        (_, tags) = self.pre_processor(f'{query}\n\n{response}')
+        _tmp = namedtuple('Document', ('page_content'))
+        documents = [_tmp('')]
         # Search for 'important' tags, and query those collections for 'data'
         # This is going to be highly relevant data, so expand the matches x4
         for meta_data in tags:
+            # Things we don't want to drag from the RAG, as every response contains a timestamp.
+            if meta_data.tag in ['time', 'date']:
+                continue
             if self.debug:
                 self.console.print(f'GATHER CONTEXT: meta_data:{meta_data}'
                                    f'collection: {collection}',
@@ -116,7 +119,7 @@ class ContextManager(PromptManager):
             documents.extend(self.rag.retrieve_data(query,
                                                     collection,
                                                     meta_data=meta,
-                                                    matches=max(1, int(self.matches*4))))
+                                                    matches=max(1, int(self.matches*2))))
             if self.debug:
                 self.console.print('DOCUMENT GATHER QUERY:'
                                    f'query: {query}'
@@ -136,7 +139,6 @@ class ContextManager(PromptManager):
         return documents
 
     def handle_context(self, data_set: list,
-                             last_response: str = '',
                              direction='query')->tuple[dict[str,list], int]:
         """ Method to handle all the lovely context """
         # Retrieve context from AI and User RAG
@@ -145,6 +147,14 @@ class ContextManager(PromptManager):
             post_tokens = 0
             collection_list = ['ai_documents', 'user_documents', 'history_documents']
             documents = {key: [] for key in collection_list}
+
+            # Try to tagify the users query and the last response from the llm
+            # placing the users query last so it has precedence (last has more
+            # priority with LLMs)
+            tags = []
+            if data_set:
+                (_, tags) = self.pre_processor(self.stringify_lists(data_set))
+
             for data in data_set:
                 if not data:
                     continue
@@ -158,7 +168,7 @@ class ContextManager(PromptManager):
                     # Extensive RAG retreival
                     storage.extend(self.gather_context(query,
                                                        collection,
-                                                       response=last_response))
+                                                       tags))
                     # Record pre-token counts
                     pages = list(map(lambda doc: doc.page_content, storage))
                     for page in pages:
@@ -173,8 +183,7 @@ class ContextManager(PromptManager):
 
                     if self.debug:
                         self.console.print(f'CONTEXT RETRIEVAL:\n{documents}\n\n')
-            documents['user_documents'] = []
-            documents['history_documents'] = []
+
             # Store the users query to their RAG, now that we are done pre-processing
             # (so as not to bring back identical information in their query)
             # A little unorthodox, but the first item in the list is ther user's query

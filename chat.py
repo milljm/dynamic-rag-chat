@@ -21,8 +21,8 @@ import pickle
 import argparse
 import threading
 import datetime
-import pytz
 from threading import Thread
+import pytz
 import yaml
 from langchain.prompts import ChatPromptTemplate
 from langchain_ollama import ChatOllama
@@ -96,10 +96,11 @@ class Chat(PromptManager):
     def get_time(tzone):
         """ return the time """
         mdt_timezone = pytz.timezone(tzone)
-        utc_time = datetime.datetime.now(mdt_timezone)
-        return (f'{utc_time.year}-{utc_time.month}-{utc_time.day}'
-                                    f':{utc_time.hour}:{utc_time.minute}:{utc_time.second}'
-                                    f'.{utc_time.microsecond}')
+        my_time = datetime.datetime.now(mdt_timezone)
+        _str_fmt = (f'{my_time.year}-{my_time.month}-{my_time.day}'
+                   f':{my_time.hour}:{my_time.minute}:{my_time.second}'
+                   f' {"AM" if my_time.hour < 12 else "PM"}')
+        return _str_fmt
 
     @staticmethod
     def create_heatmap(hot_max: int = 0, reverse: bool =False)->dict[int:int]:
@@ -246,6 +247,7 @@ class Chat(PromptManager):
         token_count = kwargs['token_count']
         cleaned_color = kwargs['cleaned_color']
         token_savings = kwargs['token_savings']
+        pre_processing_time = kwargs['pre_process_time']
         # Calculate real-time heat maps
         context_size = [v for k,v in self.prompt_map.items() if k<=prompt_tokens][-1:][0]
         produced = [v for k,v in self.heat_map.items() if token_count>=k][-1:][0]
@@ -268,6 +270,7 @@ class Chat(PromptManager):
         footer.append(f'{time_taken:.2f}', style='color(94)')
         footer.append('s Tokens(cleaned:', style='color(233)')
         footer.append(f'{token_savings}', style=f'color({cleaned_color})')
+        footer.append(f':{pre_processing_time}', style='color(233)')
         footer.append(' context:', style='color(233)')
         footer.append(f'{prompt_tokens}', style=f'color({context_size})')
         footer.append(' completion:', style='color(233)')
@@ -330,17 +333,23 @@ class Chat(PromptManager):
         Populate documents, the object which is fed to prompt formaters, and
         ultimately is what makes up the context for the LLM
         """
+        pre_process_time = time.time()
         (documents,
             pre_t,
             post_t) = self.cm.handle_context([user_input,
                                               self.chat_history_session[-10:]])
+
+        # pylint: disable=consider-using-f-string  # no, this is how it is done
+        pre_process_time = '{:.1f}s'.format(time.time() - pre_process_time)
+
         token_savings = max(0, pre_t - post_t)
         documents['llm_prompt'] = self.llm_prompt
-        documents['query'] = user_input
+        documents['user_query'] = user_input
         documents['name'] = self.name
         documents['chat_history'] = self.chat_history_session[-10:]
         documents['date_time'] = self.get_time(self.time_zone)
         documents['num_ctx'] = self.num_ctx
+        documents['pre_process_time'] = pre_process_time
         # Stringify everything
         for k, v in documents.items():
             documents[k] = self.cm.stringify_lists(v)
@@ -356,7 +365,8 @@ class Chat(PromptManager):
         # Supply the LLM with its own performances
         documents['performance'] = (f'Total tokens gathered from all RAG sources: {pre_t}\n'
                                     f'Duplicates Removed: {max(0, pre_t - post_t)}\n'
-                                    f'Breakdown from each RAG:\n{performance_summary}\n')
+                                    'Breakdown from each token generating '
+                                    f'source:\n{performance_summary}\n')
 
         return (documents, token_savings, prompt_tokens, cleaned_color)
 
@@ -366,13 +376,14 @@ class Chat(PromptManager):
                           cleaned_color: int)->None:
         """ Handle the Rich Live updating process """
         current_response = ''
-        footer_meta = {'token_savings' : token_savings,
-                       'prompt_tokens' : prompt_tokens,
-                       'cleaned_color' : cleaned_color,
-                       'token_count'   : 0}
+        footer_meta = {'token_savings'   : token_savings,
+                       'prompt_tokens'   : prompt_tokens,
+                       'cleaned_color'   : cleaned_color,
+                       'pre_process_time': documents['pre_process_time'],
+                       'token_count'     : 0}
 
         start_time = time.time()
-        query = Markdown(f'**You:** {documents["query"]}\n\n---\n\n')
+        query = Markdown(f'**You:** {documents["user_query"]}\n\n---\n\n')
         with Live(refresh_per_second=20, console=console) as live:
             live.console.clear(home=True)
             live.update(query)
@@ -395,7 +406,7 @@ class Chat(PromptManager):
 
         # Finish by saving chat history, finding and storing new RAG/Tags
         self.chat_history_session.append(f'DATE TIMESTAMP:{documents["date_time"]}'
-                                         f'\nUSER:{documents["query"]}\n'
+                                         f'\nUSER:{documents["user_query"]}\n'
                                          f'AI:{current_response}\n\n')
         self.cm.handle_context([current_response],
                                 direction='store')
