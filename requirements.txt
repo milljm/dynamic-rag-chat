@@ -6,3 +6,4 @@ langchain-community
 prompt_toolkit
 rich
 pypdf
+pytz

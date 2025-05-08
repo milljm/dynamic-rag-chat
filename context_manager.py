@@ -12,18 +12,19 @@ import threading
 from collections import namedtuple
 from langchain.schema import Document
 from langchain.prompts import ChatPromptTemplate
-from RAGTagManager import RAGTagManager, RAG
-from OllamaModel import OllamaModel
-from PromptManager import PromptManager
+from ragtag_manager import RAGTagManager, RAG
+from ollama_model import OllamaModel
+from prompt_manager import PromptManager
 current_dir = os.path.dirname(os.path.abspath(__file__))
 class ContextManager(PromptManager):
     """ A collection of methods aimed at producing/reducing the context """
-    def __init__(self, console, **kwargs):
+    def __init__(self, console, common, **kwargs):
         super().__init__(console)
         self.console = console
+        self.common = common
         self.prompts = PromptManager(console, debug=self.debug)
-        self.rag = RAG(console, **kwargs)
-        self.rag_tagger = RAGTagManager(console, **kwargs)
+        self.rag = RAG(console, self.common, **kwargs)
+        self.rag_tagger = RAGTagManager(console, self.common, **kwargs)
         self.host = kwargs['host']
         self.matches = kwargs['matches']
         self.preconditioner = kwargs['preconditioner']
@@ -48,20 +49,6 @@ class ContextManager(PromptManager):
         text = re.sub(r'[^\w\s]', '', text)
         return ' '.join(text.lower().split())
 
-    @staticmethod
-    def stringify_lists(nested_list)->str:
-        """ return a flat string """
-        def process(item):
-            result = []
-            if isinstance(item, list):
-                for subitem in item:
-                    result.extend(process(subitem))
-            else:
-                result.append(str(item))
-            return result
-        flat_strings = process(nested_list)
-        return '\n\n'.join(flat_strings)
-
     def pre_processor(self, query)->tuple[str,list[namedtuple]]:
         """
         lightweight LLM as a tagging pre-processor
@@ -73,7 +60,7 @@ class ContextManager(PromptManager):
                             if self.debug else prompts.tag_prompt_system)
         human_prompt = (prompts.get_prompt(f'{prompts.tag_prompt_file}_human.txt')
                         if self.debug else prompts.tag_prompt_human)
-
+        # pylint: enable=no-member
         prompt_template = ChatPromptTemplate.from_messages([
                     ("system", system_prompt),
                     ("human", human_prompt)
@@ -82,11 +69,11 @@ class ContextManager(PromptManager):
         if self.debug:
             self.console.print(f'PRE-PROCESSOR PROMPT:\n{prompt}\n\n',
                                 style='color(233)', highlight=False)
-        # pylint: enable=no-member
         content = pre_llm.llm_query(self.preconditioner, prompt).content
         if self.debug:
             self.console.print(f'PRE-PROCESSOR RESPONSE:\n{content}\n\n',
                                 style='color(233)', highlight=False)
+
         tags = self.rag_tagger.get_tags(content, debug=self.debug)
         return (content, tags)
 
@@ -110,32 +97,17 @@ class ContextManager(PromptManager):
             # Things we don't want to drag from the RAG, as every response contains a timestamp.
             if meta_data.tag in ['time', 'date']:
                 continue
-            if self.debug:
-                self.console.print(f'GATHER CONTEXT: meta_data:{meta_data}'
-                                   f'collection: {collection}',
-                                   style='color(233)')
             meta = dict({meta_data.tag:meta_data.content})
             # this will be the most pertinent information, so grab a ton of data
             documents.extend(self.rag.retrieve_data(query,
                                                     collection,
                                                     meta_data=meta,
                                                     matches=max(1, int(self.matches*2))))
-            if self.debug:
-                self.console.print('DOCUMENT GATHER QUERY:'
-                                   f'query: {query}'
-                                   f'collection: {collection}'
-                                   f'documents: {documents}',
-                                   style='color(233)')
+
             # relax the matches for trival meta_data content. May bring in some other nuance
             documents.extend(self.rag.retrieve_data(meta_data.content,
                                                     collection,
                                                     matches=(max(1, int(self.matches/4)))))
-            if self.debug:
-                self.console.print('DOCUMENT GATHER META:'
-                                   f'meta_data: {meta_data.content}'
-                                   f'collection: {collection}'
-                                   f'documents: {documents}',
-                                   style='color(233)')
         return documents
 
     def handle_context(self, data_set: list,
@@ -153,12 +125,12 @@ class ContextManager(PromptManager):
             # priority with LLMs)
             tags = []
             if data_set:
-                (_, tags) = self.pre_processor(self.stringify_lists(data_set))
+                (_, tags) = self.pre_processor(self.common.stringify_lists(data_set))
 
             for data in data_set:
                 if not data:
                     continue
-                query = self.stringify_lists(data) # lists -> strings (in case its not)
+                query = self.common.stringify_lists(data) # lists -> strings (in case its not)
                 storage = []
                 for collection in collection_list:
                     # General RAG retreival on default collections
@@ -187,7 +159,7 @@ class ContextManager(PromptManager):
             # Store the users query to their RAG, now that we are done pre-processing
             # (so as not to bring back identical information in their query)
             # A little unorthodox, but the first item in the list is ther user's query
-            self.rag.store_data(self.stringify_lists(data_set[0]),
+            self.rag.store_data(self.common.stringify_lists(data_set[0]),
                                 collection='user_documents',
                                 chunk_size=100,
                                 chunk_overlap=50)

@@ -1,4 +1,3 @@
-
 """
 RAGTagManager aims at handling the RAGs and the Collection(s) process (tagging)
 """
@@ -36,8 +35,9 @@ class RAGTagManager():
     {location: sumerset isles...}
     {weird: weird things mentioned about bob here...}
     """
-    def __init__(self, console, **kwargs):
+    def __init__(self, console, common, **kwargs):
         self.console = console
+        self.common = common
         self.kwargs = kwargs
         self.debug = kwargs['debug']
         self.tag_pattern = re.compile(r'{\s*([a-zA-Z0-9_-]+)\s*:\s*([^\}]+)\s*}')
@@ -66,7 +66,7 @@ class RAGTagManager():
     def update_rag(self, response, collection: str='ai_documents', debug=False)->None:
         """ regular expression through message and attempt to create key:value tuples """
         rag_tags = self.get_tags(response, debug=debug)
-        rag = RAG(self.console, **self.kwargs)
+        rag = RAG(self.console, self.common, **self.kwargs)
         # New way: Of course its practically built in. Note to self: Never pretend
         # to think you are planting a flag somewhere when it comes to coding.
         rag.store_data(response, tags_metadata=rag_tags, collection=collection)
@@ -91,8 +91,9 @@ class RAGTagManager():
 
 class RAG():
     """ Responsible for RAG operations """
-    def __init__(self, console, **kwargs):
+    def __init__(self, console, common, **kwargs):
         self.console = console
+        self.common = common
         self.host = kwargs['host']
         self.embeddings = kwargs['embeddings']
         self.vector_dir = kwargs['vector_dir']
@@ -189,7 +190,8 @@ class RAG():
             page_texts = list(map(lambda doc: doc.page_content, pages))
             for page_text in page_texts:
                 if page_text:
-                    self.store_data(page_text, 'ai_documents')
+                    self.store_data(page_text, collection = 'ai_documents')
+
         except pypdf.errors.PdfStreamError as e:
             print(f'Error loading PDF:\n\n\t{e}\n\nIs this a valid PDF?')
             sys.exit(1)

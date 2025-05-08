@@ -13,42 +13,23 @@
 #     "pypdf",
 # ]
 # ///
-import re
 import os
 import sys
 import time
-import pickle
 import argparse
-import threading
 import datetime
-from threading import Thread
-import pytz
 import yaml
-from langchain.prompts import ChatPromptTemplate
-from langchain_ollama import ChatOllama
-from rich.live import Live
-from rich.markdown import Markdown
-from rich.text import Text
-from rich.console import Group
+import pytz
 from rich.console import Console
 from prompt_toolkit import PromptSession
 from prompt_toolkit.key_binding import KeyBindings
-from ContextManager import ContextManager
-from RAGTagManager import RAG
-from PromptManager import PromptManager
+from context_manager import ContextManager
+from ragtag_manager import RAG
+from prompt_manager import PromptManager
+from render_window import RenderWindow
+from chat_utils import CommonUtils
 console = Console(highlight=True)
 current_dir = os.path.dirname(os.path.abspath(__file__))
-
-class AnimationThread(Thread):
-    """ Allow pulsing animation to run as a thread """
-    def __init__(self, owner):
-        super().__init__()
-        self.owner = owner
-
-    def run(self):
-        while self.owner.animation_active:
-            self.owner.update_animation()
-            time.sleep(0.5)
 
 # pylint: disable=too-many-instance-attributes
 class Chat(PromptManager):
@@ -58,39 +39,20 @@ class Chat(PromptManager):
         self.debug = kwargs['debug']
         self.host = kwargs['host']
         self.model = kwargs['model']
-        self.history_dir = kwargs['vector_dir']
+
         self.num_ctx = kwargs['num_ctx']
         self.time_zone = kwargs['time_zone']
+        self.common = CommonUtils(console, **kwargs)
+        self.renderer = RenderWindow(console, self.common, **kwargs)
         self.prompts = PromptManager(console, debug=self.debug)
-        self.cm = ContextManager(console, **kwargs)
-        self.llm = ChatOllama(base_url=self.host,
-                              model=self.model,
-                              temperature=1.0,
-                              repeat_penalty=1.1,
-                              num_ctx=self.num_ctx,
-                              streaming=True)
+        self.cm = ContextManager(console, self.common, **kwargs)
+
+        # Contruct prompts
         self.prompts.build_prompts()
+
         # Class variables
         self.name = kwargs['name']
         self.verbose = kwargs['verbose']
-        self.model_re = re.compile(r'(\w+)\W+')
-        self.heat_map = 0
-        self.prompt_map = self.create_heatmap(5000)
-        self.cleaned_map = self.create_heatmap(1000)
-        self.chat_max = kwargs['chat_max']
-        self.chat_history_session = self.load_chat(self.history_dir)
-        self.llm_prompt = self.load_prompt(self.history_dir)
-
-        # Thinking animation
-        self.pulsing_chars = ["⠇", "⠋", "⠙", "⠸", "⠴", "⠦"]
-        self.do_once = False
-        self.pulse_index = 0
-        self.thinking = False
-        self.animation_active = False
-        self.animation_thread = threading.Thread(target=self.update_animation)
-
-        # self changing prompt
-        self.find_prompt = re.compile(r'llm_prompt[\{:"](.*)[\.;"\}]', re.DOTALL)
 
     @staticmethod
     def get_time(tzone):
@@ -101,192 +63,6 @@ class Chat(PromptManager):
                    f':{my_time.hour}:{my_time.minute}:{my_time.second}'
                    f' {"AM" if my_time.hour < 12 else "PM"}')
         return _str_fmt
-
-    @staticmethod
-    def create_heatmap(hot_max: int = 0, reverse: bool =False)->dict[int:int]:
-        """
-        Return a dictionary of ten color ascii codes (values) with the keys representing
-        the maximum integer for said color code:
-        ./heat_map(10) --> {0: 123, 1: 51, 2: 46, 3: 42, 4: 82, 5: 154,
-                            6: 178, 7: 208, 8: 166, 9: 203, 10: 196}
-        Options: reverse = True for oppisite effect
-        """
-        heat = {0: 123} # declare a zero
-        colors = [51, 46, 42, 82, 154, 178, 208, 166, 203, 196]
-        if reverse:
-            colors = colors[::-1]
-            heat = {0: 196} # declare a zero
-        for i in range(10):
-            x = int(((i+1)/10) * hot_max)
-            heat[x] = colors[i]
-        return heat
-
-    @staticmethod
-    def save_chat(history_path, chat_history) ->None:
-        """ Persist chat history (save) """
-        history_file = os.path.join(history_path, 'chat_history.pkl')
-        try:
-            with open(history_file, "wb") as f:
-                pickle.dump(chat_history, f)
-        except FileNotFoundError as e:
-            print(f'Error saving chat. Check --history-dir\n{e}')
-
-    def load_chat(self, history_path)->list:
-        """ Persist chat history (load) """
-        loaded_list = []
-        history_file = os.path.join(history_path, 'chat_history.pkl')
-        try:
-            with open(history_file, "rb") as f:
-                loaded_list = pickle.load(f)
-                # trunacate to max ammount
-                loaded_list = loaded_list[-self.chat_max:]
-        except FileNotFoundError:
-            pass
-        except pickle.UnpicklingError as e:
-            print(f'Chat history file {history_file} not a pickle file:\n{e}')
-            sys.exit(1)
-        # pylint: disable=broad-exception-caught  # so many ways to fail, catch them all
-        except Exception as e:
-            print(f'Warning: Error loading chat: {e}')
-        return loaded_list
-
-    def save_prompt(self, prompt)->str:
-        """ Save the LLMs prompt, overwriting the previous one """
-        prompt_file = os.path.join(self.history_dir, 'llm_prompt.pkl')
-        try:
-            with open(prompt_file, "wb") as f:
-                pickle.dump(prompt, f)
-        except FileNotFoundError as e:
-            print(f'Error saving LLM prompt. Check --history-dir\n{e}')
-        return prompt
-
-    @staticmethod
-    def load_prompt(history_path)->str:
-        """ Persist LLM dynamic prompt (load) """
-        prompt_file = os.path.join(history_path, 'llm_prompt.pkl')
-        try:
-            with open(prompt_file, "rb") as f:
-                prompt_str = pickle.load(f)
-        except FileNotFoundError:
-            return ''
-        except pickle.UnpicklingError as e:
-            print(f'Chat history file {prompt_file} not a pickle file:\n{e}')
-            sys.exit(1)
-        # pylint: disable=broad-exception-caught  # so many ways to fail, catch them all
-        except Exception as e:
-            print(f'Warning: Error loading chat: {e}')
-        return prompt_str
-
-    def reveal_thinking(self, chunk, show: bool = False):
-        """ return thinking chunk if verbose """
-        content = chunk.content
-        if self.thinking and '</think>' in chunk.content:
-            chunk.content = ''
-            self.stop_thinking()
-        elif not self.thinking and '<think>' in chunk.content:
-            self.start_thinking()
-            chunk.content = 'AI thinking...'
-        elif self.thinking:
-            chunk.content = content if show else ''
-        return chunk
-
-    def start_thinking(self):
-        """ method to start thinking animation """
-        if hasattr(self, 'animation_thread') and self.animation_thread.is_alive():
-            self.animation_thread.join(timeout=0.1)
-        self.thinking = True
-        self.do_once = True
-        self.animation_active = True
-        self.animation_thread = AnimationThread(self)
-        self.animation_thread.daemon = True
-        self.animation_thread.start()
-
-    def stop_thinking(self):
-        """ method to stop thinking animation """
-        self.thinking = False
-        self.animation_active = False
-
-    def update_animation(self):
-        """ a threaded method to run the thinking animation """
-        while self.animation_active:
-            time.sleep(0.1)  # Adjust speed (0.1 seconds per frame)
-            self.pulse_index = (self.pulse_index + 1) % len(self.pulsing_chars)
-            self.render_chat()
-
-    # Stream response as chunks
-    def stream_response(self, documents: dict):
-        """ Parse LLM Prompt """
-        prompts = self.prompts
-        # pylint: disable=no-member # dynamic prompts (see self.__build_prompts)
-        system_prompt = (prompts.get_prompt(f'{prompts.plot_prompt_file}_system.txt')
-                     if self.debug else prompts.plot_prompt_system)
-
-        human_prompt = (prompts.get_prompt(f'{prompts.plot_prompt_file}_human.txt')
-                     if self.debug else prompts.plot_prompt_human)
-        # pylint: enable=no-member
-        prompt_template = ChatPromptTemplate.from_messages([
-                ("system", system_prompt),
-                ("human", human_prompt)
-            ])
-
-        if self.debug:
-            console.print(f'LLM DOCUMENTS: {documents.keys()}\n{documents["performance"]}\n')
-        prompt = prompt_template.format_messages(**documents)
-        # pylint: enable=no-member
-        if self.debug:
-            console.print(f'HEAVY LLM PROMPT (llm.stream()):\n{prompt}\n\n',
-                          style='color(233)',
-                          highlight=False)
-        for chunk in self.llm.stream(prompt):
-            chunk = self.reveal_thinking(chunk, self.verbose)
-            yield chunk
-
-    def render_footer(self, time_taken: float = 0, **kwargs)->Text:
-        """ Handle the footer statistics """
-        prompt_tokens = kwargs['prompt_tokens']
-        token_count = kwargs['token_count']
-        cleaned_color = kwargs['cleaned_color']
-        token_savings = kwargs['token_savings']
-        pre_processing_time = kwargs['pre_process_time']
-        # Calculate real-time heat maps
-        context_size = [v for k,v in self.prompt_map.items() if k<=prompt_tokens][-1:][0]
-        produced = [v for k,v in self.heat_map.items() if token_count>=k][-1:][0]
-
-        # Calculate Tokens/s
-        if time_taken > 0:
-            tokens_per_second = token_count / time_taken
-        else:
-            tokens_per_second = 0
-
-        # Implement a thinking emoji
-        emoji = f' {self.pulsing_chars[self.pulse_index]} ' if self.thinking else ' '
-
-        # Create the footer text with model info, time, and token count
-        model = '-'.join(self.model_re.findall(self.model)[:3])
-        footer = Text('\n', style='color(233)')
-        footer.append(f'{model}', style='color(202)')
-        footer.append(emoji, style='color(51)')
-        footer.append('Time:', style='color(233)')
-        footer.append(f'{time_taken:.2f}', style='color(94)')
-        footer.append('s Tokens(cleaned:', style='color(233)')
-        footer.append(f'{token_savings}', style=f'color({cleaned_color})')
-        footer.append(f':{pre_processing_time}', style='color(233)')
-        footer.append(' context:', style='color(233)')
-        footer.append(f'{prompt_tokens}', style=f'color({context_size})')
-        footer.append(' completion:', style='color(233)')
-        footer.append(f'{token_count}', style=f'color({produced})')
-        footer.append(f') {tokens_per_second:.1f}T/s', style='color(233)')
-        return footer
-
-    # Compose the full chat display with footer (model name, time taken, token count)
-    def render_chat(self, current_stream: str = "")->Text|Markdown:
-        """ render and return markdown/syntax """
-        if self.thinking and self.verbose:
-            chat_content = Text(current_stream, style='color(233)')
-        else:
-            chat_content = Markdown(current_stream)
-
-        return chat_content
 
     def token_counter(self, documents: dict):
         """ report each document token counts """
@@ -301,32 +77,12 @@ class Chat(PromptManager):
             tokens += token_cnt
 
         # Set timers, and completion token counter, colors...
-        self.heat_map = self.create_heatmap(tokens, reverse=True)
-        cleaned_color = [v for k,v in self.create_heatmap(tokens / 4,
+        self.common.heat_map = self.common.create_heatmap(tokens, reverse=True)
+        cleaned_color = [v for k,v in self.common.create_heatmap(tokens / 4,
                                                           reverse=True).items()
                             if k<=token_reduction][-1:][0]
+
         return (tokens, cleaned_color)
-
-    @staticmethod
-    def response_count(response)->int:
-        """
-        Attempt to return a token count in response. Caveats: Some models 'think'
-        before responding. Allow this response to not count against the token/s
-        performance. Make an assumption: Any return should be considered as 1 token
-        at minimum. See the for loop in self.stream_response for details why response
-        is empty.
-        """
-        if response:
-            return len(response.split())
-        return 1
-
-    def check_prompt(self, last_message):
-        """ allow the LLM to add to its own system prompt """
-        prompt = self.find_prompt.findall(last_message)[-1:]
-        if prompt:
-            prompt = self.cm.stringify_lists(prompt)
-            prompt = ' '.join(prompt.split()).replace('"', '').replace('\'', '')
-            self.llm_prompt = self.save_prompt(prompt)
 
     def get_documents(self, user_input)->tuple[dict,int,int,int]:
         """
@@ -337,22 +93,22 @@ class Chat(PromptManager):
         (documents,
             pre_t,
             post_t) = self.cm.handle_context([user_input,
-                                              self.chat_history_session[-10:]])
+                                              self.common.chat_history_session[-10:]])
 
         # pylint: disable=consider-using-f-string  # no, this is how it is done
         pre_process_time = '{:.1f}s'.format(time.time() - pre_process_time)
 
         token_savings = max(0, pre_t - post_t)
-        documents['llm_prompt'] = self.llm_prompt
+        documents['llm_prompt'] = self.common.llm_prompt
         documents['user_query'] = user_input
         documents['name'] = self.name
-        documents['chat_history'] = self.chat_history_session[-10:]
+        documents['chat_history'] = self.common.chat_history_session[-10:]
         documents['date_time'] = self.get_time(self.time_zone)
         documents['num_ctx'] = self.num_ctx
         documents['pre_process_time'] = pre_process_time
         # Stringify everything
         for k, v in documents.items():
-            documents[k] = self.cm.stringify_lists(v)
+            documents[k] = self.common.stringify_lists(v)
 
         # Do heat map stuff
         (prompt_tokens, cleaned_color) = self.token_manager(documents,
@@ -369,49 +125,6 @@ class Chat(PromptManager):
                                     f'source:\n{performance_summary}\n')
 
         return (documents, token_savings, prompt_tokens, cleaned_color)
-
-    def live_stream(self, documents: dict,
-                          token_savings: int,
-                          prompt_tokens: int,
-                          cleaned_color: int)->None:
-        """ Handle the Rich Live updating process """
-        current_response = ''
-        footer_meta = {'token_savings'   : token_savings,
-                       'prompt_tokens'   : prompt_tokens,
-                       'cleaned_color'   : cleaned_color,
-                       'pre_process_time': documents['pre_process_time'],
-                       'token_count'     : 0}
-
-        start_time = time.time()
-        query = Markdown(f'**You:** {documents["user_query"]}\n\n---\n\n')
-        with Live(refresh_per_second=20, console=console) as live:
-            live.console.clear(home=True)
-            live.update(query)
-            console.print(f'\nSubmitting {footer_meta["prompt_tokens"]} context tokens to LLM,'
-                          ' awaiting repsonse...', style='dim grey37')
-            for piece in self.stream_response(documents):
-                current_response += piece.content
-                footer_meta['token_count'] += self.response_count(piece.content)
-                response = self.render_chat(current_response)
-                footer = self.render_footer(time.time()-start_time, **footer_meta)
-                # create our theme in the following order
-                rich_content = Group(query, response, footer)
-                # replace 'thinking' output with Mode's Markdown response
-                if isinstance(response, Markdown) and self.do_once:
-                    self.do_once = False
-                    # Reset (erase) the thinking output
-                    current_response = ''
-                    rich_content = Group(query, response, footer)
-                live.update(rich_content)
-
-        # Finish by saving chat history, finding and storing new RAG/Tags
-        self.chat_history_session.append(f'DATE TIMESTAMP:{documents["date_time"]}'
-                                         f'\nUSER:{documents["user_query"]}\n'
-                                         f'AI:{current_response}\n\n')
-        self.cm.handle_context([current_response],
-                                direction='store')
-        self.save_chat(self.history_dir, self.chat_history_session, )
-        self.check_prompt(current_response)
 
     def chat(self):
         """ Prompt the User for questions, and begin! """
@@ -437,7 +150,7 @@ class Chat(PromptManager):
                  cleaned_color) = self.get_documents(user_input)
 
                 # handoff to rich live
-                self.live_stream(documents, token_savings, prompt_tokens, cleaned_color)
+                self.renderer.live_stream(documents, token_savings, prompt_tokens, cleaned_color)
 
         except KeyboardInterrupt:
             sys.exit()
@@ -532,7 +245,9 @@ See .chat.yaml.example for details.
 
 if __name__ == '__main__':
     args = parse_args(sys.argv[1:])
-    rag = RAG(console, host=args.host,
+    rag = RAG(console, CommonUtils(console,
+                                   vector_dir=args.vector_dir,
+                                   chat_max=0), host=args.host,
               embeddings=args.embeddings,
               vector_dir=args.vector_dir,
               debug=args.debug)
