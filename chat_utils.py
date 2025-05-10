@@ -20,7 +20,10 @@ class CommonUtils():
         self.llm_prompt = self.load_prompt(self.history_dir)
 
         # self changing prompt
-        self.find_prompt = re.compile(r'llm_prompt[\{:"](.*)[\.;"\}]', re.DOTALL)
+        self.find_prompt  = re.compile(r'(?<=[<m]eta_prompt: ).*?(?=[>)])', re.DOTALL)
+        self.meta_data = re.compile(r'(?<=[<m]eta_tags: ).*?(?=[>)])', re.DOTALL)
+        self.tag_pattern = re.compile(r'{\s*([a-zA-Z0-9_-]+)\s*:\s*([^\}]+)\s*}')
+        self.meta_iter = re.compile(r'(\w+):\s*([^;]*)')
 
     @staticmethod
     def stringify_lists(nested_list)->str:
@@ -116,5 +119,4 @@ class CommonUtils():
         prompt = self.find_prompt.findall(last_message)[-1:]
         if prompt:
             prompt = self.stringify_lists(prompt)
-            prompt = ' '.join(prompt.split()).replace('"', '').replace('\'', '')
             self.llm_prompt = self.save_prompt(prompt)

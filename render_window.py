@@ -26,6 +26,7 @@ class RenderWindow(PromptManager):
     """ Responsible for printing Rich Text/Markdown Live to the screen """
     def __init__(self, console, common_utils, **kwargs):
         super().__init__(console)
+        self.debug = kwargs['debug']
         self.console = console
         self.host = kwargs['host']
         self.model = kwargs['model']
@@ -42,12 +43,14 @@ class RenderWindow(PromptManager):
                               num_ctx=self.num_ctx,
                               streaming=True)
         self.prompts.build_prompts()
+        self.meta_capture = ''
 
         # Thinking animation
         self.pulsing_chars = ["⠇", "⠋", "⠙", "⠸", "⠴", "⠦"]
         self.do_once = False
         self.pulse_index = 0
         self.thinking = False
+        self.meta_hiding = False
         self.animation_active = False
         self.animation_thread = threading.Thread(target=self.update_animation)
 
@@ -64,7 +67,23 @@ class RenderWindow(PromptManager):
             return len(response.split())
         return 1
 
-    def reveal_thinking(self, chunk, show: bool = False):
+    def if_hiding(self, chunk, verbose)->object:
+        """ hide meta tags from user (unless in verbose mode) """
+        if verbose:
+            return chunk
+        content = chunk.content
+        if self.meta_hiding:
+            if content in ['>', ')']:
+                self.meta_hiding = False
+            self.meta_capture += content
+            chunk.content = ''
+        elif content in ['(meta','<meta']:
+            self.meta_hiding = True
+            self.meta_capture = content
+            chunk.content = ''
+        return chunk
+
+    def reveal_thinking(self, chunk, show: bool = False)->object:
         """ return thinking chunk if verbose """
         content = chunk.content
         if self.thinking and '</think>' in chunk.content:
@@ -126,6 +145,7 @@ class RenderWindow(PromptManager):
                           highlight=False)
         for chunk in self.llm.stream(prompt):
             chunk = self.reveal_thinking(chunk, self.verbose)
+            chunk = self.if_hiding(chunk, self.verbose)
             yield chunk
 
     def render_footer(self, time_taken: float = 0, **kwargs)->Text:
@@ -188,7 +208,7 @@ class RenderWindow(PromptManager):
                        'pre_process_time': documents['pre_process_time'],
                        'token_count'     : 0}
 
-        start_time = time.time()
+        start_time = 0
         query = Markdown(f'**You:** {documents["user_query"]}\n\n---\n\n')
         with Live(refresh_per_second=20, console=self.console) as live:
             live.console.clear(home=True)
@@ -196,6 +216,8 @@ class RenderWindow(PromptManager):
             self.console.print(f'\nSubmitting {footer_meta["prompt_tokens"]} context tokens to LLM,'
                           ' awaiting repsonse...', style='dim grey37')
             for piece in self.stream_response(documents):
+                if start_time == 0:
+                    start_time = time.time()
                 current_response += piece.content
                 footer_meta['token_count'] += self.response_count(piece.content)
                 response = self.render_chat(current_response)
@@ -211,6 +233,8 @@ class RenderWindow(PromptManager):
                 live.update(rich_content)
 
         # Finish by saving chat history, finding and storing new RAG/Tags
+        current_response += f'meta:\n{self.meta_capture}'
+        self.meta_capture = ''
         self.common.chat_history_session.append(f'DATE TIMESTAMP:{documents["date_time"]}'
                                          f'\nUSER:{documents["user_query"]}\n'
                                          f'AI:{current_response}\n\n')

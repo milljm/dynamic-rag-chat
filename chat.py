@@ -47,6 +47,9 @@ class Chat(PromptManager):
         self.prompts = PromptManager(console, debug=self.debug)
         self.cm = ContextManager(console, self.common, **kwargs)
 
+        if self.debug:
+            self.console.print('[italic dim grey50]Debug mode enabled. I will re-read the '
+                               'prompt files each time[/]\n')
         # Contruct prompts
         self.prompts.build_prompts()
 

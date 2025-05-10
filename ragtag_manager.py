@@ -17,51 +17,28 @@ logging.getLogger("chromadb").setLevel(logging.ERROR)
 class RAGTagManager():
     """
     Dynamic RAG/Tag System
-
-    The idea is to use the responses from the heavy-weight LLM, run it through
-    a series of quick summarization queries with a light-weight 1B parameter LLM
-    to 'tag' things of interest. The hope is that all this information will
-    quickly pool into a tightly aware vector database, the more the heavy weight
-    LLM is used. Each 'tag' will spawn a new RAG (collection), that the
-    pre-conditioner prompt will quickly retrieve and thus, fill our context with
-    **very** relevant data.
-
-    Example: The leight-weight model tagged bob: {bob: is a king}. We are then going
-    to create (or append) to a new collection 'bob', with every thing about said
-    person. Thus eventually pulling in odd information about 'bob' the pre-processor
-    might not have matched.
-
-    {person: is a level 12 ranger...}
-    {location: sumerset isles...}
-    {weird: weird things mentioned about bob here...}
+    capture incomming tags the LLM is producing and convert them into usable
+    key:value pairs.
     """
     def __init__(self, console, common, **kwargs):
         self.console = console
         self.common = common
         self.kwargs = kwargs
         self.debug = kwargs['debug']
-        self.tag_pattern = re.compile(r'{\s*([a-zA-Z0-9_-]+)\s*:\s*([^\}]+)\s*}')
-        self.find_all = re.compile(r'LLM-SAVE:(.*)', re.DOTALL)
-        self.split_pattern = re.compile(r'\s*[;,]\s*')
+        # store all reg in chat_utils...
+        self.meta_data = common.meta_data
+        self.tag_pattern = common.tag_pattern
+        self.meta_iter = common.meta_iter
 
     def find_tags(self, response: str)->list[tuple]:
         """ parse LLMs response for tags """
-        # Match the LLM-SAVE: prefix followed by key:value pairs
-        match = self.find_all.findall(response)
-        if not match:
-            return []  # Return empty list if pattern is not found
-        content = match[0]  # Extract everything after 'LLM-SAVE:'
-        # Split the string by semicolons or commas, allowing optional whitespace
-        parts = self.split_pattern.split(content)
-        result = []
-        for part in parts:
-            if not part.strip():
-                continue  # Skip empty entries
-            key_value = part.split(':', 1)  # Split on the first colon only
-            if len(key_value) == 2:
-                key, value = key_value
-                result.append((key.strip(), value.strip()))
-        return result
+        matches = self.meta_data.findall(response)
+        if matches:
+            group = []
+            for match in matches:
+                group.extend([(m.group(1), m.group(2)) for m in self.meta_iter.finditer(match)])
+            return group
+        return []
 
     def update_rag(self, response, collection: str='ai_documents', debug=False)->None:
         """ regular expression through message and attempt to create key:value tuples """
@@ -75,12 +52,8 @@ class RAGTagManager():
         """Convert content into tags to be used for collection identification."""
         rag_tags = []
         tagging = namedtuple('RAGTAG', ('tag', 'content'))
-        # If the LLM happened to output in actual {key:value} format
         matches = self.tag_pattern.findall(response)
-
-        # Our instructed way laid forth in plot_prompt_system.txt
         matches.extend(self.find_tags(response))
-
         if debug:
             self.console.print(f'RAG/Tag MATCHES:\n{matches}\n\nresponse:'
                                f'\n{response}[END]\n\n', style='color(233)')

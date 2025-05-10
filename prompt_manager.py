@@ -16,9 +16,6 @@ class PromptManager():
           {key : value} pairs become self.key_* : contents-of-file
           filenaming convention: {value}_system.txt / {value}_human.txt
         """
-        if self.debug:
-            self.console.print('[italic dim grey50]Debug mode enabled. I will re-read the '
-                          'prompt files each time[/]\n')
         prompt_files = {
             'pre_prompt':  'pre_conditioner_prompt',
             'tag_prompt': 'tagging_prompt',
