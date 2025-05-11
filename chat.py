@@ -56,6 +56,7 @@ class Chat(PromptManager):
         # Class variables
         self.name = kwargs['name']
         self.verbose = kwargs['verbose']
+        self.chat_sessions = kwargs['chat_sessions']
 
     @staticmethod
     def get_time(tzone):
@@ -96,7 +97,7 @@ class Chat(PromptManager):
         (documents,
             pre_t,
             post_t) = self.cm.handle_context([user_input,
-                                              self.common.chat_history_session[-10:]])
+                      self.common.chat_history_session[-self.chat_sessions:]])
 
         # pylint: disable=consider-using-f-string  # no, this is how it is done
         pre_process_time = '{:.1f}s'.format(time.time() - pre_process_time)
@@ -105,7 +106,7 @@ class Chat(PromptManager):
         documents['llm_prompt'] = self.common.llm_prompt
         documents['user_query'] = user_input
         documents['name'] = self.name
-        documents['chat_history'] = self.common.chat_history_session[-10:]
+        documents['chat_history'] = self.common.chat_history_session[-self.chat_sessions:]
         documents['date_time'] = self.get_time(self.time_zone)
         documents['num_ctx'] = self.num_ctx
         documents['pre_process_time'] = pre_process_time
@@ -213,6 +214,7 @@ See .chat.yaml.example for details.
     host = arg_dict.get('server', 'localhost:11434')
     num_ctx = arg_dict.get('context_window', 2048)
     chat_history = arg_dict.get('chat_history_max', 1000)
+    chat_history_session = arg_dict.get('chat_history_session', 5)
     name = arg_dict.get('name', 'assistant')
     time_zone = arg_dict.get('time_zone', 'GMT')
     debug = arg_dict.get('debug', False)
@@ -247,6 +249,9 @@ See .chat.yaml.example for details.
     parser.add_argument('--chat-history-max', metavar='', nargs='?', dest='chat_max',
                         default=chat_history, type=int,
                         help='Chat history responses to save to disk (default: %(default)s)')
+    parser.add_argument('--chat-history-session', metavar='', nargs='?', dest='chat_sessions',
+                        default=chat_history_session, type=int,
+                        help='Chat history responses availble in context (default: %(default)s)')
     parser.add_argument('--context-window', metavar='', nargs='?', dest='num_ctx',
                         default=num_ctx, type=int,
                         help='the maximum context window size (default: %(default)s)')
