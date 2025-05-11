@@ -199,7 +199,8 @@ class RenderWindow(PromptManager):
     def live_stream(self, documents: dict,
                           token_savings: int,
                           prompt_tokens: int,
-                          cleaned_color: int)->None:
+                          cleaned_color: int,
+                          preprocessing)->None:
         """ Handle the Rich Live updating process """
         current_response = ''
         footer_meta = {'token_savings'   : token_savings,
@@ -213,8 +214,10 @@ class RenderWindow(PromptManager):
         with Live(refresh_per_second=20, console=self.console) as live:
             live.console.clear(home=True)
             live.update(query)
-            self.console.print(f'\nSubmitting {footer_meta["prompt_tokens"]} context tokens to LLM,'
-                          ' awaiting repsonse...', style='dim grey37')
+            self.console.print(f'\nGathered [italic green]{footer_meta["prompt_tokens"]}'
+                               '[/italic green] context tokens (took [italic green]'
+                               f'{preprocessing}[/italic green]). Submitting to LLM, awaiting '
+                               'response...', style='dim grey37')
             for piece in self.stream_response(documents):
                 if start_time == 0:
                     start_time = time.time()

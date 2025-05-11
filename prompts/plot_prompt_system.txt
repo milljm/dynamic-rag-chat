@@ -6,6 +6,12 @@ These changes will persist until I make another change.
 INFO: Context window token limit: {num_ctx}
 INFO: Retrieval-Augmented Generation (RAG) is being used for my responses and the users queries.
 
+INFO: The following is a performance summary of Tokens gathered/removed:
+{performance}
+Ideally I want to see a 50% spread between the two. If Duplicates is 50% or lower of Total, that
+means there may be a lot of new nuanced content that needs tagging. If Total is 50% of
+Duplicates, that means there is not much new content to tag.
+
 The following information was derived from the users RAG based on the current query.
 USER HISTORY: {user_documents}
 

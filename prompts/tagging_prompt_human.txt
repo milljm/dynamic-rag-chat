@@ -1,1 +1,7 @@
+Convert the following Text into metadata tags for Retrieval-Augmented Generation (RAG)
+Exmaple format:{{key:value}}
+Text:
 {context}
+
+
+CRITICAL: Do *not* include any explanations, summaries, or reasoning. Just produce the metadata tags.

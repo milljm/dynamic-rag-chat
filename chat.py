@@ -123,12 +123,10 @@ class Chat(PromptManager):
             performance_summary += f'{k}:{v}\n'
 
         # Supply the LLM with its own performances
-        documents['performance'] = (f'Total tokens gathered from all RAG sources: {pre_t}\n'
-                                    f'Duplicates Removed: {max(0, pre_t - post_t)}\n'
-                                    'Breakdown from each token generating '
-                                    f'source:\n{performance_summary}\n')
+        documents['performance'] = (f'Total Tokens: {prompt_tokens}\n'
+                                    f'Duplicate Tokens removed: {max(0, pre_t - post_t)}')
 
-        return (documents, token_savings, prompt_tokens, cleaned_color)
+        return (documents, token_savings, prompt_tokens, cleaned_color, pre_process_time)
 
     def chat(self):
         """ Prompt the User for questions, and begin! """
@@ -153,24 +151,40 @@ class Chat(PromptManager):
 
                 if user_input.find(r'\no-context') >=0:
                     user_input = user_input.replace('\no-context ', '')
-                    (documents,
-                    token_savings,
-                    prompt_tokens,
-                    cleaned_color) = self.get_documents(user_input)
-                    documents['chat_history'] = []
-                    documents['ai_documents'] = []
-                    documents['user_documents'] = []
-                    documents['history_documents'] = []
+                    documents = {'user_query'      : user_input,
+                                 'name'            : self.name,
+                                 'chat_history'    : '',
+                                 'ai_documents'    : '',
+                                 'user_documents'  : '',
+                                 'date_time'       : self.get_time(self.time_zone),
+                                 'num_ctx'         : self.num_ctx,
+                                 'pre_process_time': '{:.1f}s'.format(0),
+                                 'performance'     : '',
+                                 'llm_prompt'      : ''}
+                    preprocessing = 0
+                    token_savings = 0
+                    cleaned_color = 0
                     prompt_tokens = self.cm.token_retreiver(user_input)
+                    cleaned_color = 0
+                    self.common.heat_map = self.common.create_heatmap(prompt_tokens,
+                                                                      reverse=True)
+                    cleaned_color = [v for k,v in self.common.create_heatmap(prompt_tokens / 4,
+                                                                             reverse=True).items()
+                                                  if k<=token_savings][-1:][0]
                 else:
                     # Grab our lovely context
                     (documents,
                     token_savings,
                     prompt_tokens,
-                    cleaned_color) = self.get_documents(user_input)
+                    cleaned_color,
+                    preprocessing) = self.get_documents(user_input)
 
                 # handoff to rich live
-                self.renderer.live_stream(documents, token_savings, prompt_tokens, cleaned_color)
+                self.renderer.live_stream(documents,
+                                          token_savings,
+                                          prompt_tokens,
+                                          cleaned_color,
+                                          preprocessing)
 
         except KeyboardInterrupt:
             sys.exit()

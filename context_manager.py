@@ -56,13 +56,10 @@ class ContextManager(PromptManager):
         prompts = self.prompts
         pre_llm = OllamaModel(self.host)
         # pylint: disable=no-member # dynamic prompts (see self.__build_prompts)
-        system_prompt = (prompts.get_prompt(f'{prompts.tag_prompt_file}_system.txt')
-                            if self.debug else prompts.tag_prompt_system)
         human_prompt = (prompts.get_prompt(f'{prompts.tag_prompt_file}_human.txt')
                         if self.debug else prompts.tag_prompt_human)
         # pylint: enable=no-member
         prompt_template = ChatPromptTemplate.from_messages([
-                    ("system", system_prompt),
                     ("human", human_prompt)
                 ])
         prompt = prompt_template.format_messages(context=query)
@@ -98,11 +95,11 @@ class ContextManager(PromptManager):
             if meta_data.tag in ['time', 'date']:
                 continue
             meta = dict({meta_data.tag:meta_data.content})
-            # this will be the most pertinent information, so grab a ton of data
+            # this will be the most pertinent information
             documents.extend(self.rag.retrieve_data(query,
                                                     collection,
                                                     meta_data=meta,
-                                                    matches=max(1, int(self.matches*2))))
+                                                    matches=self.matches))
 
             # relax the matches for trival meta_data content. May bring in some other nuance
             documents.extend(self.rag.retrieve_data(meta_data.content,
@@ -117,7 +114,7 @@ class ContextManager(PromptManager):
         if direction == 'query':
             pre_tokens = 0
             post_tokens = 0
-            collection_list = ['ai_documents', 'user_documents', 'history_documents']
+            collection_list = ['ai_documents', 'user_documents']
             documents = {key: [] for key in collection_list}
 
             # Try to tagify the users query and the last response from the llm
@@ -126,7 +123,8 @@ class ContextManager(PromptManager):
             tags = []
             if data_set:
                 (_, tags) = self.pre_processor(self.common.stringify_lists(data_set))
-
+                if self.debug:
+                    self.console.print(f'TAG RETREIVAL:\n{tags}\n\n')
             for data in data_set:
                 if not data:
                     continue
