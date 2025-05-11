@@ -137,8 +137,8 @@ class Chat(PromptManager):
         def _(event):
             buffer = event.current_buffer
             buffer.insert_text('\n')
-        console.print("💬 Press [italic grey100]Esc+Enter[/italic grey100] to send"
-                      " (multi-line, copy/paste safe) [italic grey100]Ctrl+C[/italic grey100]"
+        console.print("💬 Press [italic red]Esc+Enter[/italic red] to send"
+                      " (multi-line, copy/paste safe) [italic red]Ctrl+C[/italic red]"
                       " to quit.\n")
         try:
             while True:

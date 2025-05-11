@@ -71,13 +71,13 @@ class RenderWindow(PromptManager):
         """ hide meta tags from user (unless in verbose mode) """
         if verbose:
             return chunk
-        content = chunk.content
+        content = str(chunk.content)
         if self.meta_hiding:
-            if content in ['>', ')']:
+            if content.find('>') >= 0 or content.find(')') >= 0:
                 self.meta_hiding = False
             self.meta_capture += content
             chunk.content = ''
-        elif content in ['(meta','<meta']:
+        elif content.find('(meta') >= 0 or content.find('<meta') >= 0:
             self.meta_hiding = True
             self.meta_capture = content
             chunk.content = ''
