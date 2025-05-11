@@ -145,12 +145,28 @@ class Chat(PromptManager):
                 user_input = session.prompt(">>> ", multiline=True, key_bindings=kb).strip()
                 if not user_input:
                     continue
+                if user_input == r'\?':
+                    console.print('in-command switches you can use:\n\n\t\\no-context '
+                                  '[italic]msg[/italic] (perform a query with no context)')
+                    continue
 
-                # Grab our lovely context
-                (documents,
-                 token_savings,
-                 prompt_tokens,
-                 cleaned_color) = self.get_documents(user_input)
+                if user_input.find(r'\no-context') >=0:
+                    user_input = user_input.replace('\no-context ', '')
+                    (documents,
+                    token_savings,
+                    prompt_tokens,
+                    cleaned_color) = self.get_documents(user_input)
+                    documents['chat_history'] = []
+                    documents['ai_documents'] = []
+                    documents['user_documents'] = []
+                    documents['history_documents'] = []
+                    prompt_tokens = self.cm.token_retreiver(user_input)
+                else:
+                    # Grab our lovely context
+                    (documents,
+                    token_savings,
+                    prompt_tokens,
+                    cleaned_color) = self.get_documents(user_input)
 
                 # handoff to rich live
                 self.renderer.live_stream(documents, token_savings, prompt_tokens, cleaned_color)

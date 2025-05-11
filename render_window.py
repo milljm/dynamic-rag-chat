@@ -233,7 +233,7 @@ class RenderWindow(PromptManager):
                 live.update(rich_content)
 
         # Finish by saving chat history, finding and storing new RAG/Tags
-        current_response += f'meta:\n{self.meta_capture}'
+        current_response += f'{self.meta_capture}'
         self.meta_capture = ''
         self.common.chat_history_session.append(f'DATE TIMESTAMP:{documents["date_time"]}'
                                          f'\nUSER:{documents["user_query"]}\n'
