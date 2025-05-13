@@ -35,7 +35,7 @@ class RenderWindow(PromptManager):
         self.model_re = re.compile(r'(\w+)\W+')
         self.common = common_utils
         self.cm = ContextManager(console, self.common, **kwargs)
-        self.prompts = PromptManager(console, debug=self.debug)
+        self.prompts = PromptManager(console, model=self.model, debug=self.debug)
         self.llm = ChatOllama(base_url=self.host,
                               model=self.model,
                               temperature=1.0,

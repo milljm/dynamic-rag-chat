@@ -22,7 +22,7 @@ class ContextManager(PromptManager):
         super().__init__(console)
         self.console = console
         self.common = common
-        self.prompts = PromptManager(console, debug=self.debug)
+        self.prompts = PromptManager(console, model=kwargs['model'], debug=self.debug)
         self.rag = RAG(console, self.common, **kwargs)
         self.rag_tagger = RAGTagManager(console, self.common, **kwargs)
         self.host = kwargs['host']

@@ -4,28 +4,35 @@ import sys
 current_dir = os.path.dirname(os.path.abspath(__file__))
 class PromptManager():
     """ Handle all the possible prompt files we may introduce with RAG/Tagging """
-    def __init__(self, console, debug=False):
+    def __init__(self, console, model: str = 'default', debug=False):
         self.console = console
         self.debug = debug
+        self.model = self._match_model(model)
+
+    @staticmethod
+    def _match_model(model: str)->str:
+        """ attempt to match model, default to 'default' """
+        supported = ['gemma', 'llama', 'qwen']
+        return next((x for x in supported if x in model.lower()), 'default')
 
     def build_prompts(self):
         """
-        A way to manage a growing number of prompt templates dynamic RAG/Tagging
-        might introduce...
-
-          {key : value} pairs become self.key_* : contents-of-file
-          filenaming convention: {value}_system.txt / {value}_human.txt
+        A way to manage a growing number of prompt templates
+        {key : value} pairs become self.key_* : contents-of-file
+        filenaming convention: {value}_{model}_system.txt / {value}_{model}_human.txt
         """
         prompt_files = {
             'pre_prompt':  'pre_conditioner_prompt',
-            'tag_prompt': 'tagging_prompt',
+            'tag_prompt':  'tagging_prompt',
             'plot_prompt': 'plot_prompt'
         }
         for prompt_key, prompt_base in prompt_files.items():
             prompt_dir = os.path.join('prompts', prompt_base)
             setattr(self, f'{prompt_key}_file', os.path.join(current_dir, prompt_dir))
-            setattr(self, f'{prompt_key}_system', self.get_prompt(f'{prompt_dir}_system.txt'))
-            setattr(self, f'{prompt_key}_human', self.get_prompt(f'{prompt_dir}_human.txt'))
+            setattr(self, f'{prompt_key}_system',
+                    self.get_prompt(f'{prompt_dir}_{self.model}_system.txt'))
+            setattr(self, f'{prompt_key}_human',
+                    self.get_prompt(f'{prompt_dir}_{self.model}_human.txt'))
 
     def get_prompt(self, path):
         """ Keep the prompts as files for easier manipulation """

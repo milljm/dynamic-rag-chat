@@ -1,0 +1,3 @@
+Adjust the information density accordingly. If it's a question, answer it clearly. If it's a comment or thought, offer a thoughtful reply. Use any context provided.
+
+User input: {user_query}

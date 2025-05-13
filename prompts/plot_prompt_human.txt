@@ -1,1 +1,0 @@
-Using context from my system prompt, answer the users question. Or comment on the users query if there is no question:\[{user_query}]

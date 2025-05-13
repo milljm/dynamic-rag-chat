@@ -44,7 +44,7 @@ class Chat(PromptManager):
         self.time_zone = kwargs['time_zone']
         self.common = CommonUtils(console, **kwargs)
         self.renderer = RenderWindow(console, self.common, **kwargs)
-        self.prompts = PromptManager(console, debug=self.debug)
+        self.prompts = PromptManager(console, model=self.model, debug=self.debug)
         self.cm = ContextManager(console, self.common, **kwargs)
 
         if self.debug:
