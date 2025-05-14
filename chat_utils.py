@@ -24,6 +24,7 @@ class CommonUtils():
         self.meta_data = re.compile(r'(?<=[<m]eta_tags: ).*?(?=[>)])', re.DOTALL)
         self.tag_pattern = re.compile(r'\s*"([^"]+)"\s*:\s*"([^"]+)"(?:,\s*)?', re.DOTALL)
         self.meta_iter = re.compile(r'(\w+):\s*([^;]*)')
+        self.json_style = re.compile(r'```json(.*)```', re.DOTALL)
 
     @staticmethod
     def stringify_lists(nested_list)->str:

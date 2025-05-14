@@ -73,14 +73,14 @@ class RenderWindow(PromptManager):
             return chunk
         content = str(chunk.content)
         if self.meta_hiding:
-            if content.find('>') >= 0 or content.find(')') >= 0:
+            if content.find('>') != -1:
                 self.meta_hiding = False
             self.meta_capture += content
             chunk.content = ''
-        elif content.find('(meta') >= 0 or content.find('<meta') >= 0:
+        elif content.find('<meta') != -1:
             self.meta_hiding = True
             self.meta_capture = content
-            chunk.content = ''
+            chunk.content = '*Meta Tagging...*'
         return chunk
 
     def reveal_thinking(self, chunk, show: bool = False)->object:

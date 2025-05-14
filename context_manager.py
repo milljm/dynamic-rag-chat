@@ -22,13 +22,16 @@ class ContextManager(PromptManager):
         super().__init__(console)
         self.console = console
         self.common = common
-        self.prompts = PromptManager(console, model=kwargs['model'], debug=self.debug)
         self.rag = RAG(console, self.common, **kwargs)
         self.rag_tagger = RAGTagManager(console, self.common, **kwargs)
         self.host = kwargs['host']
         self.matches = kwargs['matches']
         self.preconditioner = kwargs['preconditioner']
         self.debug = kwargs['debug']
+        self.name = kwargs['name']
+        self.prompts = PromptManager(self.console,
+                                     model=self.preconditioner,
+                                     debug=self.debug)
         self.prompts.build_prompts()
 
     @staticmethod
@@ -49,12 +52,12 @@ class ContextManager(PromptManager):
         text = re.sub(r'[^\w\s]', '', text)
         return ' '.join(text.lower().split())
 
-    def pre_processor(self, query)->tuple[str,list[namedtuple]]:
+    def pre_processor(self, query)->tuple[str,list[tuple]]:
         """
         lightweight LLM as a tagging pre-processor
         """
-        prompts = self.prompts
         pre_llm = OllamaModel(self.host)
+        prompts = self.prompts
         # pylint: disable=no-member # dynamic prompts (see self.__build_prompts)
         human_prompt = (prompts.get_prompt(f'{prompts.tag_prompt_file}_human.txt')
                         if self.debug else prompts.tag_prompt_human)
@@ -80,31 +83,78 @@ class ContextManager(PromptManager):
                          kwargs={'debug': self.debug},
                          daemon=True).start()
 
+    def build_filter(
+        self,
+        tags: list[tuple[str, str]],
+        skip_fields: set[str] = None,
+        composite_fields: set[str] = None,
+        multi_delimiters: str = ",/",
+        **field_overrides
+    ) -> dict | None:
+        """
+        Build a ChromaDB-compatible filter from a list of (tag, value) tuples.
+        Supports composite fields (slash-separated), multi-fragment fields (comma-separated),
+        and custom per-field logic via kwargs.
+
+        Params:
+            tags: list of (tag, value)
+            skip_fields: tags to exclude (e.g., time, date)
+            composite_fields: treat these as hierarchical (e.g., "combat/melee")
+            multi_delimiters: delimiters that indicate multi-value fragments
+            field_overrides: optional mapping of tag -> {"type": "composite"|"multi"|"exact"}
+
+        Returns:
+            dict filter or None
+        """
+        if skip_fields is None:
+            skip_fields = {"time", "date"}
+        if composite_fields is None:
+            composite_fields = {"focus", "tone"}
+
+        conditions = []
+        delimiters = set(multi_delimiters)
+
+        for tag, value in tags:
+            # Skip unwanted fields or self-referential tags
+            if tag in skip_fields or self.name in value:
+                continue
+
+            # Field behavior override
+            field_type = field_overrides.get(tag, {}).get("type")
+
+            # Composite fields like "combat/melee"
+            if field_type == "composite" or (tag in composite_fields and '/' in value):
+                parts = [p.strip() for p in value.split('/')]
+                expanded = ["/".join(parts[:i]) for i in range(1, len(parts) + 1)]
+                conditions.append({tag: {"$in": expanded}})
+
+            # Multi-value fields (comma-separated, slash fallback)
+            elif field_type == "multi" or any(d in value for d in delimiters):
+                for d in delimiters:
+                    value = value.replace(d, ',')
+                fragments = [v.strip() for v in value.split(',') if v.strip()]
+                conditions.append({tag: {"$in": fragments}})
+
+            # Simple exact match
+            else:
+                conditions.append({tag: value})
+
+        return {"$and": conditions} if conditions else None
+
     def gather_context(self, query: str,
                              collection: str,
-                             tags: list)->list[Document]:
+                             tags: list[tuple[str,str]])->list[Document]:
         """
-        perform gathering routines based on incoming collection
+        Perform metadata field filtering matching
         """
         _tmp = namedtuple('Document', ('page_content'))
         documents = [_tmp('')]
-        # Search for 'important' tags, and query those collections for 'data'
-        # This is going to be highly relevant data, so expand the matches x4
-        for meta_data in tags:
-            # Things we don't want to drag from the RAG, as every response contains a timestamp.
-            if meta_data.tag in ['time', 'date']:
-                continue
-            meta = dict({meta_data.tag:meta_data.content})
-            # this will be the most pertinent information
-            documents.extend(self.rag.retrieve_data(query,
-                                                    collection,
-                                                    meta_data=meta,
-                                                    matches=self.matches))
-
-            # relax the matches for trival meta_data content. May bring in some other nuance
-            documents.extend(self.rag.retrieve_data(meta_data.content,
-                                                    collection,
-                                                    matches=(max(1, int(self.matches/4)))))
+        # Combined filter retrieval (highly relevant information)
+        _meta = self.build_filter(tags)
+        documents.extend(self.rag.retrieve_data(query,
+                                                collection,
+                                                meta_data=_meta,
+                                                matches=self.matches))
         return documents
 
     def handle_context(self, data_set: list,
@@ -116,26 +166,19 @@ class ContextManager(PromptManager):
             post_tokens = 0
             collection_list = ['ai_documents', 'user_documents']
             documents = {key: [] for key in collection_list}
-
-            # Try to tagify the users query and the last response from the llm
-            # placing the users query last so it has precedence (last has more
-            # priority with LLMs)
-            tags = []
             if data_set:
-                (_, tags) = self.pre_processor(self.common.stringify_lists(data_set))
+                query = self.common.stringify_lists(data_set[0])
+                # Try to tagify the users query
+                (_, tags) = self.pre_processor(query)
                 if self.debug:
                     self.console.print(f'TAG RETREIVAL:\n{tags}\n\n')
-            for data in data_set:
-                if not data:
-                    continue
-                query = self.common.stringify_lists(data) # lists -> strings (in case its not)
-                storage = []
                 for collection in collection_list:
-                    # General RAG retreival on default collections
+                    storage = []
+                    # General RAG retreival without field filter based solely on query
                     storage.extend(self.rag.retrieve_data(query,
                                                           collection,
-                                                          matches=max(1, int(self.matches/4))))
-                    # Extensive RAG retreival
+                                                          matches=int(max(1, self.matches/4))))
+                    # Extensive RAG retreival (create field filter dictionary, highly relevant)
                     storage.extend(self.gather_context(query,
                                                        collection,
                                                        tags))
@@ -144,15 +187,15 @@ class ContextManager(PromptManager):
                     for page in pages:
                         pre_tokens += self.token_retreiver(page)
 
-                    # Put it together, removing duplicates, then back to strings again
+                    # Remove duplicates RAG matches
                     documents[collection] = (list(set(pages)))
 
                     # Record post-token counts
                     for page in documents[collection]:
                         post_tokens += self.token_retreiver(page)
 
-                    if self.debug:
-                        self.console.print(f'CONTEXT RETRIEVAL:\n{documents}\n\n')
+                if self.debug:
+                    self.console.print(f'CONTEXT RETRIEVAL:\n{documents}\n\n')
 
             # Store the users query to their RAG, now that we are done pre-processing
             # (so as not to bring back identical information in their query)

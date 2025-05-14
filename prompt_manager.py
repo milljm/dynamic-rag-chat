@@ -19,20 +19,20 @@ class PromptManager():
         """
         A way to manage a growing number of prompt templates
         {key : value} pairs become self.key_* : contents-of-file
-        filenaming convention: {value}_{model}_system.txt / {value}_{model}_human.txt
+        filenaming convention: {value}_system.txt / {value}_human.txt
         """
         prompt_files = {
-            'pre_prompt':  'pre_conditioner_prompt',
-            'tag_prompt':  'tagging_prompt',
-            'plot_prompt': 'plot_prompt'
+            'pre_prompt'  :f'pre_conditioner_prompt_{self.model}',
+            'tag_prompt'  :f'tagging_prompt_{self.model}',
+            'plot_prompt' :f'plot_prompt_{self.model}'
         }
         for prompt_key, prompt_base in prompt_files.items():
             prompt_dir = os.path.join('prompts', prompt_base)
             setattr(self, f'{prompt_key}_file', os.path.join(current_dir, prompt_dir))
             setattr(self, f'{prompt_key}_system',
-                    self.get_prompt(f'{prompt_dir}_{self.model}_system.txt'))
+                    self.get_prompt(f'{prompt_dir}_system.txt'))
             setattr(self, f'{prompt_key}_human',
-                    self.get_prompt(f'{prompt_dir}_{self.model}_human.txt'))
+                    self.get_prompt(f'{prompt_dir}_human.txt'))
 
     def get_prompt(self, path):
         """ Keep the prompts as files for easier manipulation """

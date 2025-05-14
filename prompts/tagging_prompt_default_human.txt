@@ -1,7 +1,32 @@
-Convert the following Text into metadata tags for Retrieval-Augmented Generation (RAG)
-Exmaple format:{{key:value}}
+Convert the following Text into structured metadata tags for Retrieval‑Augmented Generation (RAG).
+
+Output JSON schema:
+{{
+  "tone": string,        // e.g., enthusiastic, calm
+  "emotion": string,     // e.g., curious, excited
+  "focus": string,       // e.g., conversation building, character description
+  "entity": [string],    // list of any names mentioned
+  "location": [string],  // list of places
+  "gear": [string],      // list of classes/items (e.g., fighter, rogue, sword)
+  "weather": string      // single description or "null"
+}}
+
+Rules:
+• Always output exactly these keys.
+• Use [] for zero or more values, and "" or null for empties.
+• Do *not* emit any extra fields or prose—just the JSON object.
+
+Example:
+Text: "The elf scouts ahead with bow drawn under a pale moon. Her name is Elira."
+{{
+  "tone": "calm",
+  "emotion": "focused",
+  "focus": "scouting",
+  "entity": ["elf", "Elira"],
+  "location": [],
+  "gear": ["bow"],
+  "weather": "clear"
+}}
+
 Text:
 {context}
-
-
-CRITICAL: Do *not* include any explanations, summaries, or reasoning. Just produce the metadata tags.

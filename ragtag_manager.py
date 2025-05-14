@@ -4,6 +4,7 @@ RAGTagManager aims at handling the RAGs and the Collection(s) process (tagging)
 import sys
 import re
 import logging
+import json
 from collections import namedtuple
 import pypdf # for error handling of PyPDFLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
@@ -29,6 +30,7 @@ class RAGTagManager():
         self.meta_data = common.meta_data
         self.tag_pattern = common.tag_pattern
         self.meta_iter = common.meta_iter
+        self.json_style = common.json_style
 
     def find_tags(self, response: str)->list[tuple]:
         """ parse LLMs response for tags """
@@ -54,6 +56,23 @@ class RAGTagManager():
         tagging = namedtuple('RAGTAG', ('tag', 'content'))
         matches = self.tag_pattern.findall(response)
         matches.extend(self.find_tags(response))
+        try:
+            j_matches = []
+            for k, v in list(json.loads(self.json_style.search(response)[1]).items()):
+                if isinstance(v, list):
+                    j_matches.append((k, ','.join(v)))
+                    continue
+                j_matches.append((k,v))
+            for k, j_match in enumerate(j_matches):
+                if not j_match[1] or j_match[1].lower() in ['none', 'null']:
+                    continue
+                matches.append(j_match)
+        except json.decoder.JSONDecodeError:
+            pass
+        except IndexError:
+            pass
+        except TypeError:
+            pass
         if debug:
             self.console.print(f'RAG/Tag MATCHES:\n{matches}\n\nresponse:'
                                f'\n{response}[END]\n\n', style='color(233)')
@@ -132,12 +151,11 @@ class RAG():
     def store_data(self, data,
                          tags_metadata: list[namedtuple] = None,
                          collection: str = 'ai_documents',
-                         chunk_size=200, chunk_overlap=100)->None:
+                         chunk_size=100, chunk_overlap=50)->None:
         """ store data into the RAG """
-        meta_dict = {}
-        if tags_metadata:
-            for tag in tags_metadata:
-                meta_dict[tag.tag] = tag.content
+        if tags_metadata is None:
+            tags_metadata = {}
+        meta_dict = dict(tags_metadata)
         doc = Document(page_content=data, metadata=meta_dict)
         splitter = RecursiveCharacterTextSplitter(chunk_size=chunk_size,
                                                   chunk_overlap=chunk_overlap)
@@ -145,7 +163,7 @@ class RAG():
         chroma = self._get_embeddings(collection)
         chroma.add_documents(docs)
         if self.debug:
-            self.console.print(f'CHUNKS STORED TO collection:{collection}: {len(docs)} '
+            self.console.print(f'CHUNKS STORED TO COLLECTION:{collection}: {len(docs)} '
                                f'/ chunk size {chunk_size} '
                                f'/ olverlap {chunk_overlap} '
                                f'meta_data: {meta_dict}'

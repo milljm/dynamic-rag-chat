@@ -25,38 +25,32 @@ from prompt_toolkit import PromptSession
 from prompt_toolkit.key_binding import KeyBindings
 from context_manager import ContextManager
 from ragtag_manager import RAG
-from prompt_manager import PromptManager
 from render_window import RenderWindow
 from chat_utils import CommonUtils
 console = Console(highlight=True)
 current_dir = os.path.dirname(os.path.abspath(__file__))
 
 # pylint: disable=too-many-instance-attributes
-class Chat(PromptManager):
+class Chat():
     """ Begin initializing variables classes. Call .chat() to begin """
     def __init__(self, **kwargs):
-        super().__init__(console)
+        #super().__init__(console)
         self.debug = kwargs['debug']
         self.host = kwargs['host']
         self.model = kwargs['model']
-
         self.num_ctx = kwargs['num_ctx']
         self.time_zone = kwargs['time_zone']
         self.common = CommonUtils(console, **kwargs)
         self.renderer = RenderWindow(console, self.common, **kwargs)
-        self.prompts = PromptManager(console, model=self.model, debug=self.debug)
         self.cm = ContextManager(console, self.common, **kwargs)
-
-        if self.debug:
-            self.console.print('[italic dim grey50]Debug mode enabled. I will re-read the '
-                               'prompt files each time[/]\n')
-        # Contruct prompts
-        self.prompts.build_prompts()
 
         # Class variables
         self.name = kwargs['name']
         self.verbose = kwargs['verbose']
         self.chat_sessions = kwargs['chat_sessions']
+        if self.debug:
+            console.print('[italic dim grey50]Debug mode enabled. I will re-read the '
+                               'prompt files each time[/]\n')
 
     @staticmethod
     def get_time(tzone):
@@ -82,9 +76,9 @@ class Chat(PromptManager):
 
         # Set timers, and completion token counter, colors...
         self.common.heat_map = self.common.create_heatmap(tokens, reverse=True)
-        cleaned_color = [v for k,v in self.common.create_heatmap(tokens / 4,
-                                                          reverse=True).items()
-                            if k<=token_reduction][-1:][0]
+        cleaned_color = [v for k,v in
+                         self.common.create_heatmap(tokens / 4).items()
+                         if k<=token_reduction][-1:][0]
 
         return (tokens, cleaned_color)
 
@@ -151,11 +145,13 @@ class Chat(PromptManager):
 
                 if user_input.find(r'\no-context') >=0:
                     user_input = user_input.replace('\no-context ', '')
+                    # pylint: disable=consider-using-f-string  # no, this is how it is done
                     documents = {'user_query'      : user_input,
                                  'name'            : self.name,
                                  'chat_history'    : '',
                                  'ai_documents'    : '',
                                  'user_documents'  : '',
+                                 'context'         : '',
                                  'date_time'       : self.get_time(self.time_zone),
                                  'num_ctx'         : self.num_ctx,
                                  'pre_process_time': '{:.1f}s'.format(0),
@@ -168,9 +164,9 @@ class Chat(PromptManager):
                     cleaned_color = 0
                     self.common.heat_map = self.common.create_heatmap(prompt_tokens,
                                                                       reverse=True)
-                    cleaned_color = [v for k,v in self.common.create_heatmap(prompt_tokens / 4,
-                                                                             reverse=True).items()
-                                                  if k<=token_savings][-1:][0]
+                    cleaned_color = [v for k,v in
+                                     self.common.create_heatmap(prompt_tokens / 4).items()
+                                     if k<=token_savings][-1:][0]
                 else:
                     # Grab our lovely context
                     (documents,
