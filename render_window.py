@@ -80,7 +80,7 @@ class RenderWindow(PromptManager):
         elif content.find('<meta') != -1:
             self.meta_hiding = True
             self.meta_capture = content
-            chunk.content = '*Meta Tagging...*'
+            chunk.content = ''
         return chunk
 
     def reveal_thinking(self, chunk, show: bool = False)->object:
@@ -136,7 +136,10 @@ class RenderWindow(PromptManager):
             ])
 
         if self.debug:
-            self.console.print(f'LLM DOCUMENTS: {documents.keys()}\n{documents["performance"]}\n')
+            self.console.print(f'LLM DOCUMENTS: {documents.keys()}\n'
+                               f'{documents["performance"]}\n',
+                               style='color(233)',
+                               highlight=False)
         prompt = prompt_template.format_messages(**documents)
         # pylint: enable=no-member
         if self.debug:

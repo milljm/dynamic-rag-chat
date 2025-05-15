@@ -34,7 +34,6 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 class Chat():
     """ Begin initializing variables classes. Call .chat() to begin """
     def __init__(self, **kwargs):
-        #super().__init__(console)
         self.debug = kwargs['debug']
         self.host = kwargs['host']
         self.model = kwargs['model']
@@ -220,7 +219,7 @@ See .chat.yaml.example for details.
     preconditioner = arg_dict.get('pre_llm', 'gemma-3-1B-it-QAT-Q4_0')
     embeddings = arg_dict.get('embedding_llm', 'nomic-embed-text-v1.5.f16')
     vector_dir = arg_dict.get('history_dir', None)
-    matches = int(arg_dict.get('history_matches', 10))
+    matches = int(arg_dict.get('history_matches', 5)) # 5 from each RAG (User & AI)
     host = arg_dict.get('server', 'localhost:11434')
     num_ctx = arg_dict.get('context_window', 2048)
     chat_history = arg_dict.get('chat_history_max', 1000)

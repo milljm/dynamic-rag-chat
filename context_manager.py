@@ -9,29 +9,31 @@ being supplied to the LLM. It utilizing several methods:
 import re
 import os
 import threading
-from collections import namedtuple
 from langchain.schema import Document
 from langchain.prompts import ChatPromptTemplate
-from ragtag_manager import RAGTagManager, RAG
+from ragtag_manager import RAGTagManager, RAG, RAGTag
 from ollama_model import OllamaModel
 from prompt_manager import PromptManager
+from filter_builder import FilterBuilder
 current_dir = os.path.dirname(os.path.abspath(__file__))
+
 class ContextManager(PromptManager):
     """ A collection of methods aimed at producing/reducing the context """
     def __init__(self, console, common, **kwargs):
         super().__init__(console)
         self.console = console
         self.common = common
-        self.rag = RAG(console, self.common, **kwargs)
-        self.rag_tagger = RAGTagManager(console, self.common, **kwargs)
         self.host = kwargs['host']
         self.matches = kwargs['matches']
         self.preconditioner = kwargs['preconditioner']
         self.debug = kwargs['debug']
         self.name = kwargs['name']
+        self.rag = RAG(console, self.common, **kwargs)
+        self.rag_tagger = RAGTagManager(console, self.common, **kwargs)
         self.prompts = PromptManager(self.console,
                                      model=self.preconditioner,
                                      debug=self.debug)
+        self.filter_builder = FilterBuilder()
         self.prompts.build_prompts()
 
     @staticmethod
@@ -52,7 +54,7 @@ class ContextManager(PromptManager):
         text = re.sub(r'[^\w\s]', '', text)
         return ' '.join(text.lower().split())
 
-    def pre_processor(self, query)->tuple[str,list[tuple]]:
+    def pre_processor(self, query)->tuple[str,list[RAGTag]]:
         """
         lightweight LLM as a tagging pre-processor
         """
@@ -141,20 +143,25 @@ class ContextManager(PromptManager):
 
         return {"$and": conditions} if conditions else None
 
+    @staticmethod
+    def clean_tags(tags: list[RAGTag]) -> list[RAGTag]:
+        """ clean filters """
+        return [ tag for tag in tags if tag.content and
+                 tag.content.lower() not in {'null', 'none', ''} and
+                 not any(char in tag.content for char in [';)', "I'd say!"])]
+
     def gather_context(self, query: str,
                              collection: str,
-                             tags: list[tuple[str,str]])->list[Document]:
+                             tags: list[RAGTag[str,str]])->list[Document]:
         """
         Perform metadata field filtering matching
         """
-        _tmp = namedtuple('Document', ('page_content'))
-        documents = [_tmp('')]
+        filter_dict = self.filter_builder.build(tags)
         # Combined filter retrieval (highly relevant information)
-        _meta = self.build_filter(tags)
-        documents.extend(self.rag.retrieve_data(query,
-                                                collection,
-                                                meta_data=_meta,
-                                                matches=self.matches))
+        documents = self.rag.retrieve_data(query,
+                                           collection,
+                                           meta_data=filter_dict,
+                                           matches=self.matches)
         return documents
 
     def handle_context(self, data_set: list,
@@ -169,19 +176,28 @@ class ContextManager(PromptManager):
             if data_set:
                 query = self.common.stringify_lists(data_set[0])
                 # Try to tagify the users query
-                (_, tags) = self.pre_processor(query)
+                (_, meta_tags) = self.pre_processor(query)
                 if self.debug:
-                    self.console.print(f'TAG RETREIVAL:\n{tags}\n\n')
+                    self.console.print(f'TAG RETREIVAL:\n{meta_tags}\n\n',
+                                       style='color(233)',
+                                       highlight=False)
                 for collection in collection_list:
                     storage = []
-                    # General RAG retreival without field filter based solely on query
-                    storage.extend(self.rag.retrieve_data(query,
-                                                          collection,
-                                                          matches=int(max(1, self.matches/4))))
-                    # Extensive RAG retreival (create field filter dictionary, highly relevant)
+                    # Extensive RAG retreival: field filter dictionary, highly relevant
                     storage.extend(self.gather_context(query,
                                                        collection,
-                                                       tags))
+                                                       meta_tags))
+
+                    # General RAG retreival: if Extensive retrieval above is low, figure the
+                    # difference of allowed maximum, and use that number for matches without
+                    # field filter searches
+                    balance = self.matches - len(storage)
+                    if self.debug:
+                        self.console.print(f'BALANCE: {balance}', style='color(233)')
+                    storage.extend(self.rag.retrieve_data(query,
+                                                          collection,
+                                                          matches=int(max(1, balance))))
+
                     # Record pre-token counts
                     pages = list(map(lambda doc: doc.page_content, storage))
                     for page in pages:
@@ -195,17 +211,19 @@ class ContextManager(PromptManager):
                         post_tokens += self.token_retreiver(page)
 
                 if self.debug:
-                    self.console.print(f'CONTEXT RETRIEVAL:\n{documents}\n\n')
+                    self.console.print(f'CONTEXT RETRIEVAL:\n{documents}\n\n',
+                                       style='color(233)',
+                                       highlight=False)
 
             # Store the users query to their RAG, now that we are done pre-processing
             # (so as not to bring back identical information in their query)
             # A little unorthodox, but the first item in the list is ther user's query
             self.rag.store_data(self.common.stringify_lists(data_set[0]),
+                                tags_metadata=meta_tags,
                                 collection='user_documents',
                                 chunk_size=100,
                                 chunk_overlap=50)
             # Return data collected
             return (documents, pre_tokens, post_tokens)
         # Store data (non-blocking)
-        #self.rag_tagger.update_rag(str(data_set[0]))
         return self.post_process(data_set[0])

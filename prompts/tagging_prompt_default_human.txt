@@ -1,23 +1,27 @@
-Convert the following Text into structured metadata tags for Retrieval‑Augmented Generation (RAG).
+You are an expert metadata extractor.
 
-Output JSON schema:
+Your task is to read the following text and extract a fixed set of metadata fields into a JSON object.
+
+⚠️ Rules:
+- Output exactly this JSON schema. Do not add or remove any fields.
+- Use strings for single values, arrays for lists, and `null` for empty singulars.
+- No explanations. No extra prose. Output JSON only.
+
+🧾 JSON Output Format:
 {{
-  "tone": string,        // e.g., enthusiastic, calm
-  "emotion": string,     // e.g., curious, excited
-  "focus": string,       // e.g., conversation building, character description
-  "entity": [string],    // list of any names mentioned
-  "location": [string],  // list of places
-  "gear": [string],      // list of classes/items (e.g., fighter, rogue, sword)
-  "weather": string      // single description or "null"
+  "tone": string,        // e.g., "enthusiastic", "calm"
+  "emotion": string,     // e.g., "curious", "excited"
+  "focus": string,       // e.g., "conversation building", "character description"
+  "entity": [string],    // list of any names or people mentioned
+  "location": [string],  // list of places or world locations
+  "gear": [string],      // list of classes, weapons, or items (e.g., "fighter", "sword")
+  "weather": string|null // simple description (e.g., "stormy") or null
 }}
 
-Rules:
-• Always output exactly these keys.
-• Use [] for zero or more values, and "" or null for empties.
-• Do *not* emit any extra fields or prose—just the JSON object.
-
-Example:
+Example Input:
 Text: "The elf scouts ahead with bow drawn under a pale moon. Her name is Elira."
+
+Example Output:
 {{
   "tone": "calm",
   "emotion": "focused",
@@ -27,6 +31,10 @@ Text: "The elf scouts ahead with bow drawn under a pale moon. Her name is Elira.
   "gear": ["bow"],
   "weather": "clear"
 }}
+
+---
+
+Now, extract metadata from this input:
 
 Text:
 {context}

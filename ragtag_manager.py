@@ -5,7 +5,7 @@ import sys
 import re
 import logging
 import json
-from collections import namedtuple
+from typing import NamedTuple
 import pypdf # for error handling of PyPDFLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.schema import Document
@@ -14,6 +14,14 @@ from langchain_ollama import OllamaEmbeddings
 from langchain_chroma import Chroma
 # Silence initial RAG database being empty
 logging.getLogger("chromadb").setLevel(logging.ERROR)
+
+class RAGTag(NamedTuple):
+    """
+    namedtuple class constructor
+      RAGTag(tag: str, content: str)
+    """
+    tag: str
+    content: str
 
 class RAGTagManager():
     """
@@ -28,58 +36,57 @@ class RAGTagManager():
         self.debug = kwargs['debug']
         # store all reg in chat_utils...
         self.meta_data = common.meta_data
-        self.tag_pattern = common.tag_pattern
         self.meta_iter = common.meta_iter
         self.json_style = common.json_style
 
-    def find_tags(self, response: str)->list[tuple]:
-        """ parse LLMs response for tags """
-        matches = self.meta_data.findall(response)
-        if matches:
-            group = []
-            for match in matches:
-                group.extend([(m.group(1), m.group(2)) for m in self.meta_iter.finditer(match)])
-            return group
-        return []
-
     def update_rag(self, response, collection: str='ai_documents', debug=False)->None:
         """ regular expression through message and attempt to create key:value tuples """
-        rag_tags = self.get_tags(response, debug=debug)
+        list_rag_tags = self.get_tags(response, debug=debug)
+        if debug:
+            self.console.print(f'META TAGS PARSED: {list_rag_tags}',
+                               style='color(233)',
+                               highlight=False)
         rag = RAG(self.console, self.common, **self.kwargs)
         # New way: Of course its practically built in. Note to self: Never pretend
         # to think you are planting a flag somewhere when it comes to coding.
-        rag.store_data(response, tags_metadata=rag_tags, collection=collection)
+        rag.store_data(response, tags_metadata=list_rag_tags, collection=collection)
 
-    def get_tags(self, response, debug=False) -> list[namedtuple]:
-        """Convert content into tags to be used for collection identification."""
-        rag_tags = []
-        tagging = namedtuple('RAGTAG', ('tag', 'content'))
-        matches = self.tag_pattern.findall(response)
-        matches.extend(self.find_tags(response))
+    def parse_tags(self, tag_input: dict | list[tuple[str, str]]) -> list[RAGTag]:
+        """Normalize any kind of tag input into RAGTag list."""
+        tags = []
+        for key, val in dict(tag_input).items():
+            if val is None or (isinstance(val, str) and val.lower() in {"null", "none", ""}):
+                continue
+            if isinstance(val, list):
+                val = ",".join(str(v).strip() for v in val if v)
+            tags.append(RAGTag(key, str(val).strip()))
+        return tags
+
+    def get_tags(self, response: str, debug=False) -> list[RAGTag]:
+        """Extract tags from either JSON or meta_tag format in the LLM response."""
         try:
-            j_matches = []
-            for k, v in list(json.loads(self.json_style.search(response)[1]).items()):
-                if isinstance(v, list):
-                    j_matches.append((k, ','.join(v)))
-                    continue
-                j_matches.append((k,v))
-            for k, j_match in enumerate(j_matches):
-                if not j_match[1] or j_match[1].lower() in ['none', 'null']:
-                    continue
-                matches.append(j_match)
-        except json.decoder.JSONDecodeError:
-            pass
-        except IndexError:
-            pass
-        except TypeError:
-            pass
-        if debug:
-            self.console.print(f'RAG/Tag MATCHES:\n{matches}\n\nresponse:'
-                               f'\n{response}[END]\n\n', style='color(233)')
-        # Add matches to rag_tags
-        for match in matches:
-            rag_tags.append(tagging(match[0], match[1]))
-        return rag_tags
+            # Check for JSON-style block
+            json_match = self.json_style.search(response)
+            if json_match:
+                data = json.loads(json_match.group(1))
+                return self.parse_tags(data)
+
+            # Fallback to meta_tag format
+            meta_matches = self.meta_data.findall(response)
+            if meta_matches:
+                flat_pairs = []
+                for match in meta_matches:
+                    flat_pairs.extend(self.meta_iter.findall(match))
+                return self.parse_tags(flat_pairs)
+
+            return []
+
+        # pylint: disable=broad-exception-caught  # too many ways for this to go wrong
+        except Exception as e:
+            if debug:
+                print(f'[get_tags error] {e}')
+            return []
+
 
 class RAG():
     """ Responsible for RAG operations """
@@ -141,17 +148,19 @@ class RAG():
         results = []
         results: list[Document] = chroma.similarity_search(query, matches, filter=meta_data)
         if self.debug:
-            self.console.print(f'CHUNKS RETRIEVED FROM {collection} with filter:'
-                               f'matches: {matches}',
-                               f' {meta_data}:\n{results}\n\n',
+            self.console.print(f'CHUNKS RETRIEVED FROM {collection}:\n'
+                               f'maximum retrievable matches:{matches}\n',
+                               f'field-filters:{meta_data}:\n'
+                               f'Results found:{len(results)}\n'
+                               f'RAW RESULTS:{results}\n\n',
                                 style='color(233)',
                                 highlight=False)
         return results
 
     def store_data(self, data,
-                         tags_metadata: list[namedtuple] = None,
+                         tags_metadata: list[RAGTag] = None,
                          collection: str = 'ai_documents',
-                         chunk_size=100, chunk_overlap=50)->None:
+                         chunk_size=150, chunk_overlap=75)->None:
         """ store data into the RAG """
         if tags_metadata is None:
             tags_metadata = {}
