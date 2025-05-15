@@ -16,20 +16,7 @@ Your task is to read the following text and extract a fixed set of metadata fiel
   "location": [string],  // list of places or world locations
   "gear": [string],      // list of classes, weapons, or items (e.g., "fighter", "sword")
   "weather": string|null // simple description (e.g., "stormy") or null
-}}
-
-Example Input:
-Text: "The elf scouts ahead with bow drawn under a pale moon. Her name is Elira."
-
-Example Output:
-{{
-  "tone": "calm",
-  "emotion": "focused",
-  "focus": "scouting",
-  "entity": ["elf", "Elira"],
-  "location": [],
-  "gear": ["bow"],
-  "weather": "clear"
+  "coding": string|null  // simple description of programming languange or null
 }}
 
 ---

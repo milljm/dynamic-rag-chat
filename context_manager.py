@@ -28,6 +28,7 @@ class ContextManager(PromptManager):
         self.preconditioner = kwargs['preconditioner']
         self.debug = kwargs['debug']
         self.name = kwargs['name']
+        self.chat_sessions = kwargs['chat_sessions']
         self.rag = RAG(console, self.common, **kwargs)
         self.rag_tagger = RAGTagManager(console, self.common, **kwargs)
         self.prompts = PromptManager(self.console,
@@ -37,8 +38,8 @@ class ContextManager(PromptManager):
         self.prompts.build_prompts()
 
     @staticmethod
-    def token_retreiver(context: str)->int:
-        """ iterate over list and do a word count (token) """
+    def token_retreiver(context: str|list[str])->int:
+        """ iterate over string or list of strings and do a word count (token) """
         _token_cnt = 0
         if isinstance(context, list):
             for sentence in context:
@@ -85,70 +86,38 @@ class ContextManager(PromptManager):
                          kwargs={'debug': self.debug},
                          daemon=True).start()
 
-    def build_filter(
-        self,
-        tags: list[tuple[str, str]],
-        skip_fields: set[str] = None,
-        composite_fields: set[str] = None,
-        multi_delimiters: str = ",/",
-        **field_overrides
-    ) -> dict | None:
-        """
-        Build a ChromaDB-compatible filter from a list of (tag, value) tuples.
-        Supports composite fields (slash-separated), multi-fragment fields (comma-separated),
-        and custom per-field logic via kwargs.
-
-        Params:
-            tags: list of (tag, value)
-            skip_fields: tags to exclude (e.g., time, date)
-            composite_fields: treat these as hierarchical (e.g., "combat/melee")
-            multi_delimiters: delimiters that indicate multi-value fragments
-            field_overrides: optional mapping of tag -> {"type": "composite"|"multi"|"exact"}
-
-        Returns:
-            dict filter or None
-        """
-        if skip_fields is None:
-            skip_fields = {"time", "date"}
-        if composite_fields is None:
-            composite_fields = {"focus", "tone"}
-
-        conditions = []
-        delimiters = set(multi_delimiters)
-
-        for tag, value in tags:
-            # Skip unwanted fields or self-referential tags
-            if tag in skip_fields or self.name in value:
-                continue
-
-            # Field behavior override
-            field_type = field_overrides.get(tag, {}).get("type")
-
-            # Composite fields like "combat/melee"
-            if field_type == "composite" or (tag in composite_fields and '/' in value):
-                parts = [p.strip() for p in value.split('/')]
-                expanded = ["/".join(parts[:i]) for i in range(1, len(parts) + 1)]
-                conditions.append({tag: {"$in": expanded}})
-
-            # Multi-value fields (comma-separated, slash fallback)
-            elif field_type == "multi" or any(d in value for d in delimiters):
-                for d in delimiters:
-                    value = value.replace(d, ',')
-                fragments = [v.strip() for v in value.split(',') if v.strip()]
-                conditions.append({tag: {"$in": fragments}})
-
-            # Simple exact match
-            else:
-                conditions.append({tag: value})
-
-        return {"$and": conditions} if conditions else None
-
     @staticmethod
-    def clean_tags(tags: list[RAGTag]) -> list[RAGTag]:
-        """ clean filters """
-        return [ tag for tag in tags if tag.content and
-                 tag.content.lower() not in {'null', 'none', ''} and
-                 not any(char in tag.content for char in [';)', "I'd say!"])]
+    def stagger_history(history_size, max_elements=20):
+        """ stagger chat history """
+        indices = []
+        current = history_size - 1
+        step = 1
+        while current >= 0 and len(indices) < max_elements:
+            indices.append(current)
+            current -= step
+            step += 1
+        return sorted(indices)
+
+    def get_chat_history(self)->list:
+        """
+        Limit Chat History to 550 * int(chat_sessions) tokens (defaults = 2750 tokens)
+        """
+        splice_list = self.stagger_history(len(self.common.chat_history_session),
+                                           self.chat_sessions)
+        spliced = [self.common.chat_history_session[x] for x in splice_list]
+        abridged = []
+        _tk_cnt = 0
+        max_tokens = 550 * max(1, int(self.chat_sessions)) # Defaults = 2750 tokens
+        for response in spliced:
+            _tk_cnt += self.token_retreiver(response)
+            if _tk_cnt > max_tokens:
+                if self.debug:
+                    self.console.print(f'MAX CHAT TOKENS: {_tk_cnt}',
+                                       style='color(233)',
+                                       highlight=False)
+                return abridged
+            abridged.append(response)
+        return abridged
 
     def gather_context(self, query: str,
                              collection: str,
@@ -167,12 +136,13 @@ class ContextManager(PromptManager):
     def handle_context(self, data_set: list,
                              direction='query')->tuple[dict[str,list], int]:
         """ Method to handle all the lovely context """
-        # Retrieve context from AI and User RAG
+        # Retrieve context from AI and User RAG and Chat History
         if direction == 'query':
             pre_tokens = 0
             post_tokens = 0
             collection_list = ['ai_documents', 'user_documents']
             documents = {key: [] for key in collection_list}
+            documents['chat_history'] = self.get_chat_history()
             if data_set:
                 query = self.common.stringify_lists(data_set[0])
                 # Try to tagify the users query

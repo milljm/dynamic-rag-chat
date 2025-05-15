@@ -88,9 +88,8 @@ class Chat():
         """
         pre_process_time = time.time()
         (documents,
-            pre_t,
-            post_t) = self.cm.handle_context([user_input,
-                      self.common.chat_history_session[-self.chat_sessions:]])
+         pre_t,
+         post_t) = self.cm.handle_context([user_input])
 
         # pylint: disable=consider-using-f-string  # no, this is how it is done
         pre_process_time = '{:.1f}s'.format(time.time() - pre_process_time)
@@ -99,7 +98,6 @@ class Chat():
         documents['llm_prompt'] = self.common.llm_prompt
         documents['user_query'] = user_input
         documents['name'] = self.name
-        documents['chat_history'] = self.common.chat_history_session[-self.chat_sessions:]
         documents['date_time'] = self.get_time(self.time_zone)
         documents['num_ctx'] = self.num_ctx
         documents['pre_process_time'] = pre_process_time

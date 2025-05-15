@@ -246,5 +246,5 @@ class RenderWindow(PromptManager):
                                          f'AI:{current_response}\n\n')
         self.cm.handle_context([current_response],
                                 direction='store')
-        self.common.save_chat(self.common.history_dir, self.common.chat_history_session, )
+        self.common.save_chat(self.common.history_dir, self.common.chat_history_session)
         self.common.check_prompt(current_response)

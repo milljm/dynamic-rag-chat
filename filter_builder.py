@@ -25,7 +25,7 @@ class FilterBuilder:
         soft_conditions = []
 
         for tag in tags:
-            if tag.content.lower() in {'null', 'none', '', 'unspecified'}:
+            if tag.content.lower() in {'null', 'none', '', 'unspecified', 'unknown'}:
                 continue
             condition = {tag.tag: {"$in": tag.content.split(',') if ',' in
                                           tag.content else [tag.content]}}

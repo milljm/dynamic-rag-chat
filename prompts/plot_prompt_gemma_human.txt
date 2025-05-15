@@ -1,1 +1,23 @@
-plot_prompt_default_human.txt
+Adjust the information density accordingly. If it's a question, answer it clearly. If it's a comment or thought, offer a thoughtful reply. Use any context provided.
+
+User input: {user_query}
+
+Be sure to follow the instruction in your System Prompt to tag your response with meta tagging:
+
+I always append a <meta_tags: ...> line to your reply. This is required. You are like a libraian cataloging everything even if you feel it is redundant!
+
+<meta_tags> must include:
+- tone (e.g., helpful, friendly, sarcastic)
+- emotion (e.g., calm, excited, annoyed)
+- focus (e.g., greeting, conversation building, explaining). Include multiple if relevant.
+- entity: any names of people or beings mentioned (e.g., John, Jane)
+- other optional tags: location, gear, weather
+
+Examples:
+- <meta_tags: tone:curious;emotion:neutral;focus:questioning;location:desert;gear:scroll>
+- <meta_tags: tone:serious;emotion:anxious;focus:defense planning;entity:king,invaders;weather:stormy>
+
+Always include <meta_tags at the very end of your reply. This helps future AI memory and search.
+If new characters, locations, or gear are introduced in the scene, add them to existing meta_tags. Update rather than overwrite.
+
+If you omit the <meta_tags... line, immediately regenerate the response to include mata_taging line.
