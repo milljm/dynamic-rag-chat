@@ -3,6 +3,17 @@ import os
 import re
 import sys
 import pickle
+import json
+from typing import NamedTuple
+
+class RAGTag(NamedTuple):
+    """
+    namedtuple class constructor
+      RAGTag(tag: str, content: str)
+    """
+    tag: str
+    content: str
+
 class CommonUtils():
     """ method holder for command methods used throughout the project """
     def __init__(self, console, **kwargs):
@@ -24,6 +35,52 @@ class CommonUtils():
         self.meta_data = re.compile(r'(?<=[<m]eta_tags: ).*?(?=[>)])', re.DOTALL)
         self.meta_iter = re.compile(r'(\w+):\s*([^;]*)')
         self.json_style = re.compile(r'```json(.*)```', re.DOTALL)
+
+    def parse_tags(self, tag_input: dict | list[tuple[str, str]]) -> list[RAGTag]:
+        """Normalize any kind of tag input into RAGTag list."""
+        tags = []
+        for key, val in dict(tag_input).items():
+            if val is None or (isinstance(val, str) and val.lower() in {"null", "none", ""}):
+                continue
+            if isinstance(val, list):
+                val = ",".join(str(v).strip() for v in val if v)
+            tags.append(RAGTag(key, str(val).strip()))
+        return tags
+
+    def get_tags(self, response: str, debug=False) -> list[RAGTag]:
+        """Extract tags from either JSON or meta_tag format in the LLM response."""
+        try:
+            # Check for JSON-style block
+            json_match = self.json_style.search(response)
+            if json_match:
+                if debug:
+                    self.console.print('JSON_MATCH TRUE')
+                data = json.loads(json_match.group(1))
+                return self.parse_tags(data)
+
+            # Fallback to meta_tag format
+            meta_matches = self.meta_data.findall(response)
+            if meta_matches:
+                if debug:
+                    self.console.print('META_MATCH TRUE')
+                flat_pairs = []
+                for match in meta_matches:
+                    flat_pairs.extend(self.meta_iter.findall(match))
+                return self.parse_tags(flat_pairs)
+
+            return []
+        # pylint: disable=broad-exception-caught  # too many ways for this to go wrong
+        except Exception as e:
+            if debug:
+                print(f'[get_tags error] {e}')
+            return []
+
+    @staticmethod
+    def normalize_for_dedup(text: str) -> str:
+        """ remove emojis and other markdown """
+        text = re.sub(r'[\U0001F600-\U0001F64F\u2600-\u26FF\u2700-\u27BF]', '', text)
+        #text = re.sub(r'[^\w\s]', '', text)
+        return ' '.join(text.lower().split())
 
     @staticmethod
     def stringify_lists(nested_list)->str:

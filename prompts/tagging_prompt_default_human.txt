@@ -7,14 +7,21 @@ Your task is to read the following text and extract a fixed set of metadata fiel
 - Use strings for single values, arrays for lists, and `null` for empty singulars.
 - No explanations. No extra prose. Output JSON only.
 
+<meta_tags> must include:
+- tone (e.g., helpful, friendly, sarcastic)
+- emotion (e.g., calm, excited, annoyed)
+- focus (e.g., greeting, conversation building, explaining). Include multiple if relevant.
+- entity: any names of people or beings mentioned (e.g., John, Jane)
+- other optional tags: location, gear, weather
+
 🧾 JSON Output Format:
 {{
-  "tone": string,        // e.g., "enthusiastic", "calm"
-  "emotion": string,     // e.g., "curious", "excited"
-  "focus": string,       // e.g., "conversation building", "character description"
-  "entity": [string],    // list of any names or people mentioned
-  "location": [string],  // list of places or world locations
-  "gear": [string],      // list of classes, weapons, or items (e.g., "fighter", "sword")
+  "tone": string,        // e.g., helpful, friendly, sarcastic
+  "emotion": string,     // e.g., calm, excited, annoyed
+  "focus": string,       // e.g., greeting, conversation building, explaining. Include multiple if relevant
+  "entity": [string],    // list of any names of people or beings mentioned (e.g., John, Jane, chef) or null
+  "location": [string],  // list of places or world locations or null
+  "items": [string],     // list of any items mentioned (e.g., watch, jewlery, weapons) or null
   "weather": string|null // simple description (e.g., "stormy") or null
   "coding": string|null  // simple description of programming languange or null
 }}

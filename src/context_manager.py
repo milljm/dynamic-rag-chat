@@ -6,7 +6,6 @@ being supplied to the LLM. It utilizing several methods:
     Fuzzy match sentences
     list[] -> set() removes any matches from the RAG.
 """
-import re
 import threading
 from langchain.schema import Document
 from langchain.prompts import ChatPromptTemplate
@@ -47,20 +46,13 @@ class ContextManager(PromptManager):
             _token_cnt += len(context.split(' '))
         return _token_cnt
 
-    @staticmethod
-    def normalize_for_dedup(text: str) -> str:
-        """ remove emojis and other markdown """
-        text = re.sub(r'[\U0001F600-\U0001F64F\u2600-\u26FF\u2700-\u27BF]', '', text)
-        text = re.sub(r'[^\w\s]', '', text)
-        return ' '.join(text.lower().split())
-
     def pre_processor(self, query: str)->tuple[str,list[RAGTag]]:
         """
         lightweight LLM as a tagging pre-processor
         """
         pre_llm = OllamaModel(self.host)
         prompts = self.prompts
-        query = self.normalize_for_dedup(query)
+        query = self.common.normalize_for_dedup(query)
         # pylint: disable=no-member # dynamic prompts (see self.__build_prompts)
         human_prompt = (prompts.get_prompt(f'{prompts.tag_prompt_file}_human.txt')
                         if self.debug else prompts.tag_prompt_human)
@@ -77,7 +69,7 @@ class ContextManager(PromptManager):
             self.console.print(f'PRE-PROCESSOR RESPONSE:\n{content}\n\n',
                                 style='color(233)', highlight=False)
 
-        tags = self.rag_tagger.get_tags(content, debug=self.debug)
+        tags = self.common.get_tags(content, debug=self.debug)
         return (content, tags)
 
     def post_process(self, response)->None:
@@ -188,8 +180,7 @@ class ContextManager(PromptManager):
             # Store the users query to their RAG, now that we are done pre-processing
             # (so as not to bring back identical information in their query)
             # A little unorthodox, but the first item in the list is ther user's query
-            my_query = self.normalize_for_dedup(data_set[0])
-            self.rag.store_data(self.common.stringify_lists(my_query),
+            self.rag.store_data(self.common.stringify_lists(data_set[0]),
                                 tags_metadata=meta_tags,
                                 collection='user_documents',
                                 chunk_size=100,
@@ -197,5 +188,4 @@ class ContextManager(PromptManager):
             # Return data collected
             return (documents, pre_tokens, post_tokens)
         # Store data (non-blocking)
-        response = self.normalize_for_dedup(data_set[0])
-        return self.post_process(response)
+        return self.post_process(data_set[0])

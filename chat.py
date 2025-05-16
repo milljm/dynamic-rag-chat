@@ -95,12 +95,14 @@ class Chat():
         pre_process_time = '{:.1f}s'.format(time.time() - pre_process_time)
 
         token_savings = max(0, pre_t - post_t)
-        documents['llm_prompt'] = self.common.llm_prompt
-        documents['user_query'] = user_input
-        documents['name'] = self.name
-        documents['date_time'] = self.get_time(self.time_zone)
-        documents['num_ctx'] = self.num_ctx
-        documents['pre_process_time'] = pre_process_time
+        documents.update(
+            {'llm_prompt'      : self.common.llm_prompt,
+             'user_query'      : user_input,
+             'name'            : self.name,
+             'date_time'       : self.get_time(self.time_zone),
+             'num_ctx'         : self.num_ctx,
+             'pre_process_time': pre_process_time}
+        )
         # Stringify everything
         for k, v in documents.items():
             documents[k] = self.common.stringify_lists(v)

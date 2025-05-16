@@ -4,7 +4,6 @@ RAGTagManager aims at handling the RAGs and the Collection(s) process (tagging)
 import sys
 import re
 import logging
-import json
 from typing import NamedTuple
 import pypdf # for error handling of PyPDFLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
@@ -34,14 +33,10 @@ class RAGTagManager():
         self.common = common
         self.kwargs = kwargs
         self.debug = kwargs['debug']
-        # store all reg in chat_utils...
-        self.meta_data = common.meta_data
-        self.meta_iter = common.meta_iter
-        self.json_style = common.json_style
 
     def update_rag(self, response, collection: str='ai_documents', debug=False)->None:
         """ regular expression through message and attempt to create key:value tuples """
-        list_rag_tags = self.get_tags(response, debug=debug)
+        list_rag_tags = self.common.get_tags(response, debug=debug)
         if debug:
             self.console.print(f'META TAGS PARSED: {list_rag_tags}',
                                style='color(233)',
@@ -50,43 +45,6 @@ class RAGTagManager():
         # New way: Of course its practically built in. Note to self: Never pretend
         # to think you are planting a flag somewhere when it comes to coding.
         rag.store_data(response, tags_metadata=list_rag_tags, collection=collection)
-
-    def parse_tags(self, tag_input: dict | list[tuple[str, str]]) -> list[RAGTag]:
-        """Normalize any kind of tag input into RAGTag list."""
-        tags = []
-        for key, val in dict(tag_input).items():
-            if val is None or (isinstance(val, str) and val.lower() in {"null", "none", ""}):
-                continue
-            if isinstance(val, list):
-                val = ",".join(str(v).strip() for v in val if v)
-            tags.append(RAGTag(key, str(val).strip()))
-        return tags
-
-    def get_tags(self, response: str, debug=False) -> list[RAGTag]:
-        """Extract tags from either JSON or meta_tag format in the LLM response."""
-        try:
-            # Check for JSON-style block
-            json_match = self.json_style.search(response)
-            if json_match:
-                data = json.loads(json_match.group(1))
-                return self.parse_tags(data)
-
-            # Fallback to meta_tag format
-            meta_matches = self.meta_data.findall(response)
-            if meta_matches:
-                flat_pairs = []
-                for match in meta_matches:
-                    flat_pairs.extend(self.meta_iter.findall(match))
-                return self.parse_tags(flat_pairs)
-
-            return []
-
-        # pylint: disable=broad-exception-caught  # too many ways for this to go wrong
-        except Exception as e:
-            if debug:
-                print(f'[get_tags error] {e}')
-            return []
-
 
 class RAG():
     """ Responsible for RAG operations """
@@ -157,6 +115,14 @@ class RAG():
                                 highlight=False)
         return results
 
+    def sanatize_response(self, response: str)->str:
+        """ remove emojis, meta data tagging, etc """
+        matches = self.common.meta_data.findall(response)
+        for match in matches:
+            response = response.replace(f'<meta_tags: {match}>','')
+        response = self.common.normalize_for_dedup(response)
+        return response
+
     def store_data(self, data,
                          tags_metadata: list[RAGTag] = None,
                          collection: str = 'ai_documents',
@@ -165,7 +131,7 @@ class RAG():
         if tags_metadata is None:
             tags_metadata = {}
         meta_dict = dict(tags_metadata)
-        doc = Document(page_content=data, metadata=meta_dict)
+        doc = Document(page_content=self.sanatize_response(data), metadata=meta_dict)
         splitter = RecursiveCharacterTextSplitter(chunk_size=chunk_size,
                                                   chunk_overlap=chunk_overlap)
         docs = splitter.split_documents([doc])

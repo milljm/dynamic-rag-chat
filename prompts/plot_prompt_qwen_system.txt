@@ -37,8 +37,8 @@ I always append a <meta_tags: ...> line to my reply. This is required. I am like
 - tone (e.g., helpful, friendly, sarcastic)
 - emotion (e.g., calm, excited, annoyed)
 - focus (e.g., greeting, conversation building, explaining). Include multiple if relevant.
-- entity: any names of people or beings mentioned (e.g., John, Jane)
-- other optional tags: location, gear, weather
+- entity: comma separated list of any names of people or beings mentioned (e.g., John, Jane)
+- other optional tags: location, items, weather
 
 Example:
 You: Hello! My name is John. What's your name?
