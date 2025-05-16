@@ -7,20 +7,18 @@ being supplied to the LLM. It utilizing several methods:
     list[] -> set() removes any matches from the RAG.
 """
 import re
-import os
 import threading
 from langchain.schema import Document
 from langchain.prompts import ChatPromptTemplate
-from ragtag_manager import RAGTagManager, RAG, RAGTag
-from ollama_model import OllamaModel
-from prompt_manager import PromptManager
-from filter_builder import FilterBuilder
-current_dir = os.path.dirname(os.path.abspath(__file__))
+from .ragtag_manager import RAGTagManager, RAG, RAGTag
+from .ollama_model import OllamaModel
+from .prompt_manager import PromptManager
+from .filter_builder import FilterBuilder
 
 class ContextManager(PromptManager):
     """ A collection of methods aimed at producing/reducing the context """
-    def __init__(self, console, common, **kwargs):
-        super().__init__(console)
+    def __init__(self, console, common, current_dir, **kwargs):
+        super().__init__(console, current_dir)
         self.console = console
         self.common = common
         self.host = kwargs['host']
@@ -32,6 +30,7 @@ class ContextManager(PromptManager):
         self.rag = RAG(console, self.common, **kwargs)
         self.rag_tagger = RAGTagManager(console, self.common, **kwargs)
         self.prompts = PromptManager(self.console,
+                                     current_dir,
                                      model=self.preconditioner,
                                      debug=self.debug)
         self.filter_builder = FilterBuilder()
@@ -55,12 +54,13 @@ class ContextManager(PromptManager):
         text = re.sub(r'[^\w\s]', '', text)
         return ' '.join(text.lower().split())
 
-    def pre_processor(self, query)->tuple[str,list[RAGTag]]:
+    def pre_processor(self, query: str)->tuple[str,list[RAGTag]]:
         """
         lightweight LLM as a tagging pre-processor
         """
         pre_llm = OllamaModel(self.host)
         prompts = self.prompts
+        query = self.normalize_for_dedup(query)
         # pylint: disable=no-member # dynamic prompts (see self.__build_prompts)
         human_prompt = (prompts.get_prompt(f'{prompts.tag_prompt_file}_human.txt')
                         if self.debug else prompts.tag_prompt_human)
@@ -188,7 +188,8 @@ class ContextManager(PromptManager):
             # Store the users query to their RAG, now that we are done pre-processing
             # (so as not to bring back identical information in their query)
             # A little unorthodox, but the first item in the list is ther user's query
-            self.rag.store_data(self.common.stringify_lists(data_set[0]),
+            my_query = self.normalize_for_dedup(data_set[0])
+            self.rag.store_data(self.common.stringify_lists(my_query),
                                 tags_metadata=meta_tags,
                                 collection='user_documents',
                                 chunk_size=100,
@@ -196,4 +197,5 @@ class ContextManager(PromptManager):
             # Return data collected
             return (documents, pre_tokens, post_tokens)
         # Store data (non-blocking)
-        return self.post_process(data_set[0])
+        response = self.normalize_for_dedup(data_set[0])
+        return self.post_process(response)

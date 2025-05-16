@@ -9,8 +9,8 @@ from rich.text import Text
 from rich.console import Group
 from langchain_ollama import ChatOllama
 from langchain.prompts import ChatPromptTemplate
-from context_manager import ContextManager
-from prompt_manager import PromptManager
+from .context_manager import ContextManager
+from .prompt_manager import PromptManager
 class AnimationThread(Thread):
     """ Allow pulsing animation to run as a thread """
     def __init__(self, owner):
@@ -24,8 +24,8 @@ class AnimationThread(Thread):
 
 class RenderWindow(PromptManager):
     """ Responsible for printing Rich Text/Markdown Live to the screen """
-    def __init__(self, console, common_utils, **kwargs):
-        super().__init__(console)
+    def __init__(self, console, common, current_dir, **kwargs):
+        super().__init__(console, current_dir)
         self.debug = kwargs['debug']
         self.console = console
         self.host = kwargs['host']
@@ -33,9 +33,9 @@ class RenderWindow(PromptManager):
         self.num_ctx = kwargs['num_ctx']
         self.verbose = kwargs['verbose']
         self.model_re = re.compile(r'(\w+)\W+')
-        self.common = common_utils
-        self.cm = ContextManager(console, self.common, **kwargs)
-        self.prompts = PromptManager(console, model=self.model, debug=self.debug)
+        self.common = common
+        self.cm = ContextManager(console, self.common, current_dir, **kwargs)
+        self.prompts = PromptManager(console, current_dir, model=self.model, debug=self.debug)
         self.llm = ChatOllama(base_url=self.host,
                               model=self.model,
                               temperature=1.0,

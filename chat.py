@@ -23,10 +23,10 @@ import pytz
 from rich.console import Console
 from prompt_toolkit import PromptSession
 from prompt_toolkit.key_binding import KeyBindings
-from context_manager import ContextManager
-from ragtag_manager import RAG
-from render_window import RenderWindow
-from chat_utils import CommonUtils
+from src import ContextManager
+from src import RAG
+from src import RenderWindow
+from src import CommonUtils
 console = Console(highlight=True)
 current_dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -40,8 +40,8 @@ class Chat():
         self.num_ctx = kwargs['num_ctx']
         self.time_zone = kwargs['time_zone']
         self.common = CommonUtils(console, **kwargs)
-        self.renderer = RenderWindow(console, self.common, **kwargs)
-        self.cm = ContextManager(console, self.common, **kwargs)
+        self.renderer = RenderWindow(console, self.common, current_dir, **kwargs)
+        self.cm = ContextManager(console, self.common, current_dir, **kwargs)
 
         # Class variables
         self.name = kwargs['name']

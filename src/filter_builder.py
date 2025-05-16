@@ -1,5 +1,5 @@
 """ Build filter objects suitable for Chroma use """
-from ragtag_manager import RAGTag # for type hinting
+from .ragtag_manager import RAGTag # for type hinting
 class FilterBuilder:
     """
     Initialize FilterBuilder then call .build(RAGTag) to receive a proper weighted

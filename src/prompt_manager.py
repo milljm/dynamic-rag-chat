@@ -1,13 +1,13 @@
 """ An inherited class for handling prompts """
 import os
 import sys
-current_dir = os.path.dirname(os.path.abspath(__file__))
 class PromptManager():
     """ Handle all the possible prompt files we may introduce with RAG/Tagging """
-    def __init__(self, console, model: str = 'default', debug=False):
+    def __init__(self, console, current_dir, model: str = 'default', debug=False):
         self.console = console
         self.debug = debug
         self.model = self._match_model(model)
+        self.current_dir = current_dir
 
     @staticmethod
     def _match_model(model: str)->str:
@@ -28,7 +28,7 @@ class PromptManager():
         }
         for prompt_key, prompt_base in prompt_files.items():
             prompt_dir = os.path.join('prompts', prompt_base)
-            setattr(self, f'{prompt_key}_file', os.path.join(current_dir, prompt_dir))
+            setattr(self, f'{prompt_key}_file', os.path.join(self.current_dir, prompt_dir))
             setattr(self, f'{prompt_key}_system',
                     self.get_prompt(f'{prompt_dir}_system.txt'))
             setattr(self, f'{prompt_key}_human',
