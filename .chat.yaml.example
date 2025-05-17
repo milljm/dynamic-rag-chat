@@ -3,12 +3,27 @@
 # store common arguments like server, yet pass --model on the fly.
 # NOTE: The values below should match the full options name (see --help) with
 #       underscores instead of dashes. (eg: context_window not context-window)
+#
+# Interesting Note: history_dir contains *everything* about your experience. You
+# therefore can change this on a whim to have a new history/experience with your
+# LLM, and then change it back to continue past-conversations. Or, delete this
+# directory when finished to remove any trace of your conversations.
 chat:
   model: qwen3:235b-a22b-q4_K_M
   pre_llm: gemma-3-1B-it-QAT-Q4_0
   embedding_llm: nomic-embed-text-v1.5.f16
-  history_dir: /some/writable/path
-  history_matches: 20
+  history_dir: /some/writable/path or leave blank for default
+  history_matches: 5
   server: localhost:11434
   time_zone: 'America/Denver'
   debug: False
+
+# Ollama server switches of note:
+# I have had great experiences with the above models at 20+ tokens/s, using
+# the following Ollama environment variables set:
+#
+# OLLAMA_CONTEXT_LENGTH=32768
+# OLLAMA_KEEP_ALIVE=24h
+# OLLAMA_MAX_LOADED_MODELS=3
+# OLLAMA_KV_CACHE_TYPE=f16
+# OLLAMA_FLASH_ATTENTION=true
