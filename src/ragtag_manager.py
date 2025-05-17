@@ -1,11 +1,15 @@
 """
 RAGTagManager aims at handling the RAGs and the Collection(s) process (tagging)
 """
+import os
 import sys
 import re
 import logging
 from typing import NamedTuple
 import pypdf # for error handling of PyPDFLoader
+from langchain.retrievers import ParentDocumentRetriever
+from langchain.storage import LocalFileStore
+from langchain.storage._lc_store import create_kv_docstore
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.schema import Document
 from langchain_community.document_loaders import PyPDFLoader
@@ -51,68 +55,78 @@ class RAG():
     def __init__(self, console, common, **kwargs):
         self.console = console
         self.common = common
-        self.host = kwargs['host']
-        self.embeddings = kwargs['embeddings']
         self.vector_dir = kwargs['vector_dir']
         self.debug = kwargs['debug']
+        self.embeddings = OllamaEmbeddings(base_url=kwargs['host'],
+                                           model=kwargs['embeddings'])
+        self.parent_splitter = RecursiveCharacterTextSplitter(chunk_size=2000,
+                                                              chunk_overlap=1000)
+        self.child_splitter = RecursiveCharacterTextSplitter(chunk_size=150,
+                                                             chunk_overlap=50)
 
     @staticmethod
     def _normalize_collection_name(name: str,
-                                   min_length: int = 3,
-                                   max_length: int = 63,
-                                   pad_char: str = 'x') -> str:
+                                    min_length: int = 3,
+                                    max_length: int = 63,
+                                    pad_char: str = 'x') -> str:
         """ padd/sanatize the could-be-invalid collection names """
         # Replace all invalid characters with dashes
         name = re.sub(r'[^a-zA-Z0-9_-]', '-', name)
-
         # Remove leading/trailing non-alphanumerics to meet start/end rule
         name = re.sub(r'^[^a-zA-Z0-9]+', '', name)
         name = re.sub(r'[^a-zA-Z0-9]+$', '', name)
-
         # Replace multiple dashes/underscores if needed (optional cleanup)
         name = re.sub(r'[-_]{2,}', '-', name)
-
         # Avoid names that look like IP addresses
         if re.fullmatch(r'\d{1,3}(\.\d{1,3}){3}', name):
             name = f"col-{name.replace('.', '-')}"
-
         # Enforce length limits
         if len(name) < min_length:
             name = name.ljust(min_length, pad_char)
         elif len(name) > max_length:
             name = name[:max_length]
-
         return name
 
-    def _get_embeddings(self, collection)->Chroma:
+    def parent_retriever(self, collection: str)->ParentDocumentRetriever:
+        """ Return ParentDocumentRetriever for provided collection """
         collection = self._normalize_collection_name(collection)
-        embeddings = OllamaEmbeddings(base_url=self.host, model=self.embeddings)
-        chroma_db = Chroma(persist_directory=self.vector_dir,
-                            embedding_function=embeddings,
-                            collection_name=collection)
-        return chroma_db
+        fs = LocalFileStore(os.path.join(self.vector_dir, collection))
+        store = create_kv_docstore(fs)
+        return ParentDocumentRetriever(
+                    vectorstore=self.vector_store(collection),
+                    docstore=store,
+                    child_splitter=self.child_splitter,
+                    parent_splitter=self.parent_splitter)
+
+    def vector_store(self, collection: str)->Chroma:
+        """ Return our Chroma Collections Database """
+        collection = self._normalize_collection_name(collection)
+        chroma = Chroma(persist_directory=self.vector_dir,
+                        embedding_function=self.embeddings,
+                        collection_name=collection)
+        return chroma
 
     def retrieve_data(self, query: str,
                             collection: str,
                             meta_data: dict = None,
                             matches=5)->list[Document]:
         """
-        Return vector data as a list. Syntax:
-            retrieve_data(query=str, collection=str, matches=int)->list
-                query: your question
-                k:     matches to return
+        Return matching documents
         """
-        chroma = self._get_embeddings(collection)
+        parent_retriever = self.parent_retriever(collection)
+        vector_store = self.vector_store(collection)
+
         results = []
-        results: list[Document] = chroma.similarity_search(query, matches, filter=meta_data)
+        results: list[Document] = vector_store.similarity_search(query,
+                                                                    matches,
+                                                                    filter=meta_data)
+        if results:
+            results.extend(parent_retriever.invoke(query))
         if self.debug:
-            self.console.print(f'CHUNKS RETRIEVED FROM {collection}:\n'
-                               f'maximum retrievable matches:{matches}\n',
-                               f'field-filters:{meta_data}:\n'
-                               f'Results found:{len(results)}\n'
-                               f'RAW RESULTS:{results}\n\n',
-                                style='color(233)',
-                                highlight=False)
+            self.console.print(f'RETRIEVED DOCS: from {collection} '
+                               f'meta: {meta_data}\n',
+                               f'\n{results}\n\n',
+                               style='color(233)')
         return results
 
     def sanatize_response(self, response: str)->str:
@@ -125,26 +139,15 @@ class RAG():
 
     def store_data(self, data,
                          tags_metadata: list[RAGTag] = None,
-                         collection: str = 'ai_documents',
-                         chunk_size=150, chunk_overlap=75)->None:
+                         collection: str = 'ai_documents')->None:
         """ store data into the RAG """
         if tags_metadata is None:
             tags_metadata = {}
         meta_dict = dict(tags_metadata)
-        doc = Document(page_content=self.sanatize_response(data), metadata=meta_dict)
-        splitter = RecursiveCharacterTextSplitter(chunk_size=chunk_size,
-                                                  chunk_overlap=chunk_overlap)
-        docs = splitter.split_documents([doc])
-        chroma = self._get_embeddings(collection)
-        chroma.add_documents(docs)
-        if self.debug:
-            self.console.print(f'CHUNKS STORED TO COLLECTION:{collection}: {len(docs)} '
-                               f'/ chunk size {chunk_size} '
-                               f'/ olverlap {chunk_overlap} '
-                               f'meta_data: {meta_dict}'
-                               f'\nDOCS:{docs}\n',
-                               style='color(233)',
-                               highlight=False)
+        doc = Document(self.sanatize_response(data), metadata=meta_dict)
+
+        retriever = self.parent_retriever(collection)
+        retriever.add_documents([doc])
 
     def extract_text_from_pdf(self, pdf_path)->None:
         """ extract text from PDFs """

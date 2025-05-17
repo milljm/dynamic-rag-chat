@@ -182,9 +182,7 @@ class ContextManager(PromptManager):
             # A little unorthodox, but the first item in the list is ther user's query
             self.rag.store_data(self.common.stringify_lists(data_set[0]),
                                 tags_metadata=meta_tags,
-                                collection='user_documents',
-                                chunk_size=100,
-                                chunk_overlap=50)
+                                collection='user_documents')
             # Return data collected
             return (documents, pre_tokens, post_tokens)
         # Store data (non-blocking)
