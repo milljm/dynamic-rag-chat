@@ -173,17 +173,16 @@ class RenderWindow(PromptManager):
         emoji = f' {self.pulsing_chars[self.pulse_index]} ' if self.thinking else ' '
 
         # Create the footer text with model info, time, and token count
-        model = '-'.join(self.model_re.findall(self.model)[:3])
-        footer = Text('', style='color(233)')
+        model = '-'.join(self.model_re.findall(self.model)[:2])
+        footer = Text('\n', style='color(233)')
         footer.append(f'{model}', style='color(202)')
         footer.append(emoji, style='color(51)')
-        footer.append('Time:', style='color(233)')
         footer.append(f'{time_taken:.2f}', style='color(94)')
-        footer.append('s Tokens(cleaned:', style='color(233)')
+        footer.append('s Tokens(trimmed dups:', style='color(233)')
         footer.append(f'{token_savings}', style=f'color({cleaned_color})')
-        footer.append(f':{pre_processing_time}', style='color(233)')
         footer.append(' context:', style='color(233)')
         footer.append(f'{prompt_tokens}', style=f'color({context_size})')
+        footer.append(f':{pre_processing_time}', style='color(233)')
         footer.append(' completion:', style='color(233)')
         footer.append(f'{token_count}', style=f'color({produced})')
         footer.append(f') {tokens_per_second:.1f}T/s', style='color(233)')
@@ -219,7 +218,7 @@ class RenderWindow(PromptManager):
             live.update(query)
             self.console.print(f'\nGathered [italic green]{footer_meta["prompt_tokens"]}'
                                '[/italic green] context tokens (took [italic green]'
-                               f'{preprocessing}[/italic green]). Submitting to LLM, awaiting '
+                               f'{preprocessing}[/italic green]). Submitted to LLM. Awaiting '
                                'response...', style='dim grey37')
             for piece in self.stream_response(documents):
                 if start_time == 0:
