@@ -235,7 +235,7 @@ See .chat.yaml.example for details.
     vector_dir = arg_dict.get('history_dir', None)
     matches = int(arg_dict.get('history_matches', 5)) # 5 from each RAG (User & AI)
     host = arg_dict.get('server', 'localhost:11434')
-    num_ctx = arg_dict.get('context_window', 2048)
+    num_ctx = arg_dict.get('context_window', 4192)
     chat_history = arg_dict.get('chat_history_max', 1000)
     chat_history_session = arg_dict.get('chat_history_session', 5)
     name = arg_dict.get('name', 'assistant')

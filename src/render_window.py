@@ -1,9 +1,8 @@
 """ module responsible for rendering output to the screen """
 import re
 import time
-import threading
-import requests
 from threading import Thread
+import requests
 from rich.live import Live
 from rich.markdown import Markdown
 from rich.text import Text
@@ -59,7 +58,7 @@ class RenderWindow(PromptManager):
         self.thinking = False
         self.meta_hiding = False
         self.animation_active = False
-        self.animation_thread = threading.Thread(target=self.update_animation)
+        self.animation_thread = Thread(target=self.update_animation)
 
     @staticmethod
     def ollama_keepalive(host):
@@ -81,17 +80,30 @@ class RenderWindow(PromptManager):
             return len(response.split())
         return 1
 
+    def hide_reasons(self, chunk_content)->bool:
+        """ return bool on reasons to hide token """
+        reasons = ['<meta', '<th', '<status']
+        for reason in reasons:
+            if chunk_content.find(f'>{reason}') != -1 or chunk_content.find(reason) != -1:
+                return True
+        return False
+
     def if_hiding(self, chunk, verbose)->object:
         """ hide meta tags from user (unless in verbose mode) """
         if verbose:
             return chunk
         content = str(chunk.content)
         if self.meta_hiding:
-            if content.find('>') != -1:
+            if self.hide_reasons(content):
+                self.meta_capture += content
+                content = ''
+            elif content.find('>') != -1:
                 self.meta_hiding = False
+                self.stop_thinking()
             self.meta_capture += content
             chunk.content = ''
-        elif content.find('<meta') != -1:
+        elif self.hide_reasons(content):
+            self.start_thinking()
             self.meta_hiding = True
             # Capture multiple during this response
             if self.meta_capture:
@@ -106,8 +118,11 @@ class RenderWindow(PromptManager):
         content = chunk.content
         if self.thinking and '</think>' in chunk.content:
             chunk.content = ''
+            self.thinking = False
             self.stop_thinking()
         elif not self.thinking and '<think>' in chunk.content:
+            self.do_once = True
+            self.thinking = True
             self.start_thinking()
             chunk.content = 'AI thinking...'
         elif self.thinking:
@@ -118,8 +133,6 @@ class RenderWindow(PromptManager):
         """ method to start thinking animation """
         if hasattr(self, 'animation_thread') and self.animation_thread.is_alive():
             self.animation_thread.join(timeout=0.1)
-        self.thinking = True
-        self.do_once = True
         self.animation_active = True
         self.animation_thread = AnimationThread(self)
         self.animation_thread.daemon = True
@@ -127,7 +140,6 @@ class RenderWindow(PromptManager):
 
     def stop_thinking(self):
         """ method to stop thinking animation """
-        self.thinking = False
         self.animation_active = False
 
     def update_animation(self):
@@ -188,7 +200,7 @@ class RenderWindow(PromptManager):
             tokens_per_second = 0
 
         # Implement a thinking emoji
-        emoji = f' {self.pulsing_chars[self.pulse_index]} ' if self.thinking else ' '
+        emoji = f' {self.pulsing_chars[self.pulse_index]} ' if self.animation_active else ' '
 
         foot_color = self.color-6 if self.light_mode else self.color
         # Create the footer text with model info, time, and token count
@@ -232,9 +244,9 @@ class RenderWindow(PromptManager):
 
         if not self.ollama_ping:
             self.ollama_ping = True
-            thread = threading.Thread(target=self.ollama_keepalive,
-                                      args=(self.host,),
-                                      daemon=True)
+            thread = Thread(target=self.ollama_keepalive,
+                            args=(self.host,),
+                            daemon=True)
             thread.start()
 
         start_time = 0

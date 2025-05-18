@@ -28,6 +28,10 @@ Perfect for storytelling, world building, AI role-play, and narrative design too
 - ✍️ **Preconditioning layer**: Light LLMs summarize fetched data before handing off to larger models (decreasing context box without losing details) -NOT Complete yet!
 - 🧪 **Debug mode**: Visualize what the model sees, including RAG hits and prompt stages
 
+<img width="764" alt="light_mode" src="https://github.com/user-attachments/assets/df7bd018-0354-45e7-8451-903d2834fcfd" />
+
+https://github.com/user-attachments/assets/07976c98-3935-4b24-a1c0-e09dcd8bf07b
+
 ---
 
 ## 🚀 Getting Started

@@ -13,10 +13,13 @@ chat:
   pre_llm: gemma-3-1B-it-QAT-Q4_0
   embedding_llm: nomic-embed-text-v1.5.f16
   history_dir: /some/writable/path or leave blank for default
-  history_matches: 5
+  history_matches: 5       (how many matches to allow from the RAG: 5 from user's RAG and 5 from AIs)
+  chat_history_session: 5  (how many turns of history to provide. Thats 15 from all sources by default)
   server: localhost:11434
   time_zone: 'America/Denver'
   light_mode: False
+  context_window: 4192
+  name: your assistants name
   debug: False
 
 # Ollama server switches of note:

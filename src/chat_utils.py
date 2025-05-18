@@ -108,7 +108,7 @@ class CommonUtils():
         colors = [51, 46, 42, 82, 154, 178, 208, 166, 203, 196]
         if self.light_mode:
             heat = {0: 21} # declare a zero
-            colors = [33, 37, 30, 28, 65, 58, 94, 130, 124, 196]
+            colors = [19, 26, 30, 28, 65, 58, 94, 130, 124, 196]
         if reverse:
             colors = colors[::-1]
             heat = {0: 196} # declare a zero
