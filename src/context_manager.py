@@ -2,9 +2,10 @@
 ContextManager aims at handeling everything relating to the context
 being supplied to the LLM. It utilizing several methods:
 
-    Emoji removal
-    Fuzzy match sentences
+    Emoji removal.
     list[] -> set() removes any matches from the RAG.
+    Staggered History.
+    ParentDocument/ChildDocument retrieval (return one large response with many small one)
 """
 import threading
 from langchain.schema import Document
@@ -26,6 +27,8 @@ class ContextManager(PromptManager):
         self.debug = kwargs['debug']
         self.name = kwargs['name']
         self.chat_sessions = kwargs['chat_sessions']
+        self.light_mode = kwargs['light_mode']
+        self.color = 245 if self.light_mode else 233
         self.rag = RAG(console, self.common, **kwargs)
         self.rag_tagger = RAGTagManager(console, self.common, **kwargs)
         self.prompts = PromptManager(self.console,
@@ -63,11 +66,11 @@ class ContextManager(PromptManager):
         prompt = prompt_template.format_messages(context=query)
         if self.debug:
             self.console.print(f'PRE-PROCESSOR PROMPT:\n{prompt}\n\n',
-                                style='color(233)', highlight=False)
+                                style=f'color({self.color})', highlight=False)
         content = pre_llm.llm_query(self.preconditioner, prompt).content
         if self.debug:
             self.console.print(f'PRE-PROCESSOR RESPONSE:\n{content}\n\n',
-                                style='color(233)', highlight=False)
+                                style=f'color({self.color})', highlight=False)
 
         tags = self.common.get_tags(content, debug=self.debug)
         return (content, tags)
@@ -105,7 +108,7 @@ class ContextManager(PromptManager):
             if _tk_cnt > max_tokens:
                 if self.debug:
                     self.console.print(f'MAX CHAT TOKENS: {_tk_cnt}',
-                                       style='color(233)',
+                                       style=f'color({self.color})',
                                        highlight=False)
                 return abridged
             abridged.append(response)
@@ -141,7 +144,7 @@ class ContextManager(PromptManager):
                 (_, meta_tags) = self.pre_processor(query)
                 if self.debug:
                     self.console.print(f'TAG RETREIVAL:\n{meta_tags}\n\n',
-                                       style='color(233)',
+                                       style=f'color({self.color})',
                                        highlight=False)
                 for collection in collection_list:
                     storage = []
@@ -155,7 +158,7 @@ class ContextManager(PromptManager):
                     # field filter searches
                     balance = self.matches - len(storage)
                     if self.debug:
-                        self.console.print(f'BALANCE: {balance}', style='color(233)')
+                        self.console.print(f'BALANCE: {balance}', style=f'color({self.color})')
                     storage.extend(self.rag.retrieve_data(query,
                                                           collection,
                                                           matches=int(max(1, balance))))
@@ -174,7 +177,7 @@ class ContextManager(PromptManager):
 
                 if self.debug:
                     self.console.print(f'CONTEXT RETRIEVAL:\n{documents}\n\n',
-                                       style='color(233)',
+                                       style=f'color({self.color})',
                                        highlight=False)
 
             # Store the users query to their RAG, now that we are done pre-processing

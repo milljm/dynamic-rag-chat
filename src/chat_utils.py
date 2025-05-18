@@ -19,6 +19,9 @@ class CommonUtils():
     def __init__(self, console, **kwargs):
         self.history_dir = kwargs['vector_dir']
         self.chat_max = kwargs['chat_max']
+        self.light_mode = kwargs['light_mode']
+        self.debug = kwargs['debug']
+        self.color = 245 if self.light_mode else 233
 
         # Heat Map
         self.console = console
@@ -30,13 +33,14 @@ class CommonUtils():
         self.chat_history_session = self.load_chat(self.history_dir)
         self.llm_prompt = self.load_prompt(self.history_dir)
 
-        # self changing prompt
+        # Regular expression in use throughout the project
         self.find_prompt  = re.compile(r'(?<=[<m]eta_prompt: ).*?(?=[>)])', re.DOTALL)
         self.meta_data = re.compile(r'(?<=[<m]eta_tags: ).*?(?=[>)])', re.DOTALL)
         self.meta_iter = re.compile(r'(\w+):\s*([^;]*)')
         self.json_style = re.compile(r'```json(.*)```', re.DOTALL)
 
-    def parse_tags(self, tag_input: dict | list[tuple[str, str]]) -> list[RAGTag]:
+    @staticmethod
+    def parse_tags(tag_input: dict | list[tuple[str, str]]) -> list[RAGTag]:
         """Normalize any kind of tag input into RAGTag list."""
         tags = []
         for key, val in dict(tag_input).items():
@@ -53,16 +57,12 @@ class CommonUtils():
             # Check for JSON-style block
             json_match = self.json_style.search(response)
             if json_match:
-                if debug:
-                    self.console.print('JSON_MATCH TRUE')
                 data = json.loads(json_match.group(1))
                 return self.parse_tags(data)
 
             # Fallback to meta_tag format
             meta_matches = self.meta_data.findall(response)
             if meta_matches:
-                if debug:
-                    self.console.print('META_MATCH TRUE')
                 flat_pairs = []
                 for match in meta_matches:
                     flat_pairs.extend(self.meta_iter.findall(match))
@@ -96,8 +96,7 @@ class CommonUtils():
         flat_strings = process(nested_list)
         return '\n\n'.join(flat_strings)
 
-    @staticmethod
-    def create_heatmap(hot_max: int = 0, reverse: bool =False)->dict[int:int]:
+    def create_heatmap(self, hot_max: int = 0, reverse: bool =False)->dict[int:int]:
         """
         Return a dictionary of ten color ascii codes (values) with the keys representing
         the maximum integer for said color code:
@@ -107,6 +106,9 @@ class CommonUtils():
         """
         heat = {0: 123} # declare a zero
         colors = [51, 46, 42, 82, 154, 178, 208, 166, 203, 196]
+        if self.light_mode:
+            heat = {0: 21} # declare a zero
+            colors = [33, 37, 30, 28, 65, 58, 94, 130, 124, 196]
         if reverse:
             colors = colors[::-1]
             heat = {0: 196} # declare a zero
@@ -177,3 +179,6 @@ class CommonUtils():
         if prompt:
             prompt = self.stringify_lists(prompt)
             self.llm_prompt = self.save_prompt(prompt)
+            if self.debug:
+                self.console.print(f'PROMPT CHANGE: {self.llm_prompt}',
+                                   style=f'color({self.color})', highlight=True)

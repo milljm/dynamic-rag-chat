@@ -2,6 +2,7 @@
 import re
 import time
 import threading
+import requests
 from threading import Thread
 from rich.live import Live
 from rich.markdown import Markdown
@@ -32,6 +33,8 @@ class RenderWindow(PromptManager):
         self.model = kwargs['model']
         self.num_ctx = kwargs['num_ctx']
         self.verbose = kwargs['verbose']
+        self.light_mode = kwargs['light_mode']
+        self.color = 245 if self.light_mode else 233
         self.model_re = re.compile(r'(\w+)\W+')
         self.common = common
         self.cm = ContextManager(console, self.common, current_dir, **kwargs)
@@ -41,9 +44,13 @@ class RenderWindow(PromptManager):
                               temperature=1.0,
                               repeat_penalty=1.1,
                               num_ctx=self.num_ctx,
-                              streaming=True)
+                              streaming=True,
+                              keep_alive=38000)
         self.prompts.build_prompts()
         self.meta_capture = ''
+
+        # Ollama hot
+        self.ollama_ping = False
 
         # Thinking animation
         self.pulsing_chars = ["⠇", "⠋", "⠙", "⠸", "⠴", "⠦"]
@@ -53,6 +60,13 @@ class RenderWindow(PromptManager):
         self.meta_hiding = False
         self.animation_active = False
         self.animation_thread = threading.Thread(target=self.update_animation)
+
+    @staticmethod
+    def ollama_keepalive(host):
+        """ keep those pesky models warm """
+        while True:
+            requests.head(f'http://{host}/', timeout=300)
+            time.sleep(5)
 
     @staticmethod
     def response_count(response)->int:
@@ -79,7 +93,11 @@ class RenderWindow(PromptManager):
             chunk.content = ''
         elif content.find('<meta') != -1:
             self.meta_hiding = True
-            self.meta_capture = content
+            # Capture multiple during this response
+            if self.meta_capture:
+                self.meta_capture += content
+            else:
+                self.meta_capture = content
             chunk.content = ''
         return chunk
 
@@ -138,13 +156,13 @@ class RenderWindow(PromptManager):
         if self.debug:
             self.console.print(f'LLM DOCUMENTS: {documents.keys()}\n'
                                f'{documents["performance"]}\n',
-                               style='color(233)',
+                               style=f'color({self.color})',
                                highlight=False)
         prompt = prompt_template.format_messages(**documents)
         # pylint: enable=no-member
         if self.debug:
             self.console.print(f'HEAVY LLM PROMPT (llm.stream()):\n{prompt}\n\n',
-                          style='color(233)',
+                          style=f'color({self.color})',
                           highlight=False)
         for chunk in self.llm.stream(prompt):
             chunk = self.reveal_thinking(chunk, self.verbose)
@@ -172,27 +190,28 @@ class RenderWindow(PromptManager):
         # Implement a thinking emoji
         emoji = f' {self.pulsing_chars[self.pulse_index]} ' if self.thinking else ' '
 
+        foot_color = self.color-6 if self.light_mode else self.color
         # Create the footer text with model info, time, and token count
         model = '-'.join(self.model_re.findall(self.model)[:2])
-        footer = Text('\n', style='color(233)')
+        footer = Text('\n', style=f'color({foot_color})')
         footer.append(f'{model}', style='color(202)')
-        footer.append(emoji, style='color(51)')
+        footer.append(emoji, style=f'color({12 if self.light_mode else 51})')
         footer.append(f'{time_taken:.2f}', style='color(94)')
-        footer.append('s Tokens(trimmed dups:', style='color(233)')
+        footer.append('s Tokens(deduplication:', style=f'color({foot_color})')
         footer.append(f'{token_savings}', style=f'color({cleaned_color})')
-        footer.append(' context:', style='color(233)')
+        footer.append(' context:', style=f'color({foot_color})')
         footer.append(f'{prompt_tokens}', style=f'color({context_size})')
-        footer.append(f':{pre_processing_time}', style='color(233)')
-        footer.append(' completion:', style='color(233)')
+        footer.append(f':{pre_processing_time}', style=f'color({foot_color})')
+        footer.append(' completion:', style=f'color({foot_color})')
         footer.append(f'{token_count}', style=f'color({produced})')
-        footer.append(f') {tokens_per_second:.1f}T/s', style='color(233)')
+        footer.append(f') {tokens_per_second:.1f}T/s', style=f'color({foot_color})')
         return footer
 
     # Compose the full chat display with footer (model name, time taken, token count)
     def render_chat(self, current_stream: str = "")->Text|Markdown:
         """ render and return markdown/syntax """
         if self.thinking and self.verbose:
-            chat_content = Text(current_stream, style='color(233)')
+            chat_content = Text(current_stream, style=f'color({self.color})')
         else:
             chat_content = Markdown(current_stream)
 
@@ -211,15 +230,23 @@ class RenderWindow(PromptManager):
                        'pre_process_time': documents['pre_process_time'],
                        'token_count'     : 0}
 
+        if not self.ollama_ping:
+            self.ollama_ping = True
+            thread = threading.Thread(target=self.ollama_keepalive,
+                                      args=(self.host,),
+                                      daemon=True)
+            thread.start()
+
         start_time = 0
         query = Markdown(f'**You:** {documents["user_query"]}\n\n---\n\n')
+        color = self.color-5 if self.light_mode else self.color
         with Live(refresh_per_second=20, console=self.console) as live:
             live.console.clear(home=True)
             live.update(query)
-            self.console.print(f'\nGathered [italic green]{footer_meta["prompt_tokens"]}'
-                               '[/italic green] context tokens (took [italic green]'
-                               f'{preprocessing}[/italic green]). Submitted to LLM. Awaiting '
-                               'response...', style='dim grey37')
+            self.console.print(f'\n[italic]Gathered {footer_meta["prompt_tokens"]} context '
+                               f'tokens (took {preprocessing}). Submitted to LLM. Awaiting '
+                               'response...[/italic]',
+                               style=f'color({color})', highlight=True)
             for piece in self.stream_response(documents):
                 if start_time == 0:
                     start_time = time.time()
@@ -237,7 +264,8 @@ class RenderWindow(PromptManager):
                     rich_content = Group(query, response, footer)
                 live.update(rich_content)
 
-        # Finish by saving chat history, finding and storing new RAG/Tags
+        # Finish by saving chat history, finding and storing new RAG/Tags or
+        # llm_prompt changes, then reset it.
         current_response += f'{self.meta_capture}'
         self.meta_capture = ''
         self.common.chat_history_session.append(f'DATE TIMESTAMP:{documents["date_time"]}'

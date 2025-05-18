@@ -16,6 +16,7 @@ chat:
   history_matches: 5
   server: localhost:11434
   time_zone: 'America/Denver'
+  light_mode: False
   debug: False
 
 # Ollama server switches of note:

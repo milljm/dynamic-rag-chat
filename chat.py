@@ -11,6 +11,7 @@
 #     "prompt_toolkit",
 #     "rich",
 #     "pypdf",
+#     "requests",
 # ]
 # ///
 import os
@@ -39,6 +40,7 @@ class Chat():
         self.model = kwargs['model']
         self.num_ctx = kwargs['num_ctx']
         self.time_zone = kwargs['time_zone']
+        self.light_mode = kwargs['light_mode']
         self.common = CommonUtils(console, **kwargs)
         self.renderer = RenderWindow(console, self.common, current_dir, **kwargs)
         self.cm = ContextManager(console, self.common, current_dir, **kwargs)
@@ -48,7 +50,7 @@ class Chat():
         self.verbose = kwargs['verbose']
         self.chat_sessions = kwargs['chat_sessions']
         if self.debug:
-            console.print('[italic dim grey50]Debug mode enabled. I will re-read the '
+            console.print('[italic dim grey30]Debug mode enabled. I will re-read the '
                                'prompt files each time[/]\n')
 
     @staticmethod
@@ -60,6 +62,15 @@ class Chat():
                    f':{my_time.hour}:{my_time.minute}:{my_time.second}'
                    f' {"AM" if my_time.hour < 12 else "PM"}')
         return _str_fmt
+
+    @staticmethod
+    def set_lightmode_aware(light):
+        """ inject a light-mode aware prompt command """
+        if light:
+            return ('Reminder: The user is using a high luminance background. Therefore, try'
+                    ' and only use dark emojis which will provide high-contrast')
+        return ('Reminder: The user is using a low luminance background. Therefore, try'
+                    ' and only use bright emojis which will provide high-contrast')
 
     def token_counter(self, documents: dict):
         """ report each document token counts """
@@ -101,7 +112,8 @@ class Chat():
              'name'            : self.name,
              'date_time'       : self.get_time(self.time_zone),
              'num_ctx'         : self.num_ctx,
-             'pre_process_time': pre_process_time}
+             'pre_process_time': pre_process_time,
+             'light_mode'      : self.set_lightmode_aware(self.light_mode)}
         )
         # Stringify everything
         for k, v in documents.items():
@@ -117,7 +129,8 @@ class Chat():
 
         # Supply the LLM with its own performances
         documents['performance'] = (f'Total Tokens: {prompt_tokens}\n'
-                                    f'Duplicate Tokens removed: {max(0, pre_t - post_t)}')
+                                    f'Duplicate Tokens removed: {max(0, pre_t - post_t)}\n'
+                                    f'My maximum Context Window size: {self.num_ctx}')
 
         return (documents, token_savings, prompt_tokens, cleaned_color, pre_process_time)
 
@@ -155,6 +168,7 @@ class Chat():
                                  'num_ctx'         : self.num_ctx,
                                  'pre_process_time': '{:.1f}s'.format(0),
                                  'performance'     : '',
+                                 'light_mode'      : self.set_lightmode_aware(self.light_mode),
                                  'llm_prompt'      : ''}
                     preprocessing = 0
                     token_savings = 0
@@ -227,6 +241,7 @@ See .chat.yaml.example for details.
     name = arg_dict.get('name', 'assistant')
     time_zone = arg_dict.get('time_zone', 'GMT')
     debug = arg_dict.get('debug', False)
+    light = arg_dict.get('light_mode', False)
     if vector_dir is None:
         vector_dir = os.path.join(current_dir, 'vector_data')
     parser = argparse.ArgumentParser(description=f'{about}',
@@ -268,6 +283,8 @@ See .chat.yaml.example for details.
                         help='Path to pdf to pre-populate main RAG')
     parser.add_argument('--import-txt', metavar='', nargs='?', type=str,
                         help='Path to txt to pre-populate main RAG')
+    parser.add_argument('--light-mode', action='store_true', default=light,
+                        help='Use a color scheme suitible for light background terminals')
     parser.add_argument('--debug', action='store_true', default=debug,
                         help='Print preconditioning message, prompt, etc')
     parser.add_argument('-v','--verbose', action='store_true', default=debug,
@@ -278,12 +295,9 @@ See .chat.yaml.example for details.
 
 if __name__ == '__main__':
     args = parse_args(sys.argv[1:])
-    rag = RAG(console, CommonUtils(console,
-                                   vector_dir=args.vector_dir,
-                                   chat_max=0), host=args.host,
-              embeddings=args.embeddings,
-              vector_dir=args.vector_dir,
-              debug=args.debug)
+    rag = RAG(console,
+              CommonUtils(console, **vars(args)),
+              **vars(args))
     if args.import_txt:
         doc_path = args.import_txt
         if os.path.exists(doc_path):

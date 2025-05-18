@@ -37,13 +37,15 @@ class RAGTagManager():
         self.common = common
         self.kwargs = kwargs
         self.debug = kwargs['debug']
+        self.light_mode = kwargs['light_mode']
+        self.color = 245 if self.light_mode else 233
 
     def update_rag(self, response, collection: str='ai_documents', debug=False)->None:
         """ regular expression through message and attempt to create key:value tuples """
         list_rag_tags = self.common.get_tags(response, debug=debug)
         if debug:
             self.console.print(f'META TAGS PARSED: {list_rag_tags}',
-                               style='color(233)',
+                               style=f'color({self.color})',
                                highlight=False)
         rag = RAG(self.console, self.common, **self.kwargs)
         # New way: Of course its practically built in. Note to self: Never pretend
@@ -57,6 +59,8 @@ class RAG():
         self.common = common
         self.vector_dir = kwargs['vector_dir']
         self.debug = kwargs['debug']
+        self.light_mode = kwargs['light_mode']
+        self.color = 250 if self.light_mode else 233
         self.embeddings = OllamaEmbeddings(base_url=kwargs['host'],
                                            model=kwargs['embeddings'])
         self.parent_splitter = RecursiveCharacterTextSplitter(chunk_size=2000,
@@ -118,15 +122,15 @@ class RAG():
 
         results = []
         results: list[Document] = vector_store.similarity_search(query,
-                                                                    matches,
-                                                                    filter=meta_data)
+                                                                 matches,
+                                                                 filter=meta_data)
         if results:
             results.extend(parent_retriever.invoke(query))
         if self.debug:
             self.console.print(f'RETRIEVED DOCS: from {collection} '
                                f'meta: {meta_data}\n',
                                f'\n{results}\n\n',
-                               style='color(233)')
+                               style=f'color({self.color})')
         return results
 
     def sanatize_response(self, response: str)->str:
@@ -145,7 +149,6 @@ class RAG():
             tags_metadata = {}
         meta_dict = dict(tags_metadata)
         doc = Document(self.sanatize_response(data), metadata=meta_dict)
-
         retriever = self.parent_retriever(collection)
         retriever.add_documents([doc])
 
