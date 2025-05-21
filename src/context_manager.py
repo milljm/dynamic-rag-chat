@@ -11,9 +11,9 @@ import threading
 from langchain.schema import Document
 from langchain.prompts import ChatPromptTemplate
 from .ragtag_manager import RAGTagManager, RAG, RAGTag
-from .ollama_model import OllamaModel
 from .prompt_manager import PromptManager
 from .filter_builder import FilterBuilder
+from .openai_model import OpenAIModel
 
 class ContextManager(PromptManager):
     """ A collection of methods aimed at producing/reducing the context """
@@ -37,7 +37,11 @@ class ContextManager(PromptManager):
                                      current_dir,
                                      model=self.preconditioner,
                                      debug=self.debug)
-        self.pre_llm = OllamaModel(base_url=self.host, **kwargs)
+        self.pre_llm = OpenAIModel(base_url=self.host,
+                                   model=self.preconditioner,
+                                   temperature=0.3,
+                                   streaming=False,
+                                   api_key=kwargs['api_key'])
         self.filter_builder = FilterBuilder()
         self.prompts.build_prompts()
 
@@ -69,7 +73,7 @@ class ContextManager(PromptManager):
         if self.debug:
             self.console.print(f'PRE-PROCESSOR PROMPT:\n{prompt}\n\n',
                                 style=f'color({self.color})', highlight=False)
-        content = self.pre_llm.llm_query(prompt).content
+        content = self.pre_llm.llm.invoke(prompt).content
         if self.debug:
             self.console.print(f'PRE-PROCESSOR RESPONSE:\n{content}\n\n',
                                 style=f'color({self.color})', highlight=False)

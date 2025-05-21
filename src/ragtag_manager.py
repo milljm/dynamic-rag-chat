@@ -13,6 +13,7 @@ from langchain.storage._lc_store import create_kv_docstore
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.schema import Document
 from langchain_community.document_loaders import PyPDFLoader
+from langchain_openai import OpenAIEmbeddings
 from langchain_ollama import OllamaEmbeddings
 from langchain_chroma import Chroma
 # Silence initial RAG database being empty
@@ -61,8 +62,17 @@ class RAG():
         self.debug = kwargs['debug']
         self.light_mode = kwargs['light_mode']
         self.color = 250 if self.light_mode else 233
-        self.embeddings = OllamaEmbeddings(base_url=kwargs['host'],
-                                           model=kwargs['embeddings'])
+
+        # hack for now, until Ollama supports v1/embeddings?
+        if kwargs['host'].find(':11434') != -1:
+            ugh = re.findall(r'(\w+:[0-9]+)', kwargs['host'])[0]
+            self.embeddings = OllamaEmbeddings(base_url=ugh,
+                                               model=kwargs['embeddings'])
+        else:
+            self.embeddings = OpenAIEmbeddings(base_url=kwargs['host'],
+                                               model=kwargs['embeddings'],
+                                               api_key=kwargs['api_key'])
+
         self.parent_splitter = RecursiveCharacterTextSplitter(chunk_size=2000,
                                                               chunk_overlap=1000)
         self.child_splitter = RecursiveCharacterTextSplitter(chunk_size=150,

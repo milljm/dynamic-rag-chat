@@ -2,15 +2,14 @@
 import re
 import time
 from threading import Thread
-import requests
 from rich.live import Live
 from rich.markdown import Markdown
 from rich.text import Text
 from rich.console import Group
-from langchain_ollama import ChatOllama
 from langchain.prompts import ChatPromptTemplate
 from .context_manager import ContextManager
 from .prompt_manager import PromptManager
+from .openai_model import OpenAIModel
 class AnimationThread(Thread):
     """ Allow pulsing animation to run as a thread """
     def __init__(self, owner):
@@ -38,13 +37,11 @@ class RenderWindow(PromptManager):
         self.common = common
         self.cm = ContextManager(console, self.common, current_dir, **kwargs)
         self.prompts = PromptManager(console, current_dir, model=self.model, debug=self.debug)
-        self.llm = ChatOllama(base_url=self.host,
-                              model=self.model,
-                              temperature=0.9,
-                              repeat_penalty=1.1,
-                              num_ctx=self.num_ctx,
-                              streaming=True,
-                              keep_alive='1h')
+        self.llm = OpenAIModel(base_url=self.host,
+                               model=self.model,
+                               temperature=0.9,
+                               streaming=True,
+                               api_key=kwargs['api_key'])
         self.prompts.build_prompts()
         self.meta_capture = ''
 
@@ -59,13 +56,6 @@ class RenderWindow(PromptManager):
         self.meta_hiding = False
         self.animation_active = False
         self.animation_thread = Thread(target=self.update_animation)
-
-    @staticmethod
-    def ollama_keepalive(host):
-        """ keep those pesky models warm """
-        while True:
-            requests.head(f'http://{host}/', timeout=300)
-            time.sleep(5)
 
     @staticmethod
     def response_count(response)->int:
@@ -176,7 +166,7 @@ class RenderWindow(PromptManager):
             self.console.print(f'HEAVY LLM PROMPT (llm.stream()):\n{prompt}\n\n',
                           style=f'color({self.color})',
                           highlight=False)
-        for chunk in self.llm.stream(prompt):
+        for chunk in self.llm.llm.stream(prompt):
             chunk = self.reveal_thinking(chunk, self.verbose)
             chunk = self.if_hiding(chunk, self.verbose)
             yield chunk
@@ -241,13 +231,6 @@ class RenderWindow(PromptManager):
                        'cleaned_color'   : cleaned_color,
                        'pre_process_time': documents['pre_process_time'],
                        'token_count'     : 0}
-
-        if not self.ollama_ping:
-            self.ollama_ping = True
-            thread = Thread(target=self.ollama_keepalive,
-                            args=(self.host,),
-                            daemon=True)
-            thread.start()
 
         start_time = 0
         query = Markdown(f'**You:** {documents["user_query"]}\n\n---\n\n')

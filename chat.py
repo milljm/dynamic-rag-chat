@@ -6,6 +6,7 @@
 #     "langchain",
 #     "langchain-core",
 #     "langchain_ollama",
+#     "langchain_openai,
 #     "langchain_chroma",
 #     "langchain-community",
 #     "prompt_toolkit",
@@ -235,6 +236,7 @@ See .chat.yaml.example for details.
     vector_dir = arg_dict.get('history_dir', None)
     matches = int(arg_dict.get('history_matches', 5)) # 5 from each RAG (User & AI)
     host = arg_dict.get('server', 'localhost:11434')
+    api_key = arg_dict.get('api_key', None)
     num_ctx = arg_dict.get('context_window', 4192)
     chat_history = arg_dict.get('chat_history_max', 1000)
     chat_history_session = arg_dict.get('chat_history_session', 5)
@@ -264,6 +266,9 @@ See .chat.yaml.example for details.
     parser.add_argument('--server', metavar='', nargs='?', dest='host',
                         default=host, type=str,
                         help='ollama server address (default: %(default)s)')
+    parser.add_argument('--api-key', metavar='', nargs='?',
+                        default=api_key, type=str,
+                        help='You API Key (default: %(default)s)')
     parser.add_argument('-n','--name', metavar='', nargs='?', dest='name',
                         default=name, type=str,
                         help='your assistants name (default: %(default)s)')

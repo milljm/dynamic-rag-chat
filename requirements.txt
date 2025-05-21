@@ -1,6 +1,7 @@
 langchain
 langchain-core
 langchain_ollama
+langchain_openai
 langchain_chroma
 langchain-community
 prompt_toolkit
