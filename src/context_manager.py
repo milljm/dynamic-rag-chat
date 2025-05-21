@@ -10,10 +10,10 @@ being supplied to the LLM. It utilizing several methods:
 import threading
 from langchain.schema import Document
 from langchain.prompts import ChatPromptTemplate
+from langchain_openai import ChatOpenAI
 from .ragtag_manager import RAGTagManager, RAG, RAGTag
 from .prompt_manager import PromptManager
 from .filter_builder import FilterBuilder
-from .openai_model import OpenAIModel
 
 class ContextManager(PromptManager):
     """ A collection of methods aimed at producing/reducing the context """
@@ -37,7 +37,7 @@ class ContextManager(PromptManager):
                                      current_dir,
                                      model=self.preconditioner,
                                      debug=self.debug)
-        self.pre_llm = OpenAIModel(base_url=self.host,
+        self.pre_llm = ChatOpenAI(base_url=self.host,
                                    model=self.preconditioner,
                                    temperature=0.3,
                                    streaming=False,
@@ -73,7 +73,7 @@ class ContextManager(PromptManager):
         if self.debug:
             self.console.print(f'PRE-PROCESSOR PROMPT:\n{prompt}\n\n',
                                 style=f'color({self.color})', highlight=False)
-        content = self.pre_llm.llm.invoke(prompt).content
+        content = self.pre_llm.invoke(prompt).content
         if self.debug:
             self.console.print(f'PRE-PROCESSOR RESPONSE:\n{content}\n\n',
                                 style=f'color({self.color})', highlight=False)

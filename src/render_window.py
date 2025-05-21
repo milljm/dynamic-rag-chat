@@ -7,9 +7,9 @@ from rich.markdown import Markdown
 from rich.text import Text
 from rich.console import Group
 from langchain.prompts import ChatPromptTemplate
+from langchain_openai import ChatOpenAI
 from .context_manager import ContextManager
 from .prompt_manager import PromptManager
-from .openai_model import OpenAIModel
 class AnimationThread(Thread):
     """ Allow pulsing animation to run as a thread """
     def __init__(self, owner):
@@ -37,7 +37,7 @@ class RenderWindow(PromptManager):
         self.common = common
         self.cm = ContextManager(console, self.common, current_dir, **kwargs)
         self.prompts = PromptManager(console, current_dir, model=self.model, debug=self.debug)
-        self.llm = OpenAIModel(base_url=self.host,
+        self.llm = ChatOpenAI(base_url=self.host,
                                model=self.model,
                                temperature=0.9,
                                streaming=True,
@@ -166,7 +166,7 @@ class RenderWindow(PromptManager):
             self.console.print(f'HEAVY LLM PROMPT (llm.stream()):\n{prompt}\n\n',
                           style=f'color({self.color})',
                           highlight=False)
-        for chunk in self.llm.llm.stream(prompt):
+        for chunk in self.llm.stream(prompt):
             chunk = self.reveal_thinking(chunk, self.verbose)
             chunk = self.if_hiding(chunk, self.verbose)
             yield chunk
