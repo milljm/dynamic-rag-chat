@@ -30,11 +30,14 @@ class ContextManager(PromptManager):
         self.light_mode = kwargs['light_mode']
         self.color = 245 if self.light_mode else 233
         self.rag = RAG(console, self.common, **kwargs)
-        self.rag_tagger = RAGTagManager(console, self.common, **kwargs)
+        self.rag_tagger = RAGTagManager(console,
+                                        self.common,
+                                        **kwargs)
         self.prompts = PromptManager(self.console,
                                      current_dir,
                                      model=self.preconditioner,
                                      debug=self.debug)
+        self.pre_llm = OllamaModel(base_url=self.host, **kwargs)
         self.filter_builder = FilterBuilder()
         self.prompts.build_prompts()
 
@@ -53,7 +56,6 @@ class ContextManager(PromptManager):
         """
         lightweight LLM as a tagging pre-processor
         """
-        pre_llm = OllamaModel(self.host)
         prompts = self.prompts
         query = self.common.normalize_for_dedup(query)
         # pylint: disable=no-member # dynamic prompts (see self.__build_prompts)
@@ -67,7 +69,7 @@ class ContextManager(PromptManager):
         if self.debug:
             self.console.print(f'PRE-PROCESSOR PROMPT:\n{prompt}\n\n',
                                 style=f'color({self.color})', highlight=False)
-        content = pre_llm.llm_query(self.preconditioner, prompt).content
+        content = self.pre_llm.llm_query(prompt).content
         if self.debug:
             self.console.print(f'PRE-PROCESSOR RESPONSE:\n{content}\n\n',
                                 style=f'color({self.color})', highlight=False)

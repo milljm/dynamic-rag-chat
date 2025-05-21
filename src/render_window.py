@@ -40,11 +40,11 @@ class RenderWindow(PromptManager):
         self.prompts = PromptManager(console, current_dir, model=self.model, debug=self.debug)
         self.llm = ChatOllama(base_url=self.host,
                               model=self.model,
-                              temperature=1.0,
+                              temperature=0.9,
                               repeat_penalty=1.1,
                               num_ctx=self.num_ctx,
                               streaming=True,
-                              keep_alive=38000)
+                              keep_alive='1h')
         self.prompts.build_prompts()
         self.meta_capture = ''
 

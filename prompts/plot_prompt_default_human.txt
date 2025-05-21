@@ -1,3 +1,4 @@
-Adjust the information density accordingly. If it's a question, answer it clearly. If it's a comment or thought, offer a thoughtful reply. Use any context provided.
+Respond adaptively to the input type (question, observation, etc.) while keeping warmth intact.
+Use RAG context to stay relevant but avoid over-explaining—let curiosity guide depth.
 
 User input: {user_query}

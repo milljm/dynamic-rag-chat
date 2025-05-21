@@ -6,14 +6,14 @@ class OllamaModel():
     Responsible for dealing directly with LLMs,
     out side of the realm of the Chat class
     """
-    def __init__(self, base_url):
-        self.base_url = base_url
+    def __init__(self, base_url, **kwargs):
+        self.llm = ChatOllama(base_url=base_url,
+                              model=kwargs['preconditioner'],
+                              temperature=0.5,
+                              repeat_penalty=1.1,
+                              streaming=False,
+                              num_ctx=kwargs['num_ctx'])
 
-    def llm_query(self, model, prompt_template, temp=1.0)->object:
+    def llm_query(self, prompt_template)->object:
         """ query the llm with a message, without streaming """
-        llm = ChatOllama(model=model,
-                         temperature=temp,
-                         base_url=self.base_url,
-                         repeat_penalty=1.1,
-                         streaming=False)
-        return llm.invoke(prompt_template)
+        return self.llm.invoke(prompt_template)
