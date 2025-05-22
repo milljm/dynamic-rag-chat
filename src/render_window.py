@@ -42,6 +42,7 @@ class RenderWindow(PromptManager):
                                model=self.model,
                                temperature=0.9,
                                streaming=True,
+                               max_tokens=kwargs['num_ctx'],
                                api_key=kwargs['api_key'])
         self.prompts.build_prompts()
         self.meta_capture = ''

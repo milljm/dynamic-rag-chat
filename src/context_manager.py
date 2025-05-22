@@ -43,6 +43,7 @@ class ContextManager(PromptManager):
                                    model=self.preconditioner,
                                    temperature=0.3,
                                    streaming=False,
+                                   max_tokens=2048,
                                    api_key=kwargs['api_key'])
         self.filter_builder = FilterBuilder()
         self.prompts.build_prompts()
