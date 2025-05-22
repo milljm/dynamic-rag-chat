@@ -47,6 +47,7 @@ class ContextManager(PromptManager):
                                    api_key=kwargs['api_key'])
         self.filter_builder = FilterBuilder()
         self.prompts.build_prompts()
+        self.warn = True
 
     def deduplication(self, base_reference: list, response_list: list) -> list[str]:
         """
@@ -89,8 +90,7 @@ class ContextManager(PromptManager):
             _token_cnt += len(context.split(' '))
         return _token_cnt
 
-    @staticmethod
-    def check_nltk_resource():
+    def check_nltk_resource(self):
         """
         Checks for NLTK 'punkt' availability.
         Issues a warning if missing, explains options.
@@ -103,22 +103,33 @@ class ContextManager(PromptManager):
                 data.find(pnk)
             return True
         except LookupError:
-            warnings.warn(
-                "NLTK 'punkt' tokenizer missing! \n"
-                "To enable advanced sentence splitting (handles abbreviations, etc.), run:\n"
-                ">>> import nltk\n"
-                ">>> nltk.download('punkt')\n"
-                ">>> nltk.download('punkt_tab')\n"
-                "Falling back to basic punctuation-based splitting (may be less accurate).",
-                UserWarning
-            )
+            if self.warn:
+                self.warn = False
+                warnings.warn(
+                '\nApologies for the interruption... This program uses "nltk" to match obscure'
+                '\nsimilarities (and removes them) to help keep your context window token count'
+                '\ndown. But I am loath to download/install something behind your back. You can'
+                '\nchoose to ignore this once-per-session message, or do the following to'
+                '\nsatisfy the requirements:\n\n'
+                'To enable advanced sentence splitting (handles abbreviations, etc.), run:\n'
+                '$> python\n'
+                '>>> import nltk\n'
+                '>>> nltk.download("punkt")\n'
+                '>>> nltk.download("punkt_tab")\n'
+                '\n\nDoing so will save expression data to "~/nltk_data"'
+                '\nLearn more about NLTK: https://www.nltk.org'
+                '\nFalling back to basic punctuation-based splitting (may be less accurate).',
+                    UserWarning
+                )
             return False
         except ImportError:
-            warnings.warn(
-                "NLTK not installed! Sentence splitting will use basic punctuation.\n"
-                "Install NLTK for better results: `pip install nltk`",
-                UserWarning
-            )
+            if self.warn:
+                self.warn = False
+                warnings.warn(
+                    'NLTK not installed! Sentence splitting will use basic punctuation.\n'
+                    'Install NLTK for better results: `pip install nltk`',
+                    UserWarning
+                )
             return False
 
     def pre_processor(self, query: str)->tuple[str,list[RAGTag]]:
