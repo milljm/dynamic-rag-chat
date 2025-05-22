@@ -7,6 +7,8 @@ being supplied to the LLM. It utilizing several methods:
     Staggered History.
     ParentDocument/ChildDocument retrieval (return one large response with many small one)
 """
+import warnings
+import re
 import threading
 from langchain.schema import Document
 from langchain.prompts import ChatPromptTemplate
@@ -45,6 +47,36 @@ class ContextManager(PromptManager):
         self.filter_builder = FilterBuilder()
         self.prompts.build_prompts()
 
+    def deduplication(self, base_reference: list, response_list: list) -> list[str]:
+        """
+        Deduplicate response_list using base_reference, preserving semantic chunks.
+        Returns cleaned RAG chunks (not just flat sentences).
+        """
+        if self.check_nltk_resource():
+            # pylint: disable=import-outside-toplevel # handle gracefully with user
+            from nltk import sent_tokenize
+        else:
+            def sent_tokenize(text):
+                # Basic fallback (splits on .!? followed by space)
+                return re.split(r'(?<=[.!?])\s+', text)
+
+        def process(text: str) -> set:
+            normalized = re.sub(r'\s+', ' ', text.strip()).lower()
+            return set(sent_tokenize(normalized))
+
+        base_sentences = set()
+        for text in base_reference:
+            base_sentences.update(process(text))
+        cleaned_chunks = []
+        for chunk in response_list:
+            response_sentences = process(chunk)
+            # pylint: disable=unnecessary-lambda,cell-var-from-loop
+            unique_sentences = sorted(response_sentences - base_sentences,
+                                      key=lambda s: chunk.find(s))
+            if unique_sentences:
+                cleaned_chunks.append(' '.join(unique_sentences))
+        return cleaned_chunks
+
     @staticmethod
     def token_retreiver(context: str|list[str])->int:
         """ iterate over string or list of strings and do a word count (token) """
@@ -55,6 +87,38 @@ class ContextManager(PromptManager):
         else:
             _token_cnt += len(context.split(' '))
         return _token_cnt
+
+    @staticmethod
+    def check_nltk_resource():
+        """
+        Checks for NLTK 'punkt' availability.
+        Issues a warning if missing, explains options.
+        """
+        try:
+            # pylint: disable=import-outside-toplevel # handle gracefully with user
+            from nltk import data
+            pnk_lst = ['tokenizers/punkt', 'tokenizers/punkt_tab']
+            for pnk in pnk_lst:
+                data.find(pnk)
+            return True
+        except LookupError:
+            warnings.warn(
+                "NLTK 'punkt' tokenizer missing! \n"
+                "To enable advanced sentence splitting (handles abbreviations, etc.), run:\n"
+                ">>> import nltk\n"
+                ">>> nltk.download('punkt')\n"
+                ">>> nltk.download('punkt_tab')\n"
+                "Falling back to basic punctuation-based splitting (may be less accurate).",
+                UserWarning
+            )
+            return False
+        except ImportError:
+            warnings.warn(
+                "NLTK not installed! Sentence splitting will use basic punctuation.\n"
+                "Install NLTK for better results: `pip install nltk`",
+                UserWarning
+            )
+            return False
 
     def pre_processor(self, query: str)->tuple[str,list[RAGTag]]:
         """
@@ -162,7 +226,7 @@ class ContextManager(PromptManager):
                     # General RAG retreival: if Extensive retrieval above is low, figure the
                     # difference of allowed maximum, and use that number for matches without
                     # field filter searches
-                    balance = self.matches - len(storage)
+                    balance = max(0, self.matches - len(storage))
                     if self.debug:
                         self.console.print(f'BALANCE: {balance}', style=f'color({self.color})')
                     storage.extend(self.rag.retrieve_data(query,
@@ -175,7 +239,8 @@ class ContextManager(PromptManager):
                         pre_tokens += self.token_retreiver(page)
 
                     # Remove duplicates RAG matches
-                    documents[collection] = (list(set(pages)))
+                    documents[collection] = self.deduplication(documents['chat_history'],
+                                                               pages)
 
                     # Record post-token counts
                     for page in documents[collection]:

@@ -9,3 +9,4 @@ rich
 pypdf
 pytz
 requests
+nltk

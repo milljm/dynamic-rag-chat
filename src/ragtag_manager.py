@@ -65,7 +65,7 @@ class RAG():
 
         # hack for now, until Ollama supports v1/embeddings?
         if kwargs['host'].find(':11434') != -1:
-            ugh = re.findall(r'(\w+:[0-9]+)', kwargs['host'])[0]
+            ugh = re.findall(r'([\w+\.-]+:[0-9]+)', kwargs['host'])[0]
             self.embeddings = OllamaEmbeddings(base_url=ugh,
                                                model=kwargs['embeddings'])
         else:

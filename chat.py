@@ -13,6 +13,7 @@
 #     "rich",
 #     "pypdf",
 #     "requests",
+#     "nltk",
 # ]
 # ///
 import os
@@ -110,6 +111,7 @@ class Chat():
         documents.update(
             {'llm_prompt'      : self.common.llm_prompt,
              'user_query'      : user_input,
+             'chat_sessions'   : self.chat_sessions,
              'name'            : self.name,
              'date_time'       : self.get_time(self.time_zone),
              'num_ctx'         : self.num_ctx,
@@ -162,6 +164,7 @@ class Chat():
                     documents = {'user_query'      : user_input,
                                  'name'            : self.name,
                                  'chat_history'    : '',
+                                 'chat_sessions'   : self.chat_sessions,
                                  'ai_documents'    : '',
                                  'user_documents'  : '',
                                  'context'         : '',

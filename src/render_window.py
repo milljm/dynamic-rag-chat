@@ -31,6 +31,7 @@ class RenderWindow(PromptManager):
         self.model = kwargs['model']
         self.num_ctx = kwargs['num_ctx']
         self.verbose = kwargs['verbose']
+        self.name = kwargs['name']
         self.light_mode = kwargs['light_mode']
         self.color = 245 if self.light_mode else 233
         self.model_re = re.compile(r'(\w+)\W+')
@@ -44,9 +45,6 @@ class RenderWindow(PromptManager):
                                api_key=kwargs['api_key'])
         self.prompts.build_prompts()
         self.meta_capture = ''
-
-        # Ollama hot
-        self.ollama_ping = False
 
         # Thinking animation
         self.pulsing_chars = ["⠇", "⠋", "⠙", "⠸", "⠴", "⠦"]
@@ -233,15 +231,14 @@ class RenderWindow(PromptManager):
                        'token_count'     : 0}
 
         start_time = 0
-        query = Markdown(f'**You:** {documents["user_query"]}\n\n---\n\n')
         color = self.color-5 if self.light_mode else self.color
+        header = Text(f'Submitting relevant RAG+History tokens: {footer_meta["prompt_tokens"]} '
+                      f'(took {preprocessing})...', style=f'color({color})')
+        seperator = Markdown('---')
+        query = Markdown(f'**You:** {documents["user_query"]}')
         with Live(refresh_per_second=20, console=self.console) as live:
             live.console.clear(home=True)
-            live.update(query)
-            self.console.print(f'\n[italic]Gathered {footer_meta["prompt_tokens"]} context '
-                               f'tokens (took {preprocessing}). Submitted to LLM. Awaiting '
-                               'response...[/italic]',
-                               style=f'color({color})', highlight=True)
+            live.update(Group(header, query, seperator, seperator))
             for piece in self.stream_response(documents):
                 if start_time == 0:
                     start_time = time.time()
@@ -249,23 +246,21 @@ class RenderWindow(PromptManager):
                 footer_meta['token_count'] += self.response_count(piece.content)
                 response = self.render_chat(current_response)
                 footer = self.render_footer(time.time()-start_time, **footer_meta)
-                # create our theme in the following order
-                rich_content = Group(query, response, footer)
                 # replace 'thinking' output with Mode's Markdown response
                 if isinstance(response, Markdown) and self.do_once:
                     self.do_once = False
                     # Reset (erase) the thinking output
                     current_response = ''
-                    rich_content = Group(query, response, footer)
+                rich_content = Group(header, query, seperator, seperator,
+                                     Markdown(f'**{self.name}:**'), response, footer)
                 live.update(rich_content)
 
         # Finish by saving chat history, finding and storing new RAG/Tags or
         # llm_prompt changes, then reset it.
-        current_response += f'{self.meta_capture}'
+        current_response += self.meta_capture
         self.meta_capture = ''
-        self.common.chat_history_session.append(f'DATE TIMESTAMP:{documents["date_time"]}'
-                                         f'\nUSER:{documents["user_query"]}\n'
-                                         f'AI:{current_response}\n\n')
+        self.common.chat_history_session.append(f'\nUSER:{documents["user_query"]}\n'
+                                                f'AI: {current_response}\n\n')
         self.cm.handle_context([current_response],
                                 direction='store')
         self.common.save_chat(self.common.history_dir, self.common.chat_history_session)
