@@ -311,20 +311,31 @@ See .chat.yaml.example for details.
 # pylint: disable=redefined-outer-name #  we exit immediately
 def extract_text_from_pdf(args: argparse.ArgumentParser)->None:
     """ Store imported PDF text directly into the RAG """
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=300)
+    common = CommonUtils(console, **vars(args))
     rag = RAG(console,
               CommonUtils(console, **vars(args)),
               **vars(args),)
     chat = Chat(**vars(args))
+    print(f'Importing document: {args.import_pdf}')
     loader = PyPDFLoader(args.import_pdf)
     pages = []
     try:
         for page in loader.lazy_load():
             pages.append(page)
         page_texts = list(map(lambda doc: doc.page_content, pages))
-        for page_text in page_texts:
+        for p_cnt, page_text in enumerate(page_texts):
             if page_text:
-                _, meta_data  = chat.cm.pre_processor(page_text)
-                rag.store_data(page_text, tags_metadata=meta_data)
+                print(f'\tPage {p_cnt+1}/{len(page_texts)}')
+                texts = text_splitter.split_text(page_text)
+                for ind, text in enumerate(texts):
+                    print(f'\t\tmetadata tagging chunk {ind+1}/{len(texts)}')
+                    _, meta_tags  = chat.cm.pre_processor(text)
+                    _normal = common.normalize_for_dedup(text)
+                    rag.store_data(_normal, tags_metadata=meta_tags)
+            else:
+                print(f'\tPage {p_cnt+1}/{len(page_texts)} blank')
+
 
     except pypdf.errors.PdfStreamError as e:
         print(f'Error loading PDF:\n\n\t{e}\n\nIs this a valid PDF?')
@@ -333,15 +344,21 @@ def extract_text_from_pdf(args: argparse.ArgumentParser)->None:
 
 def store_text(args: argparse.ArgumentParser)->None:
     """ Store imported text file directly into the RAG """
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=300)
+    common = CommonUtils(console, **vars(args))
     chat = Chat(**vars(args))
     rag = RAG(console,
               CommonUtils(console, **vars(args)),
               **vars(args),)
+    print(f'Importing document: {args.import_txt}')
     with open(args.import_txt, 'r', encoding='utf-8') as file:
         document_content = file.read()
-        _, meta_tags  = chat.cm.pre_processor(document_content)
-        rag.store_data(document_content, tags_metadata=meta_tags)
-        print(f"Document loaded from: {args.import_txt}")
+        texts = text_splitter.split_text(document_content)
+        for ind, text in enumerate(texts):
+            print(f'\tmetadata tagging chunk {ind+1}/{len(texts)}')
+            _, meta_tags  = chat.cm.pre_processor(text)
+            _normal = common.normalize_for_dedup(text)
+            rag.store_data(_normal, tags_metadata=meta_tags)
     sys.exit()
 
 def extract_text_from_markdown(args: argparse.ArgumentParser)->None:
@@ -349,7 +366,8 @@ def extract_text_from_markdown(args: argparse.ArgumentParser)->None:
     walk recursively through provided directory and import *.md, *.html, *.txt
     file directly into the RAG
     """
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=4096, chunk_overlap=0)
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=300)
+    common = CommonUtils(console, **vars(args))
     chat = Chat(**vars(args))
     rag = RAG(console,
               CommonUtils(console, **vars(args)),
@@ -366,24 +384,31 @@ def extract_text_from_markdown(args: argparse.ArgumentParser)->None:
                 print(f'Importing document: {_file}')
                 texts = text_splitter.split_text(document_content)
                 for ind, text in enumerate(texts):
-                    print(f'metadata tagging chunk {ind+1}/{len(texts)}')
+                    print(f'\tmetadata tagging chunk {ind+1}/{len(texts)}')
                     _, meta_tags  = chat.cm.pre_processor(text)
-                    rag.store_data(text, tags_metadata=meta_tags)
+                    _normal = common.normalize_for_dedup(text)
+                    rag.store_data(_normal, tags_metadata=meta_tags)
     sys.exit()
 
 def extract_text_from_web(args: argparse.ArgumentParser)->None:
     """ extract plain text from web address """
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=300)
+    common = CommonUtils(console, **vars(args))
     chat = Chat(**vars(args))
     rag = RAG(console,
               CommonUtils(console, **vars(args)),
               **vars(args),)
     response = requests.get(args.import_web, timeout=300)
     if response.status_code == 200:
+        print(f"Document loaded from: {args.import_web}")
         soup = BeautifulSoup(response.content, 'html.parser')
         text = soup.get_text()
-        _, meta_tags  = chat.cm.pre_processor(text)
-        rag.store_data(text, tags_metadata=meta_tags)
-        print(f"Document loaded from: {args.import_web}")
+        texts = text_splitter.split_text(text)
+        for ind, text in enumerate(texts):
+            print(f'\tmetadata tagging chunk {ind+1}/{len(texts)}')
+            _, meta_tags  = chat.cm.pre_processor(text)
+            _normal = common.normalize_for_dedup(text)
+            rag.store_data(_normal, tags_metadata=meta_tags)
     else:
         print(f'Error obtaining webpage: {response.status_code}\n{response.raw}')
         sys.exit(1)
