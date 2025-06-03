@@ -31,6 +31,7 @@ from prompt_toolkit import PromptSession
 from prompt_toolkit.key_binding import KeyBindings
 import pypdf # for error handling of PyPDFLoader
 from langchain_community.document_loaders import PyPDFLoader
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from src import ContextManager
 from src import RAG
 from src import RenderWindow
@@ -295,6 +296,8 @@ See .chat.yaml.example for details.
                         help='Path to txt to pre-populate main RAG')
     parser.add_argument('--import-web', metavar='', type=str,
                         help='URL to pre-populate main RAG')
+    parser.add_argument('--import-dir', metavar='', type=str,
+                        help='Path to recursively find and import assorted files (*.md *.html)')
     parser.add_argument('--light-mode', action='store_true', default=light,
                         help='Use a color scheme suitible for light background terminals')
     parser.add_argument('-d', '--debug', action='store_true', default=debug,
@@ -341,6 +344,33 @@ def store_text(args: argparse.ArgumentParser)->None:
         print(f"Document loaded from: {args.import_txt}")
     sys.exit()
 
+def extract_text_from_markdown(args: argparse.ArgumentParser)->None:
+    """
+    walk recursively through provided directory and import *.md, *.html, *.txt
+    file directly into the RAG
+    """
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=4096, chunk_overlap=0)
+    chat = Chat(**vars(args))
+    rag = RAG(console,
+              CommonUtils(console, **vars(args)),
+              **vars(args),)
+    for fdir, _, files in os.walk(args.import_dir):
+        for file in files:
+            if file.find('.md') != -1 or file.find('.html') != -1 or file.find('.txt'):
+                _file = os.path.join(fdir, file)
+                with open(_file, 'r', encoding='utf-8') as file:
+                    document_content = file.read()
+                if _file.find('.html') != -1:
+                    soup = BeautifulSoup(document_content, 'html.parser')
+                    document_content = soup.get_text()
+                print(f'Importing document: {_file}')
+                texts = text_splitter.split_text(document_content)
+                for ind, text in enumerate(texts):
+                    print(f'metadata tagging chunk {ind+1}/{len(texts)}')
+                    _, meta_tags  = chat.cm.pre_processor(text)
+                    rag.store_data(text, tags_metadata=meta_tags)
+    sys.exit()
+
 def extract_text_from_web(args: argparse.ArgumentParser)->None:
     """ extract plain text from web address """
     chat = Chat(**vars(args))
@@ -376,5 +406,9 @@ if __name__ == '__main__':
     if args.import_web:
         extract_text_from_web(args)
         sys.exit(0)
+    if args.import_dir:
+        if os.path.exists(args.import_dir):
+            extract_text_from_markdown(args)
+            sys.exit(0)
     chat = Chat(**vars(args))
     chat.chat()
