@@ -9,22 +9,25 @@
 # LLM, and then change it back to continue past-conversations. Or, delete this
 # directory when finished to remove any trace of your conversations.
 chat:
-  model: qwen3:235b-a22b-q4_K_M             (heavy-weight LLM, your main go-to)
-  pre_llm: gemma-3-1B-it-QAT-Q4_0           (light-weight LLM, used for metadata tagging)
-  embedding_llm: nomic-embed-text-v1.5.f16  (embeddings for RAG vector database work)
-  history_dir:                              /some/writable/path or leave blank for default
-  history_matches: 5                        (how many matches to allow from the RAG: 5 from user's RAG and 5 from AIs)
-  chat_history_session: 5                   (how many turns of history to provide. Thats 15 from all sources by default)
-  server: https://openai-compatible.com/v1
-  api_key: YOUR API KEY
-  time_zone: 'America/Denver'               (currenlty not used in the system prompts, easy to implement though: {date_time})
-  light_mode: False                         (set to true if you use a high luminance terminal background)
-  context_window: 4192                      (currently not used in, WIP)
+  model: qwen3:235b-a22b-q4_K_M                      (heavy-weight LLM, your main go-to)
+  pre_llm: gemma-3-1B-it-QAT-Q4_0                    (light-weight LLM, used for metadata tagging)
+  embedding_llm: nomic-embed-text-v1.5.f16           (embeddings for RAG vector database work)
+  history_dir:                                       /some/writable/path or leave blank for default
+  history_matches: 5                                 (how many matches to allow from the RAG: 5 from user's RAG and 5 from AIs)
+  history_session: 5                                 (how many turns of history to provide. Thats 15 from all sources by default)
+  llm_server: https://api.openai.com/v1              (An OpenAI compatible API server address. If using Ollama locally that would be: http://localhost:11434/v1)
+  pre_server:                                        (the server for which is hosting the pre_llm model, or blank to use llm_server)
+  embedding_server:                                  (the server for which is hosting the embedding_llm model, or blank to use llm_server)
+  api_key: YOUR API KEY                              (Your assigned API key, or empty if using local Ollama server)
+  time_zone: 'America/Denver'                        (currenlty not used in the system prompts, easy to implement though: {date_time})
+  light_mode: False                                  (set to true if you use a high luminance terminal background)
+  context_window: 4192                               (currently not used in, WIP)
   name: your assistants name
   debug: False
 
 # Ollama server switches of note:
-# I have good experiences with the above models at 20+ tokens/s, using the following Ollama environment variables set:
+# I have good experiences with the above models running locally at 25+ tokens/s (Mac Studio 512GB),
+# using the following Ollama environment variables set:
 #
 # OLLAMA_CONTEXT_LENGTH=32768
 # OLLAMA_KEEP_ALIVE=24h

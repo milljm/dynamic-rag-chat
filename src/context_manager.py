@@ -23,7 +23,7 @@ class ContextManager(PromptManager):
         super().__init__(console, current_dir)
         self.console = console
         self.common = common
-        self.host = kwargs['host']
+        self.pre_host = kwargs['pre_host']
         self.matches = kwargs['matches']
         self.preconditioner = kwargs['preconditioner']
         self.debug = kwargs['debug']
@@ -39,12 +39,12 @@ class ContextManager(PromptManager):
                                      current_dir,
                                      model=self.preconditioner,
                                      debug=self.debug)
-        self.pre_llm = ChatOpenAI(base_url=self.host,
-                                   model=self.preconditioner,
-                                   temperature=0.3,
-                                   streaming=False,
-                                   max_tokens=2048,
-                                   api_key=kwargs['api_key'])
+        self.pre_llm = ChatOpenAI(base_url=self.pre_host,
+                                  model=self.preconditioner,
+                                  temperature=0.3,
+                                  streaming=False,
+                                  max_tokens=2048,
+                                  api_key=kwargs['api_key'])
         self.filter_builder = FilterBuilder()
         self.prompts.build_prompts()
         self.warn = True
@@ -160,7 +160,6 @@ class ContextManager(PromptManager):
     def post_process(self, response)->None:
         """ Start a thread to process LLMs response """
         threading.Thread(target=self.rag_tagger.update_rag, args=(response,),
-                         kwargs={'debug': self.debug},
                          daemon=True).start()
 
     @staticmethod

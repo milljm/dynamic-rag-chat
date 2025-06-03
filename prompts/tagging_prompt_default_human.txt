@@ -1,6 +1,6 @@
-You are an expert metadata extractor.
+I am an expert metadata extractor.
 
-Your task is to read the following text and extract a fixed set of metadata fields into a JSON object.
+My task is to read the following text and extract a fixed set of metadata fields into a JSON object.
 
 ⚠️ Rules:
 - Output exactly this JSON schema. Do not add or remove any fields.
@@ -12,18 +12,23 @@ Your task is to read the following text and extract a fixed set of metadata fiel
 - emotion (e.g., calm, excited, annoyed)
 - focus (e.g., greeting, conversation building, explaining). Include multiple if relevant.
 - entity: any names of people or beings mentioned (e.g., John, Jane)
-- other optional tags: location, gear, weather
+- other optional tags: location, gear, weather, relationship_stage, narrative_arc, scene_type, sensory_mood, user_choice, coding
 
 🧾 JSON Output Format:
 {{
-  "tone": string,        // e.g., helpful, friendly, sarcastic
-  "emotion": string,     // e.g., calm, excited, annoyed
-  "focus": string,       // e.g., greeting, conversation building, explaining. Include multiple if relevant
-  "entity": [string],    // list of any names of people or beings mentioned (e.g., John, Jane, chef) or null
-  "location": [string],  // list of places or world locations or null
-  "items": [string],     // list of any items mentioned (e.g., watch, jewlery, weapons) or null
-  "weather": string|null // simple description (e.g., "stormy") or null
-  "coding": string|null  // simple description of programming languange or null
+  "tone": string, // e.g., introspective, hopeful, tense, vulnerable
+  "emotion": string, // primary emotion in the text
+  "focus": string, // main narrative themes (e.g., dialogue, bonding, introspection)
+  "entity": [string] | [], // list of named characters, or empty list
+  "location": [string] | [], // list of places, or empty list
+  "items": [string] | [], // list of objects mentioned, or empty list
+  "weather": string | null, // environment/weather description
+  "relationship_stage": string | null, // e.g., tentative trust, growing bond
+  "narrative_arc": string | null, // e.g., ivy_trust_arc, somni_rescue_arc
+  "scene_type": string | null, // e.g., quiet moment, dialogue, flashback
+  "sensory_mood": string | null, // sensory tone or atmosphere (e.g., warm light, cold silence)
+  "user_choice": string | null, // last user action or dialogue (e.g., asked about john, pressed hand to hers)
+  "coding": string | null // programming language if relevant, otherwise null
 }}
 
 ---

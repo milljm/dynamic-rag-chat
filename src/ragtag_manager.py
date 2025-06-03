@@ -2,17 +2,14 @@
 RAGTagManager aims at handling the RAGs and the Collection(s) process (tagging)
 """
 import os
-import sys
 import re
 import logging
 from typing import NamedTuple
-import pypdf # for error handling of PyPDFLoader
 from langchain.retrievers import ParentDocumentRetriever
 from langchain.storage import LocalFileStore
 from langchain.storage._lc_store import create_kv_docstore
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.schema import Document
-from langchain_community.document_loaders import PyPDFLoader
 from langchain_openai import OpenAIEmbeddings
 from langchain_ollama import OllamaEmbeddings
 from langchain_chroma import Chroma
@@ -41,10 +38,10 @@ class RAGTagManager():
         self.light_mode = kwargs['light_mode']
         self.color = 245 if self.light_mode else 233
 
-    def update_rag(self, response, collection: str='ai_documents', debug=False)->None:
+    def update_rag(self, response, collection: str='ai_documents')->None:
         """ regular expression through message and attempt to create key:value tuples """
-        list_rag_tags = self.common.get_tags(response, debug=debug)
-        if debug:
+        list_rag_tags = self.common.get_tags(response, debug=self.debug)
+        if self.debug:
             self.console.print(f'META TAGS PARSED: {list_rag_tags}',
                                style=f'color({self.color})',
                                highlight=False)
@@ -64,12 +61,13 @@ class RAG():
         self.color = 250 if self.light_mode else 233
 
         # hack for now, until Ollama supports v1/embeddings?
-        if kwargs['host'].find(':11434') != -1:
-            ugh = re.findall(r'([\w+\.-]+:[0-9]+)', kwargs['host'])[0]
+        if kwargs['emb_host'].find(':11434') != -1:
+            # https://someaddress.com/v1 --> someaddress:11434
+            ugh = re.findall(r'([\w+\.-]+:[0-9]+)', kwargs['emb_host'])[0]
             self.embeddings = OllamaEmbeddings(base_url=ugh,
                                                model=kwargs['embeddings'])
         else:
-            self.embeddings = OpenAIEmbeddings(base_url=kwargs['host'],
+            self.embeddings = OpenAIEmbeddings(base_url=kwargs['emb_host'],
                                                model=kwargs['embeddings'],
                                                api_key=kwargs['api_key'])
 
@@ -158,22 +156,10 @@ class RAG():
         if tags_metadata is None:
             tags_metadata = {}
         meta_dict = dict(tags_metadata)
+        if self.debug:
+            self.console.print(f'STORE DATA: {data}\nTAGS: {meta_dict}',
+                               style=f'color({self.color})',
+                               highlight=False)
         doc = Document(self.sanatize_response(data), metadata=meta_dict)
         retriever = self.parent_retriever(collection)
         retriever.add_documents([doc])
-
-    def extract_text_from_pdf(self, pdf_path)->None:
-        """ extract text from PDFs """
-        loader = PyPDFLoader(pdf_path)
-        pages = []
-        try:
-            for page in loader.lazy_load():
-                pages.append(page)
-            page_texts = list(map(lambda doc: doc.page_content, pages))
-            for page_text in page_texts:
-                if page_text:
-                    self.store_data(page_text, collection = 'ai_documents')
-
-        except pypdf.errors.PdfStreamError as e:
-            print(f'Error loading PDF:\n\n\t{e}\n\nIs this a valid PDF?')
-            sys.exit(1)

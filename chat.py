@@ -26,6 +26,8 @@ import pytz
 from rich.console import Console
 from prompt_toolkit import PromptSession
 from prompt_toolkit.key_binding import KeyBindings
+import pypdf # for error handling of PyPDFLoader
+from langchain_community.document_loaders import PyPDFLoader
 from src import ContextManager
 from src import RAG
 from src import RenderWindow
@@ -238,11 +240,13 @@ See .chat.yaml.example for details.
     embeddings = arg_dict.get('embedding_llm', 'nomic-embed-text-v1.5.f16')
     vector_dir = arg_dict.get('history_dir', None)
     matches = int(arg_dict.get('history_matches', 5)) # 5 from each RAG (User & AI)
-    host = arg_dict.get('server', 'localhost:11434')
+    host = arg_dict.get('llm_server', 'http://localhost:11434/v1')
+    pre_host = arg_dict.get('pre_server', host)
+    emb_host = arg_dict.get('embedding_server', host)
     api_key = arg_dict.get('api_key', None)
     num_ctx = arg_dict.get('context_window', 4192)
-    chat_history = arg_dict.get('chat_history_max', 1000)
-    chat_history_session = arg_dict.get('chat_history_session', 5)
+    chat_history = arg_dict.get('history_max', 1000)
+    history_session = arg_dict.get('history_session', 5)
     name = arg_dict.get('name', 'assistant')
     time_zone = arg_dict.get('time_zone', 'GMT')
     debug = arg_dict.get('debug', False)
@@ -252,48 +256,43 @@ See .chat.yaml.example for details.
     parser = argparse.ArgumentParser(description=f'{about}',
                                      epilog=f'{epilog}',
                                      formatter_class=argparse.RawTextHelpFormatter)
-    parser.add_argument('-m', '--model', default=model, metavar='',
+    parser.add_argument('--model', default=model, metavar='',
                         help='LLM Model (default: %(default)s)')
-    parser.add_argument('-p', '--pre-llm', metavar='', nargs='?', dest='preconditioner',
-                        default=preconditioner, type=str,
-                        help='pre-processor LLM (default: %(default)s)')
-    parser.add_argument('-e', '--embedding-llm', metavar='', nargs='?', dest='embeddings',
-                        default=embeddings, type=str,
-                        help='LM embedding model (default: %(default)s)')
-    parser.add_argument('--history-dir', metavar='', nargs='?', dest='vector_dir',
-                        default=vector_dir, type=str,
-                        help='history directory (default: %(default)s)')
-    parser.add_argument('--history-matches', metavar='', nargs='?', dest='matches',
-                        default=matches, type=int,
+    parser.add_argument('--pre-llm', metavar='', dest='preconditioner', default=preconditioner,
+                        type=str, help='pre-processor LLM (default: %(default)s)')
+    parser.add_argument('--embedding-llm', metavar='', dest='embeddings', default=embeddings,
+                        type=str, help='LM embedding model (default: %(default)s)')
+    parser.add_argument('--history-dir', metavar='', dest='vector_dir', default=vector_dir,
+                        type=str, help='history directory (default: %(default)s)')
+    parser.add_argument('--history-matches', metavar='', dest='matches', default=matches, type=int,
                         help='Number of results to pull from each RAG (default: %(default)s)')
-    parser.add_argument('--server', metavar='', nargs='?', dest='host',
-                        default=host, type=str,
-                        help='ollama server address (default: %(default)s)')
-    parser.add_argument('--api-key', metavar='', nargs='?',
-                        default=api_key, type=str,
+    parser.add_argument('--llm-server', metavar='', dest='host', default=host, type=str,
+                        help='OpenAI API server address (default: %(default)s)')
+    parser.add_argument('--pre-server', metavar='', dest='pre_host', default=pre_host, type=str,
+                        help='OpenAI API server address (default: %(default)s)')
+    parser.add_argument('--embedding-server', metavar='', dest='emb_host', default=emb_host,
+                        type=str, help='OpenAI API server address (default: %(default)s)')
+    parser.add_argument('--api-key', metavar='', default=api_key, type=str,
                         help='You API Key (default: %(default)s)')
-    parser.add_argument('-n','--name', metavar='', nargs='?', dest='name',
-                        default=name, type=str,
+    parser.add_argument('--name', metavar='', dest='name', default=name, type=str,
                         help='your assistants name (default: %(default)s)')
-    parser.add_argument('-t','--time-zone', metavar='', nargs='?', dest='time_zone',
-                        default=time_zone, type=str,
+    parser.add_argument('--time-zone', metavar='', dest='time_zone', default=time_zone, type=str,
                         help='your assistants name (default: %(default)s)')
-    parser.add_argument('--chat-history-max', metavar='', nargs='?', dest='chat_max',
-                        default=chat_history, type=int,
+    parser.add_argument('--history-max', metavar='', dest='chat_max', default=chat_history,
+                        type=int,
                         help='Chat history responses to save to disk (default: %(default)s)')
-    parser.add_argument('--chat-history-session', metavar='', nargs='?', dest='chat_sessions',
-                        default=chat_history_session, type=int,
+    parser.add_argument('--history-session', metavar='', dest='chat_sessions',
+                        default=history_session, type=int,
                         help='Chat history responses availble in context (default: %(default)s)')
-    parser.add_argument('--context-window', metavar='', nargs='?', dest='num_ctx',
-                        default=num_ctx, type=int,
+    parser.add_argument('--context-window', metavar='', dest='num_ctx', default=num_ctx, type=int,
                         help='the maximum context window size (default: %(default)s)')
-    parser.add_argument('--import-pdf', metavar='', nargs='?', type=str,
+    parser.add_argument('--import-pdf', metavar='', type=str,
                         help='Path to pdf to pre-populate main RAG')
-    parser.add_argument('--import-txt', metavar='', nargs='?', type=str,
+    parser.add_argument('--import-txt', metavar='', type=str,
                         help='Path to txt to pre-populate main RAG')
     parser.add_argument('--light-mode', action='store_true', default=light,
                         help='Use a color scheme suitible for light background terminals')
-    parser.add_argument('--debug', action='store_true', default=debug,
+    parser.add_argument('-d', '--debug', action='store_true', default=debug,
                         help='Print preconditioning message, prompt, etc')
     parser.add_argument('-v','--verbose', action='store_true', default=debug,
                         help='Do not hide what the model is thinking (if the model supports'
@@ -301,27 +300,57 @@ See .chat.yaml.example for details.
 
     return verify_args(parser.parse_args(argv))
 
-if __name__ == '__main__':
-    args = parse_args(sys.argv[1:])
+# pylint: disable=redefined-outer-name #  we exit immediately
+def extract_text_from_pdf(args: argparse.ArgumentParser)->None:
+    """ extract text from PDFs and store data in RAG with meta_data tagging """
     rag = RAG(console,
               CommonUtils(console, **vars(args)),
-              **vars(args))
+              **vars(args),)
+    pdf_chat = Chat(**vars(args))
+    loader = PyPDFLoader(args.import_pdf)
+    pages = []
+    try:
+        for page in loader.lazy_load():
+            pages.append(page)
+        page_texts = list(map(lambda doc: doc.page_content, pages))
+        for page_text in page_texts:
+            if page_text:
+                _, meta_data  = pdf_chat.cm.pre_processor(page_text)
+                rag.store_data(page_text, tags_metadata=meta_data)
+
+    except pypdf.errors.PdfStreamError as e:
+        print(f'Error loading PDF:\n\n\t{e}\n\nIs this a valid PDF?')
+        sys.exit(1)
+    sys.exit()
+
+# pylint: disable=redefined-outer-name #  we exit immediately
+def store_text(args: argparse.ArgumentParser)->None:
+    """ Store data in RAG with meta_data tagging """
+    text_chat = Chat(**vars(args))
+    rag = RAG(console,
+              CommonUtils(console, **vars(args)),
+              **vars(args),)
+    with open(args.import_txt, 'r', encoding='utf-8') as file:
+        document_content = file.read()
+        _, meta_tags  = text_chat.cm.pre_processor(document_content)
+        rag.store_data(document_content, tags_metadata=meta_tags)
+        print(f"Document loaded from: {args.import_txt}")
+    sys.exit()
+
+# pylint: enable=redefined-outer-name
+if __name__ == '__main__':
+    args = parse_args(sys.argv[1:])
     if args.import_txt:
-        doc_path = args.import_txt
-        if os.path.exists(doc_path):
-            with open(doc_path, 'r', encoding='utf-8') as file:
-                document_content = file.read()
-                rag.store_data(document_content)
-            print(f"Document loaded from: {doc_path}")
+        if os.path.exists(args.import_txt):
+            store_text(args)
         else:
-            print(f"Error: The file at {doc_path} does not exist.")
-        sys.exit()
+            print(f'Error: The file at {args.import_txt} does not exist.')
+            sys.exit(1)
     if args.import_pdf:
-        pdf_file = args.import_pdf
-        if os.path.exists(pdf_file):
-            rag.extract_text_from_pdf(pdf_file)
+        if os.path.exists(args.import_pdf):
+            extract_text_from_pdf(args)
         else:
-            print(f"Error: The file at {pdf_file} does not exist.")
-        sys.exit()
+            print(f"Error: The file at {args.import_pdf} does not exist.")
+            sys.exit(1)
     chat = Chat(**vars(args))
     chat.chat()
