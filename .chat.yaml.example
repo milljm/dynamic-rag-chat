@@ -21,7 +21,7 @@ chat:
   api_key: YOUR API KEY                              (Your assigned API key, or empty if using local Ollama server)
   time_zone: 'America/Denver'                        (currenlty not used in the system prompts, easy to implement though: {date_time})
   light_mode: False                                  (set to true if you use a high luminance terminal background)
-  context_window: 4192                               (currently not used in, WIP)
+  context_window: 4192                               (ask the server to use this context window size. Sometimes can be ignore)
   name: your assistants name
   debug: False
 

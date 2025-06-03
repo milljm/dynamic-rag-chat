@@ -14,6 +14,7 @@
 #     "pypdf",
 #     "requests",
 #     "nltk",
+#     "beautifulsoup4",
 # ]
 # ///
 import os
@@ -23,7 +24,9 @@ import argparse
 import datetime
 import yaml
 import pytz
+import requests
 from rich.console import Console
+from bs4 import BeautifulSoup
 from prompt_toolkit import PromptSession
 from prompt_toolkit.key_binding import KeyBindings
 import pypdf # for error handling of PyPDFLoader
@@ -290,6 +293,8 @@ See .chat.yaml.example for details.
                         help='Path to pdf to pre-populate main RAG')
     parser.add_argument('--import-txt', metavar='', type=str,
                         help='Path to txt to pre-populate main RAG')
+    parser.add_argument('--import-web', metavar='', type=str,
+                        help='URL to pre-populate main RAG')
     parser.add_argument('--light-mode', action='store_true', default=light,
                         help='Use a color scheme suitible for light background terminals')
     parser.add_argument('-d', '--debug', action='store_true', default=debug,
@@ -302,11 +307,11 @@ See .chat.yaml.example for details.
 
 # pylint: disable=redefined-outer-name #  we exit immediately
 def extract_text_from_pdf(args: argparse.ArgumentParser)->None:
-    """ extract text from PDFs and store data in RAG with meta_data tagging """
+    """ Store imported PDF text directly into the RAG """
     rag = RAG(console,
               CommonUtils(console, **vars(args)),
               **vars(args),)
-    pdf_chat = Chat(**vars(args))
+    chat = Chat(**vars(args))
     loader = PyPDFLoader(args.import_pdf)
     pages = []
     try:
@@ -315,7 +320,7 @@ def extract_text_from_pdf(args: argparse.ArgumentParser)->None:
         page_texts = list(map(lambda doc: doc.page_content, pages))
         for page_text in page_texts:
             if page_text:
-                _, meta_data  = pdf_chat.cm.pre_processor(page_text)
+                _, meta_data  = chat.cm.pre_processor(page_text)
                 rag.store_data(page_text, tags_metadata=meta_data)
 
     except pypdf.errors.PdfStreamError as e:
@@ -323,19 +328,35 @@ def extract_text_from_pdf(args: argparse.ArgumentParser)->None:
         sys.exit(1)
     sys.exit()
 
-# pylint: disable=redefined-outer-name #  we exit immediately
 def store_text(args: argparse.ArgumentParser)->None:
-    """ Store data in RAG with meta_data tagging """
-    text_chat = Chat(**vars(args))
+    """ Store imported text file directly into the RAG """
+    chat = Chat(**vars(args))
     rag = RAG(console,
               CommonUtils(console, **vars(args)),
               **vars(args),)
     with open(args.import_txt, 'r', encoding='utf-8') as file:
         document_content = file.read()
-        _, meta_tags  = text_chat.cm.pre_processor(document_content)
+        _, meta_tags  = chat.cm.pre_processor(document_content)
         rag.store_data(document_content, tags_metadata=meta_tags)
         print(f"Document loaded from: {args.import_txt}")
     sys.exit()
+
+def extract_text_from_web(args: argparse.ArgumentParser)->None:
+    """ extract plain text from web address """
+    chat = Chat(**vars(args))
+    rag = RAG(console,
+              CommonUtils(console, **vars(args)),
+              **vars(args),)
+    response = requests.get(args.import_web, timeout=300)
+    if response.status_code == 200:
+        soup = BeautifulSoup(response.content, 'html.parser')
+        text = soup.get_text()
+        _, meta_tags  = chat.cm.pre_processor(text)
+        rag.store_data(text, tags_metadata=meta_tags)
+        print(f"Document loaded from: {args.import_web}")
+    else:
+        print(f'Error obtaining webpage: {response.status_code}\n{response.raw}')
+        sys.exit(1)
 
 # pylint: enable=redefined-outer-name
 if __name__ == '__main__':
@@ -352,5 +373,8 @@ if __name__ == '__main__':
         else:
             print(f"Error: The file at {args.import_pdf} does not exist.")
             sys.exit(1)
+    if args.import_web:
+        extract_text_from_web(args)
+        sys.exit(0)
     chat = Chat(**vars(args))
     chat.chat()
