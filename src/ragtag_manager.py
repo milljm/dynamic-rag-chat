@@ -72,9 +72,11 @@ class RAG():
                                                api_key=kwargs['api_key'])
 
         self.parent_splitter = RecursiveCharacterTextSplitter(chunk_size=2000,
-                                                              chunk_overlap=1000)
-        self.child_splitter = RecursiveCharacterTextSplitter(chunk_size=150,
-                                                             chunk_overlap=50)
+                                                              chunk_overlap=1000,
+                                                              separators=['\n\n'])
+        self.child_splitter = RecursiveCharacterTextSplitter(chunk_size=200,
+                                                             chunk_overlap=100,
+                                                             separators=['.'])
 
     @staticmethod
     def _normalize_collection_name(name: str,

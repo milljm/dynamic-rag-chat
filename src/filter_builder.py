@@ -5,21 +5,18 @@ class FilterBuilder:
     Initialize FilterBuilder then call .build(RAGTag) to receive a proper weighted
     filter designed to focus on retrieving important information.
     """
-    def __init__(
-        self,
-        skip_fields=None,
-        composite_fields=None,
-        multi_delimiters=",/",
-        field_overrides=None,
-        strict_fields=('focus',)
-    ):
+    def __init__(self,
+                 skip_fields=None,
+                 composite_fields=None,
+                 multi_delimiters=",/",
+                 field_overrides=None):
+
         self.skip_fields = skip_fields or {"time", "date"}
         self.composite_fields = composite_fields or {"focus", "tone"}
         self.multi_delimiters = multi_delimiters
         self.field_overrides = field_overrides or {}
-        self.strict_fields = strict_fields
 
-    def build_flexible_filter(self, tags: list[tuple[str, str]])->dict:
+    def build_flexible_filter(self, tags: list[tuple[str, str]], field)->dict:
         """Create a Chroma filter that uses AND for important fields, OR for others"""
         must_conditions = []
         soft_conditions = []
@@ -29,7 +26,7 @@ class FilterBuilder:
                 continue
             condition = {tag.tag: {"$in": tag.content.split(',') if ',' in
                                           tag.content else [tag.content]}}
-            if tag.tag in self.strict_fields:
+            if tag.tag in [field]:
                 must_conditions.append(condition)
             else:
                 soft_conditions.append(condition)
@@ -64,9 +61,9 @@ class FilterBuilder:
         # default: exact match
         return {tag: value}
 
-    def build(self, tags: list[RAGTag[str, str]])->dict|None:
+    def build(self, tags: list[RAGTag[str, str]], field: str)->dict|None:
         """
         Call with a list of RAGTag compatible objects (see ragtag_manager for details).
         Basically the RAGTag is a NamedTuple(tag: str, content: str) object.
         """
-        return self.build_flexible_filter(tags)
+        return self.build_flexible_filter(tags, field)

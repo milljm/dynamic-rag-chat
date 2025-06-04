@@ -19,7 +19,7 @@ My task is to read the following text and extract a fixed set of metadata fields
   "tone": string, // e.g., introspective, hopeful, tense, vulnerable
   "emotion": string, // primary emotion in the text
   "focus": string, // main narrative themes (e.g., dialogue, bonding, introspection)
-  "entity": [string] | [], // list of named characters, or empty list
+  "entity": [string] | [], // list of named characters, or empty list, do not use pronouns
   "location": [string] | [], // list of places, or empty list
   "items": [string] | [], // list of objects mentioned, or empty list
   "weather": string | null, // environment/weather description

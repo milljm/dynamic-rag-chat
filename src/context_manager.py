@@ -197,11 +197,12 @@ class ContextManager(PromptManager):
 
     def gather_context(self, query: str,
                              collection: str,
-                             tags: list[RAGTag[str,str]])->list[Document]:
+                             tags: list[RAGTag[str,str]],
+                             field: str)->list[Document]:
         """
         Perform metadata field filtering matching
         """
-        filter_dict = self.filter_builder.build(tags)
+        filter_dict = self.filter_builder.build(tags, field)
         # Combined filter retrieval (highly relevant information)
         documents = self.rag.retrieve_data(query,
                                            collection,
@@ -227,19 +228,24 @@ class ContextManager(PromptManager):
                     self.console.print(f'TAG RETREIVAL:\n{meta_tags}\n\n',
                                        style=f'color({self.color})',
                                        highlight=False)
+                important_fields = ['entity', 'focus', 'tone', 'emotion', 'other']
                 for collection in collection_list:
                     storage = []
                     # Extensive RAG retreival: field filter dictionary, highly relevant
-                    storage.extend(self.gather_context(query,
-                                                       collection,
-                                                       meta_tags))
+                    # Loop until we've exhausted important_fields or collected maximum
+                    for field in important_fields:
+                        storage.extend(self.gather_context(query,
+                                                           collection,
+                                                           meta_tags,
+                                                           field))
+                        balance = max(0, self.matches - len(storage))
+                        if balance == 0 or len(storage) >= self.matches:
+                            break
 
-                    # General RAG retreival: if Extensive retrieval above is low, figure the
-                    # difference of allowed maximum, and use that number for matches without
-                    # field filter searches
-                    balance = max(0, self.matches - len(storage))
                     if self.debug:
                         self.console.print(f'BALANCE: {balance}', style=f'color({self.color})')
+
+                    # Fallback to simularity search based on the difference. Always allow one.
                     storage.extend(self.rag.retrieve_data(query,
                                                           collection,
                                                           matches=int(max(1, balance))))
