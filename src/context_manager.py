@@ -7,8 +7,7 @@ being supplied to the LLM. It utilizing several methods:
     Staggered History.
     ParentDocument/ChildDocument retrieval (return one large response with many small one)
 """
-import warnings
-import re
+from difflib import SequenceMatcher
 import threading
 from langchain.schema import Document
 from langchain.prompts import ChatPromptTemplate
@@ -43,40 +42,30 @@ class ContextManager(PromptManager):
                                   model=self.preconditioner,
                                   temperature=0.3,
                                   streaming=False,
-                                  max_tokens=2048,
+                                  max_tokens=4096,
                                   api_key=kwargs['api_key'])
         self.filter_builder = FilterBuilder()
         self.prompts.build_prompts()
         self.warn = True
 
-    def deduplication(self, base_reference: list, response_list: list) -> list[str]:
+    def deduplication(self, base_reference: list[str],
+                            response_list: list[str],
+                            threshold: float = 0.92) -> list[str]:
         """
-        Deduplicate response_list using base_reference, preserving semantic chunks.
-        Returns cleaned RAG chunks (not just flat sentences).
+        Deduplicate response_list using semantic similarity against base_reference.
+        Returns cleaned RAG chunks.
         """
-        if self.check_nltk_resource():
-            # pylint: disable=import-outside-toplevel # handle gracefully with user
-            from nltk import sent_tokenize
-        else:
-            def sent_tokenize(text):
-                # Basic fallback (splits on .!? followed by space)
-                return re.split(r'(?<=[.!?])\s+', text)
+        def is_similar(a: str, b: str) -> bool:
+            return SequenceMatcher(None, a.lower().strip(), b.lower().strip()).ratio() > threshold
 
-        def process(text: str) -> set:
-            normalized = re.sub(r'\s+', ' ', text.strip()).lower()
-            return set(sent_tokenize(normalized))
-
-        base_sentences = set()
-        for text in base_reference:
-            base_sentences.update(process(text))
         cleaned_chunks = []
         for chunk in response_list:
-            response_sentences = process(chunk)
-            # pylint: disable=unnecessary-lambda,cell-var-from-loop
-            unique_sentences = sorted(response_sentences - base_sentences,
-                                      key=lambda s: chunk.find(s))
-            if unique_sentences:
-                cleaned_chunks.append(' '.join(unique_sentences))
+            if any(is_similar(chunk, base) for base in base_reference):
+                continue
+            if any(is_similar(chunk, prior) for prior in cleaned_chunks):
+                continue
+            cleaned_chunks.append(chunk)
+
         return cleaned_chunks
 
     @staticmethod
@@ -89,48 +78,6 @@ class ContextManager(PromptManager):
         else:
             _token_cnt += len(context.split(' '))
         return _token_cnt
-
-    def check_nltk_resource(self):
-        """
-        Checks for NLTK 'punkt' availability.
-        Issues a warning if missing, explains options.
-        """
-        try:
-            # pylint: disable=import-outside-toplevel # handle gracefully with user
-            from nltk import data
-            pnk_lst = ['tokenizers/punkt', 'tokenizers/punkt_tab']
-            for pnk in pnk_lst:
-                data.find(pnk)
-            return True
-        except LookupError:
-            if self.warn:
-                self.warn = False
-                warnings.warn(
-                '\nApologies for the interruption... This program uses "nltk" to match obscure'
-                '\nsimilarities (and removes them) to help keep your context window token count'
-                '\ndown. But I am loath to download/install something behind your back. You can'
-                '\nchoose to ignore this once-per-session message, or do the following to'
-                '\nsatisfy the requirements:\n\n'
-                'To enable advanced sentence splitting (handles abbreviations, etc.), run:\n'
-                '$> python\n'
-                '>>> import nltk\n'
-                '>>> nltk.download("punkt")\n'
-                '>>> nltk.download("punkt_tab")\n'
-                '\n\nDoing so will save expression data to "~/nltk_data"'
-                '\nLearn more about NLTK: https://www.nltk.org'
-                '\nFalling back to basic punctuation-based splitting (may be less accurate).',
-                    UserWarning
-                )
-            return False
-        except ImportError:
-            if self.warn:
-                self.warn = False
-                warnings.warn(
-                    'NLTK not installed! Sentence splitting will use basic punctuation.\n'
-                    'Install NLTK for better results: `pip install nltk`',
-                    UserWarning
-                )
-            return False
 
     def pre_processor(self, query: str)->tuple[str,list[RAGTag]]:
         """
@@ -234,10 +181,54 @@ class ContextManager(PromptManager):
                     # Extensive RAG retreival: field filter dictionary, highly relevant
                     # Loop until we've exhausted important_fields or collected maximum
                     for field in important_fields:
+                        # Entity is very important, as it represents an NPC/Character. We
+                        # will therefor spend 75% of our allotted context window budget
+                        # on Entity field-filtering matches
+                        if field == 'entity':
+                            flat_entities = []
+                            entity_weights = max(1, int(self.matches * .75))
+                            # Obtain the entities tag, and it's contents
+                            entities = [x.content for x in meta_tags if x.tag == 'entity']
+
+                            # Clean the entities tag and store its contents
+                            past_multi_entity = []
+                            for key, tag in enumerate(meta_tags):
+                                if entities and tag.tag == 'entity':
+                                    past_multi_entity = meta_tags.pop(key)
+
+                            # Generate a list of entities
+                            for entity in entities:
+                                if isinstance(entity, list):
+                                    flat_entities.extend(entity)
+                                elif isinstance(entity, str):
+                                    flat_entities.extend([e.strip() for e in entity.split(',')
+                                                                    if e.strip()])
+                            # Perform a balanced search for each entity
+                            for a_entity in flat_entities:
+                                meta_tags.append(RAGTag(tag='entity', content=a_entity.lower()))
+                                for _ in range(max(1, int(entity_weights / len(flat_entities)))):
+                                    storage.extend(self.gather_context(query,
+                                                                       collection,
+                                                                       meta_tags,
+                                                                       field))
+                                # Remove the entities RAGTag from the list each time
+                                for key, tag in enumerate(meta_tags):
+                                    if entities and tag.tag == 'entity':
+                                        meta_tags.pop(key)
+
+                            # add the pruned entity tag back in (allow a search for combination)
+                            if past_multi_entity:
+                                meta_tags.append(past_multi_entity)
+                                storage.extend(self.gather_context(query,
+                                                                   collection,
+                                                                   meta_tags,
+                                                                   field))
+                        # 25% other field-filters
                         storage.extend(self.gather_context(query,
                                                            collection,
                                                            meta_tags,
                                                            field))
+
                         balance = max(0, self.matches - len(storage))
                         if balance == 0 or len(storage) >= self.matches:
                             break

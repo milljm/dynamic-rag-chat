@@ -74,9 +74,9 @@ class RAG():
         self.parent_splitter = RecursiveCharacterTextSplitter(chunk_size=2000,
                                                               chunk_overlap=1000,
                                                               separators=['\n\n'])
-        self.child_splitter = RecursiveCharacterTextSplitter(chunk_size=200,
-                                                             chunk_overlap=100,
-                                                             separators=['.'])
+        self.child_splitter = RecursiveCharacterTextSplitter(chunk_size=500,
+                                                             chunk_overlap=200,
+                                                             separators=['\n\n'])
 
     @staticmethod
     def _normalize_collection_name(name: str,

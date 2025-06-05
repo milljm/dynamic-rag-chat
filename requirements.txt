@@ -9,5 +9,4 @@ rich
 pypdf
 pytz
 requests
-nltk
 beautifulsoup4

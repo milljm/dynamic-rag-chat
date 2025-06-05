@@ -13,7 +13,6 @@
 #     "rich",
 #     "pypdf",
 #     "requests",
-#     "nltk",
 #     "beautifulsoup4",
 # ]
 # ///
@@ -250,7 +249,7 @@ See .chat.yaml.example for details.
     api_key = arg_dict.get('api_key', None)
     num_ctx = arg_dict.get('context_window', 4192)
     chat_history = arg_dict.get('history_max', 1000)
-    history_session = arg_dict.get('history_session', 5)
+    history_sessions = arg_dict.get('history_sessions', 5)
     name = arg_dict.get('name', 'assistant')
     time_zone = arg_dict.get('time_zone', 'GMT')
     debug = arg_dict.get('debug', False)
@@ -268,8 +267,6 @@ See .chat.yaml.example for details.
                         type=str, help='LM embedding model (default: %(default)s)')
     parser.add_argument('--history-dir', metavar='', dest='vector_dir', default=vector_dir,
                         type=str, help='history directory (default: %(default)s)')
-    parser.add_argument('--history-matches', metavar='', dest='matches', default=matches, type=int,
-                        help='Number of results to pull from each RAG (default: %(default)s)')
     parser.add_argument('--llm-server', metavar='', dest='host', default=host, type=str,
                         help='OpenAI API server address (default: %(default)s)')
     parser.add_argument('--pre-server', metavar='', dest='pre_host', default=pre_host, type=str,
@@ -282,12 +279,14 @@ See .chat.yaml.example for details.
                         help='your assistants name (default: %(default)s)')
     parser.add_argument('--time-zone', metavar='', dest='time_zone', default=time_zone, type=str,
                         help='your assistants name (default: %(default)s)')
+    parser.add_argument('--history-matches', metavar='', dest='matches', default=matches, type=int,
+                        help='Number of results to pull from each RAG (default: %(default)s)')
+    parser.add_argument('--history-sessions', metavar='', dest='chat_sessions',
+                        default=history_sessions, type=int,
+                        help='Chat history responses availble in context (default: %(default)s)')
     parser.add_argument('--history-max', metavar='', dest='chat_max', default=chat_history,
                         type=int,
                         help='Chat history responses to save to disk (default: %(default)s)')
-    parser.add_argument('--history-session', metavar='', dest='chat_sessions',
-                        default=history_session, type=int,
-                        help='Chat history responses availble in context (default: %(default)s)')
     parser.add_argument('--context-window', metavar='', dest='num_ctx', default=num_ctx, type=int,
                         help='the maximum context window size (default: %(default)s)')
     parser.add_argument('--import-pdf', metavar='', type=str,

@@ -44,11 +44,11 @@ class CommonUtils():
         """Normalize any kind of tag input into RAGTag list."""
         tags = []
         for key, val in dict(tag_input).items():
-            if val is None or (isinstance(val, str) and val.lower() in {"null", "none", ""}):
+            if val is None or (isinstance(val, str) and val.lower() in {'null', 'none', ''}):
                 continue
             if isinstance(val, list):
                 val = ",".join(str(v).strip() for v in val if v)
-            tags.append(RAGTag(key, str(val).strip()))
+            tags.append(RAGTag(key.lower(), str(val).strip().lower()))
         return tags
 
     def get_tags(self, response: str, debug=False) -> list[RAGTag]:
