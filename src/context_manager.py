@@ -79,7 +79,15 @@ class ContextManager(PromptManager):
             _token_cnt += len(context.split(' '))
         return _token_cnt
 
-    def pre_processor(self, query: str)->tuple[str,list[RAGTag]]:
+    @staticmethod
+    def no_entity(tags: list[RAGTag])->bool:
+        """ Bool check for entity == None """
+        entity = ''.join([x.content for x in tags if x.tag == 'entity'])
+        if not entity:
+            return True
+        return entity.lower().find('none') != -1
+
+    def pre_processor(self, query: str, previous: str='')->tuple[str,list[RAGTag]]:
         """
         lightweight LLM as a tagging pre-processor
         """
@@ -92,7 +100,7 @@ class ContextManager(PromptManager):
         prompt_template = ChatPromptTemplate.from_messages([
                     ("human", human_prompt)
                 ])
-        prompt = prompt_template.format_messages(context=query)
+        prompt = prompt_template.format_messages(context=query, previous=previous)
         if self.debug:
             self.console.print(f'PRE-PROCESSOR PROMPT:\n{prompt}\n\n',
                                 style=f'color({self.color})', highlight=False)
@@ -100,8 +108,13 @@ class ContextManager(PromptManager):
         if self.debug:
             self.console.print(f'PRE-PROCESSOR RESPONSE:\n{content}\n\n',
                                 style=f'color({self.color})', highlight=False)
-
         tags = self.common.get_tags(content, debug=self.debug)
+        if self.no_entity(tags) and not previous:
+            try:
+                last_contents = self.common.chat_history_session[-1:]
+            except IndexError:
+                last_contents = ''
+            return self.pre_processor(query, previous=last_contents)
         return (content, tags)
 
     def post_process(self, response)->None:
