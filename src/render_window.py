@@ -180,7 +180,7 @@ class RenderWindow(PromptManager):
 
         # Calculate real-time heat maps
         context_size = [v for k,v in self.common.prompt_map.items() if k<=prompt_tokens][-1:][0]
-        produced = [v for k,v in self.common.heat_map.items() if token_count>=k][-1:][0]
+        produced = [v for k,v in self.common.heat_map.items() if token_count*4>=k][-1:][0]
 
         # Calculate Tokens/s
         if time_taken > 0:
@@ -259,6 +259,13 @@ class RenderWindow(PromptManager):
         # Finish by saving chat history, finding and storing new RAG/Tags or
         # llm_prompt changes, then reset it.
         current_response += self.meta_capture
+        # Pesky LLM forgot to close meta_tags with '>'
+        if "<meta_tags:" in current_response and not current_response.strip().endswith(">"):
+            current_response += '>'
+            self.meta_hiding = False
+            self.stop_thinking()
+            self.console.print('Warn: I had to help the LLM close meta_tags',
+                               style=f'color({self.color})',highlight=False)
         self.meta_capture = ''
         self.common.chat_history_session.append(f'\nUSER:{documents["user_query"]}\n'
                                                 f'AI: {current_response}\n\n')

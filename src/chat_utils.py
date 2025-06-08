@@ -26,7 +26,7 @@ class CommonUtils():
         # Heat Map
         self.console = console
         self.heat_map = 0
-        self.prompt_map = self.create_heatmap(5000)
+        self.prompt_map = self.create_heatmap(8000)
         self.cleaned_map = self.create_heatmap(1000)
 
         # Class variables

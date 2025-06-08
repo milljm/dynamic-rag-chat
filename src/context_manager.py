@@ -109,7 +109,7 @@ class ContextManager(PromptManager):
             self.console.print(f'PRE-PROCESSOR RESPONSE:\n{content}\n\n',
                                 style=f'color({self.color})', highlight=False)
         tags = self.common.get_tags(content, debug=self.debug)
-        if self.no_entity(tags) and not previous:
+        if self.no_entity(tags) and previous:
             try:
                 last_contents = self.common.chat_history_session[-1:]
             except IndexError:

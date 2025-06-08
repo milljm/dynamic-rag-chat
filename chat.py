@@ -187,7 +187,7 @@ class Chat():
                     self.common.heat_map = self.common.create_heatmap(prompt_tokens,
                                                                       reverse=True)
                     cleaned_color = [v for k,v in
-                                     self.common.create_heatmap(prompt_tokens / 4).items()
+                                     self.common.create_heatmap(prompt_tokens / 2).items()
                                      if k<=token_savings][-1:][0]
                 else:
                     # Grab our lovely context
