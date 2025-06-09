@@ -115,7 +115,8 @@ class ContextManager(PromptManager):
             except IndexError:
                 last_contents = ''
             return self.pre_processor(query, previous=last_contents)
-        return (content, tags)
+        scene_consistency = self.common.scene_tracker_from_tags(tags)
+        return (content, tags, scene_consistency)
 
     def post_process(self, response)->None:
         """ Start a thread to process LLMs response """
@@ -183,7 +184,8 @@ class ContextManager(PromptManager):
             if data_set:
                 query = self.common.stringify_lists(data_set[0])
                 # Try to tagify the users query
-                (_, meta_tags) = self.pre_processor(query)
+                (_, meta_tags, scene_meta) = self.pre_processor(query)
+                documents['scene_meta'] = scene_meta
                 if self.debug:
                     self.console.print(f'TAG RETREIVAL:\n{meta_tags}\n\n',
                                        style=f'color({self.color})',

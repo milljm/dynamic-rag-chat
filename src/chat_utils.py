@@ -38,6 +38,44 @@ class CommonUtils():
         self.meta_data = re.compile(r'(?<=[<m]eta_tags: ).*?(?=[>)])', re.DOTALL)
         self.meta_iter = re.compile(r'(\w+):\s*([^;]*)')
         self.json_style = re.compile(r'```json(.*)```', re.DOTALL)
+        self.json_template = re.compile(r'\{\/([^\}]+)\}', re.DOTALL)
+
+
+        # Ephemeral scene tracking
+        self._scene_meta = {
+            # Core Spatial-Temporal Anchors
+            'location': 'unknown',                  # e.g., 'Beast cockpit'
+            'time': 'unknown',                      # 'day', 'night', 'dusk', 'morning'
+            'status': 'unknown',                    # 'in motion', 'camped', 'combat'
+            'entity_location': ['unknown'],         # john backseat, jane frontseat, bo navigation
+
+            # Character Presence & Perspective
+            'audience': [],                         # Characters being spoken to directly
+
+            # Narrative Flow / Contextual Arc
+            'narrative_arc': 'unspecified',         # e.g., 'john_trust_arc'
+            'scene_type': 'unspecified',            # e.g., 'banter', 'flashback', 'combat',
+            'tone': 'neutral',                      # e.g., 'playful', 'tense'
+            'emotion': 'neutral',                   # emotion felt or scene tone
+            'focus': ['conversation'],              # narrative function (dialogue, strategy, etc.)
+            'narrative_arcs': set(['']),            # e.g., 'head_to_sector8', 'save_world'
+            'completed_narrative_arcs': set(['']),  # e.g., 'talk_to_john', 'help_jane'
+
+            # Environmental & Sensory Cues
+            'weather': None,                        # e.g., 'storm approaching'
+            'sensory_mood': None,                   # e.g., 'dim light and engine hum'
+
+            # Mechanical/Narrative Nudges
+            'user_choice': None,                    # User's last clear decision or action
+            'last_object_interacted': None,         # e.g., 'radio', 'rifle', 'memory shard'
+
+            # System Controls / Optional
+            'time_jump_allowed': False,             # Can the LLM skip forward?
+            'scene_locked': False,                  # Prevents new characters from entering scene
+            'narrator_mode': False,                 # If True, LLM may use omniscient 3rd-person
+        }
+        # Load from file. If file does not exist then self.scene_meta == self._scene_meta above
+        self.scene_meta = self.load_scene(self.history_dir)
 
     @staticmethod
     def parse_tags(tag_input: dict | list[tuple[str, str]]) -> list[RAGTag]:
@@ -50,6 +88,60 @@ class CommonUtils():
                 val = ",".join(str(v).strip() for v in val if v)
             tags.append(RAGTag(key.lower(), str(val).strip().lower()))
         return tags
+
+    def scene_tracker_from_tags(self, tags: list[RAGTag]) -> str:
+        """ Build a formatted scene state string based on incoming RAGTags and internal memory """
+        tag_dict = {tag.tag: tag.content for tag in tags}
+        # Allow for an update to self._scene_meta
+        for key, value in self._scene_meta.items():
+            if key not in self.scene_meta:
+                self.scene_meta[key] = value
+        scene = self.scene_meta.copy()
+        for key, value in scene.items():
+            if key not in self._scene_meta:
+                self.scene_meta.pop(key)
+
+        scene = self.scene_meta.copy()
+        for key in scene:
+            incoming = tag_dict.get(key)
+            # Skip if incoming is invalid or empty
+            if incoming in (None, 'none', 'unknown', [], '', {}, 'null'):
+                continue
+            # Handle list fields safely
+            if isinstance(scene[key], list) and not isinstance(incoming, list):
+                incoming = [incoming]
+            # Handle unique scene tracking features (like missions and completed_missiones)
+            if key == 'narrative_arcs':
+                if isinstance(incoming, list):
+                    scene[key].update(i for i in incoming if i and i.strip())
+                elif isinstance(incoming, str) and incoming.strip():
+                    scene[key].add(incoming.strip())
+            elif key == 'completed_narrative_arcs':
+                if isinstance(incoming, list):
+                    scene[key].update(i for i in incoming if i and i.strip())
+                elif isinstance(incoming, str) and incoming.strip():
+                    scene[key].add(incoming.strip())
+                try:
+                    for _mission in scene[key]:
+                        scene['completed_narrative_arcs'].remove(_mission)
+                        scene['narrative_arcs'].remove(_mission)
+                except KeyError:
+                    pass
+            else:
+                scene[key] = incoming
+        # Update internal memory with merged scene state
+        self.scene_meta = scene  # No `.copy()` needed
+        # Convert to string for LLM injection
+        def stringify(k, v):
+            if isinstance(v, (list, set)):
+                clean = sorted(i for i in v if i and str(i).strip())
+                return f'{k}=' + (', '.join(clean) if clean else 'none')
+            if v in (None, '', [], {}, 'none', 'unknown'):
+                return f'{k}=none'
+            return f'{k}={v}'
+        scene_str = '#SCENE_STATE: ' + '; '.join(stringify(k, v) for k, v in sorted(scene.items()))
+        self.save_scene(self.history_dir, self.scene_meta)
+        return scene_str
 
     def get_tags(self, response: str, debug=False) -> list[RAGTag]:
         """Extract tags from either JSON or meta_tag format in the LLM response."""
@@ -118,6 +210,32 @@ class CommonUtils():
         return heat
 
     @staticmethod
+    def save_scene(history_path, scene):
+        """ persist scenes """
+        scene_file = os.path.join(history_path, 'ephemeral_scene.pkl')
+        try:
+            with open(scene_file, "wb") as f:
+                pickle.dump(scene, f)
+        except FileNotFoundError as e:
+            print(f'Error saving chat. Check --history-dir\n{e}')
+
+    def load_scene(self, history_path: str)->dict:
+        """ Persist chat history (load) """
+        scene_file = os.path.join(history_path, 'ephemeral_scene.pkl')
+        try:
+            with open(scene_file, "rb") as f:
+                loaded_scene = pickle.load(f)
+        except FileNotFoundError:
+            return self._scene_meta
+        except pickle.UnpicklingError as e:
+            print(f'Scene file {scene_file} not a pickle file:\n{e}')
+            sys.exit(1)
+        # pylint: disable=broad-exception-caught  # so many ways to fail, catch them all
+        except Exception as e:
+            print(f'Warning: Error loading scene file: {e}')
+        return loaded_scene
+
+    @staticmethod
     def save_chat(history_path, chat_history) ->None:
         """ Persist chat history (save) """
         history_file = os.path.join(history_path, 'chat_history.pkl')
@@ -127,7 +245,7 @@ class CommonUtils():
         except FileNotFoundError as e:
             print(f'Error saving chat. Check --history-dir\n{e}')
 
-    def load_chat(self, history_path)->list:
+    def load_chat(self, history_path: str)->list:
         """ Persist chat history (load) """
         loaded_list = []
         history_file = os.path.join(history_path, 'chat_history.pkl')

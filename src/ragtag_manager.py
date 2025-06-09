@@ -41,6 +41,7 @@ class RAGTagManager():
     def update_rag(self, response, collection: str='ai_documents')->None:
         """ regular expression through message and attempt to create key:value tuples """
         list_rag_tags = self.common.get_tags(response, debug=self.debug)
+        self.common.scene_tracker_from_tags(list_rag_tags)
         if self.debug:
             self.console.print(f'META TAGS PARSED: {list_rag_tags}',
                                style=f'color({self.color})',
@@ -155,6 +156,11 @@ class RAG():
                          tags_metadata: list[RAGTag] = None,
                          collection: str = 'ai_documents')->None:
         """ store data into the RAG """
+        # Remove meta_data tagging information from data
+        reg_meta = self.common.meta_data.findall(data)
+        if reg_meta:
+            data = data.replace(f'<meta_tags: {reg_meta[0]}>', '')
+
         if tags_metadata is None:
             tags_metadata = {}
         meta_dict = dict(tags_metadata)

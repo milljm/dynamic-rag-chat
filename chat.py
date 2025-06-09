@@ -142,6 +142,42 @@ class Chat():
 
         return (documents, token_savings, prompt_tokens, cleaned_color, pre_process_time)
 
+    def load_file_as_context(self, user_input):
+        """ parse user_input for all occurrences of {{ /path/to/file }} """
+        included_files = self.common.json_template.findall(user_input)
+        for included_file in included_files:
+            # WIP: allow importing file for context
+            continue
+        return self.get_documents(user_input)
+
+    def no_context(self, user_input)->tuple:
+        """ perform search without any context involved """
+        # pylint: disable=consider-using-f-string  # no, this is how it is done
+        documents = {'user_query'         : user_input,
+                        'name'            : self.name,
+                        'chat_history'    : '',
+                        'chat_sessions'   : self.chat_sessions,
+                        'ai_documents'    : '',
+                        'user_documents'  : '',
+                        'context'         : '',
+                        'date_time'       : self.get_time(self.time_zone),
+                        'num_ctx'         : self.num_ctx,
+                        'pre_process_time': '{:.1f}s'.format(0),
+                        'performance'     : '',
+                        'light_mode'      : self.set_lightmode_aware(self.light_mode),
+                        'llm_prompt'      : ''}
+        preprocessing = 0
+        token_savings = 0
+        cleaned_color = 0
+        prompt_tokens = self.cm.token_retreiver(user_input)
+        cleaned_color = 0
+        self.common.heat_map = self.common.create_heatmap(prompt_tokens,
+                                                            reverse=True)
+        cleaned_color = [v for k,v in
+                            self.common.create_heatmap(prompt_tokens / 2).items()
+                            if k<=token_savings][-1:][0]
+        return (documents, token_savings, prompt_tokens, cleaned_color, preprocessing)
+
     def chat(self):
         """ Prompt the User for questions, and begin! """
         session = PromptSession()
@@ -165,30 +201,19 @@ class Chat():
 
                 if user_input.find(r'\no-context') >=0:
                     user_input = user_input.replace('\no-context ', '')
-                    # pylint: disable=consider-using-f-string  # no, this is how it is done
-                    documents = {'user_query'      : user_input,
-                                 'name'            : self.name,
-                                 'chat_history'    : '',
-                                 'chat_sessions'   : self.chat_sessions,
-                                 'ai_documents'    : '',
-                                 'user_documents'  : '',
-                                 'context'         : '',
-                                 'date_time'       : self.get_time(self.time_zone),
-                                 'num_ctx'         : self.num_ctx,
-                                 'pre_process_time': '{:.1f}s'.format(0),
-                                 'performance'     : '',
-                                 'light_mode'      : self.set_lightmode_aware(self.light_mode),
-                                 'llm_prompt'      : ''}
-                    preprocessing = 0
-                    token_savings = 0
-                    cleaned_color = 0
-                    prompt_tokens = self.cm.token_retreiver(user_input)
-                    cleaned_color = 0
-                    self.common.heat_map = self.common.create_heatmap(prompt_tokens,
-                                                                      reverse=True)
-                    cleaned_color = [v for k,v in
-                                     self.common.create_heatmap(prompt_tokens / 2).items()
-                                     if k<=token_savings][-1:][0]
+                    (documents,
+                     token_savings,
+                     prompt_tokens,
+                     cleaned_color,
+                     preprocessing) = self.no_context(user_input)
+
+                if self.common.json_template.findall(user_input):
+                    (documents,
+                    token_savings,
+                    prompt_tokens,
+                    cleaned_color,
+                    preprocessing) = self.load_file_as_context(user_input)
+
                 else:
                     # Grab our lovely context
                     (documents,
