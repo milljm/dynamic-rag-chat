@@ -94,7 +94,7 @@ class Chat():
         # Set timers, and completion token counter, colors...
         self.common.heat_map = self.common.create_heatmap(tokens, reverse=True)
         cleaned_color = [v for k,v in
-                         self.common.create_heatmap(tokens / 4).items()
+                         self.common.create_heatmap(tokens * 8).items()
                          if k<=token_reduction][-1:][0]
 
         return (tokens, cleaned_color)
