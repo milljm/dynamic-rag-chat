@@ -378,7 +378,7 @@ def extract_text_from_pdf(args: argparse.ArgumentParser)->None:
                 texts = text_splitter.split_text(page_text)
                 for ind, text in enumerate(texts):
                     print(f'\t\tmetadata tagging chunk {ind+1}/{len(texts)}')
-                    _, meta_tags  = chat.cm.pre_processor(text)
+                    _, meta_tags, _  = chat.cm.pre_processor(text)
                     _normal = common.normalize_for_dedup(text)
                     rag.store_data(_normal, tags_metadata=meta_tags)
             else:
@@ -404,7 +404,7 @@ def store_text(args: argparse.ArgumentParser)->None:
         texts = text_splitter.split_text(document_content)
         for ind, text in enumerate(texts):
             print(f'\tmetadata tagging chunk {ind+1}/{len(texts)}')
-            _, meta_tags  = chat.cm.pre_processor(text)
+            _, meta_tags, _  = chat.cm.pre_processor(text)
             _normal = common.normalize_for_dedup(text)
             rag.store_data(_normal, tags_metadata=meta_tags)
     sys.exit()
@@ -433,7 +433,7 @@ def extract_text_from_markdown(args: argparse.ArgumentParser)->None:
                 texts = text_splitter.split_text(document_content)
                 for ind, text in enumerate(texts):
                     print(f'\tmetadata tagging chunk {ind+1}/{len(texts)}')
-                    _, meta_tags  = chat.cm.pre_processor(text)
+                    _, meta_tags, _  = chat.cm.pre_processor(text)
                     _normal = common.normalize_for_dedup(text)
                     rag.store_data(_normal, tags_metadata=meta_tags)
     sys.exit()
@@ -454,7 +454,7 @@ def extract_text_from_web(args: argparse.ArgumentParser)->None:
         texts = text_splitter.split_text(text)
         for ind, text in enumerate(texts):
             print(f'\tmetadata tagging chunk {ind+1}/{len(texts)}')
-            _, meta_tags  = chat.cm.pre_processor(text)
+            _, meta_tags, _  = chat.cm.pre_processor(text)
             _normal = common.normalize_for_dedup(text)
             rag.store_data(_normal, tags_metadata=meta_tags)
     else:
