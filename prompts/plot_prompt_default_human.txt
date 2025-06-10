@@ -1,8 +1,7 @@
 ephemeral scene setting:
 {scene_meta}
 
-DYNAMIC FILES: The following content was loaded dynamically and may be relevant to User input:
-{dynamic_files}
-END DYNAMIC FILES
+User Input: {user_query}
 
-User input: {user_query}
+### The following content was loaded dynamically and may be relevant to User Input:
+{dynamic_files}

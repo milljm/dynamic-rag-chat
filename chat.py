@@ -165,10 +165,10 @@ class Chat():
                     documents['dynamic_files'] = (f'{documents.get("dynamic_files", "")}'
                                                   f'{soup.get_text()}\n')
                     documents['user_query'] = documents['user_query'].replace(included_file,
-                        f'{os.path.basename(included_file)} ✅')
+                        f'{included_file} ✅')
             else:
                 documents['user_query'] = documents['user_query'].replace(included_file,
-                        f'{os.path.basename(included_file)} ❌')
+                        f'{included_file} ❌')
         return (documents, token_savings, prompt_tokens, cleaned_color, pre_process_time)
 
     def no_context(self, user_input)->tuple:
