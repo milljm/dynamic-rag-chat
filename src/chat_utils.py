@@ -18,6 +18,13 @@ class CommonUtils():
     """ method holder for command methods used throughout the project """
     def __init__(self, console, **kwargs):
         self.history_dir = kwargs['vector_dir']
+        if not os.path.exists(self.history_dir):
+            try:
+                os.makedirs(self.history_dir)
+            except OSError:
+                print(f'Unable to create directory: {self.history_dir}')
+                sys.exit(1)
+
         self.chat_max = kwargs['chat_max']
         self.light_mode = kwargs['light_mode']
         self.debug = kwargs['debug']
@@ -226,6 +233,8 @@ class CommonUtils():
             with open(scene_file, "rb") as f:
                 loaded_scene = pickle.load(f)
         except FileNotFoundError:
+            with open(scene_file, "wb") as f:
+                pickle.dump(self._scene_meta, f)
             return self._scene_meta
         except pickle.UnpicklingError as e:
             print(f'Scene file {scene_file} not a pickle file:\n{e}')

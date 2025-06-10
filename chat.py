@@ -143,7 +143,7 @@ class Chat():
 
         return (documents, token_savings, prompt_tokens, cleaned_color, pre_process_time)
 
-    def load_file_as_context(self, user_input):
+    def load_content_as_context(self, user_input):
         """ parse user_input for all occurrences of {{ /path/to/file }} """
         (documents,
         token_savings,
@@ -156,26 +156,38 @@ class Chat():
                 with open(included_file, 'r', encoding='utf-8') as f:
                     _tmp = f.read()
                     documents['dynamic_files'] = f'{documents.get("dynamic_files", "")}{_tmp}\n'
-                    console.print(f'[italic dim grey30]{included_file}:loaded[/]\n')
+                    documents['user_query'] = documents['user_query'].replace(included_file,
+                        f'{os.path.basename(included_file)} ✅')
+            elif included_file.startswith('http'):
+                response = requests.get(included_file, timeout=300)
+                if response.status_code == 200:
+                    soup = BeautifulSoup(response.content, 'html.parser')
+                    documents['dynamic_files'] = (f'{documents.get("dynamic_files", "")}'
+                                                  f'{soup.get_text()}\n')
+                    documents['user_query'] = documents['user_query'].replace(included_file,
+                        f'{os.path.basename(included_file)} ✅')
+            else:
+                documents['user_query'] = documents['user_query'].replace(included_file,
+                        f'{os.path.basename(included_file)} ❌')
         return (documents, token_savings, prompt_tokens, cleaned_color, pre_process_time)
 
     def no_context(self, user_input)->tuple:
         """ perform search without any context involved """
         # pylint: disable=consider-using-f-string  # no, this is how it is done
-        documents = {'user_query'         : user_input,
-                        'name'            : self.name,
-                        'chat_history'    : '',
-                        'dynamic_files'   : '',
-                        'chat_sessions'   : self.chat_sessions,
-                        'ai_documents'    : '',
-                        'user_documents'  : '',
-                        'context'         : '',
-                        'date_time'       : self.get_time(self.time_zone),
-                        'num_ctx'         : self.num_ctx,
-                        'pre_process_time': '{:.1f}s'.format(0),
-                        'performance'     : '',
-                        'light_mode'      : self.set_lightmode_aware(self.light_mode),
-                        'llm_prompt'      : ''}
+        documents = {'user_query'      : user_input,
+                     'name'            : self.name,
+                     'chat_history'    : '',
+                     'dynamic_files'   : '',
+                     'chat_sessions'   : self.chat_sessions,
+                     'ai_documents'    : '',
+                     'user_documents'  : '',
+                     'context'         : '',
+                     'date_time'       : self.get_time(self.time_zone),
+                     'num_ctx'         : self.num_ctx,
+                     'pre_process_time': '{:.1f}s'.format(0),
+                     'performance'     : '',
+                     'light_mode'      : self.set_lightmode_aware(self.light_mode),
+                     'llm_prompt'      : ''}
         preprocessing = 0
         token_savings = 0
         cleaned_color = 0
@@ -196,9 +208,9 @@ class Chat():
         def _(event):
             buffer = event.current_buffer
             buffer.insert_text('\n')
-        console.print("💬 Press [italic red]Esc+Enter[/italic red] to send"
-                      " (multi-line, copy/paste safe) [italic red]Ctrl+C[/italic red]"
-                      " to quit.\n")
+        console.print('💬 Press [italic red]Esc+Enter[/italic red] to send (multi-line), '
+                      r'[red]\? Esc+Enter[/red] for help, '
+                      '[italic red]Ctrl+C[/italic red] to quit.\n')
         try:
             while True:
                 user_input = session.prompt(">>> ", multiline=True, key_bindings=kb).strip()
@@ -206,7 +218,9 @@ class Chat():
                     continue
                 if user_input == r'\?':
                     console.print('in-command switches you can use:\n\n\t\\no-context '
-                                  '[italic]msg[/italic] (perform a query with no context)')
+                                  '[italic]msg[/italic] (perform a query with no context)\n'
+                                  '\t{{/absolute/path/to/file}}   - Include a file as context\n'
+                                  '\t{{https://somewebsite.com/}} - Include URL as context')
                     continue
 
                 if user_input.find(r'\no-context') >=0:
@@ -222,7 +236,7 @@ class Chat():
                     token_savings,
                     prompt_tokens,
                     cleaned_color,
-                    preprocessing) = self.load_file_as_context(user_input)
+                    preprocessing) = self.load_content_as_context(user_input)
 
                 else:
                     # Grab our lovely context
