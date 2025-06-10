@@ -116,6 +116,7 @@ class Chat():
         documents.update(
             {'llm_prompt'      : self.common.llm_prompt,
              'user_query'      : user_input,
+             'dynamic_files'   : '',
              'chat_sessions'   : self.chat_sessions,
              'name'            : self.name,
              'date_time'       : self.get_time(self.time_zone),
@@ -144,11 +145,19 @@ class Chat():
 
     def load_file_as_context(self, user_input):
         """ parse user_input for all occurrences of {{ /path/to/file }} """
+        (documents,
+        token_savings,
+        prompt_tokens,
+        cleaned_color,
+        pre_process_time) = self.get_documents(user_input)
         included_files = self.common.json_template.findall(user_input)
         for included_file in included_files:
-            # WIP: allow importing file for context
-            continue
-        return self.get_documents(user_input)
+            if os.path.exists(included_file):
+                with open(included_file, 'r', encoding='utf-8') as f:
+                    _tmp = f.read()
+                    documents['dynamic_files'] = f'{documents.get("dynamic_files", "")}{_tmp}\n'
+                    console.print(f'[italic dim grey30]{included_file}:loaded[/]\n')
+        return (documents, token_savings, prompt_tokens, cleaned_color, pre_process_time)
 
     def no_context(self, user_input)->tuple:
         """ perform search without any context involved """
@@ -156,6 +165,7 @@ class Chat():
         documents = {'user_query'         : user_input,
                         'name'            : self.name,
                         'chat_history'    : '',
+                        'dynamic_files'   : '',
                         'chat_sessions'   : self.chat_sessions,
                         'ai_documents'    : '',
                         'user_documents'  : '',
