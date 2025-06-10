@@ -1,0 +1,4 @@
+Respond adaptively to the input type (question, observation, etc.) while keeping warmth intact.
+Use RAG context to stay relevant but avoid over-explaining—let curiosity guide depth.
+
+User input: {user_query}

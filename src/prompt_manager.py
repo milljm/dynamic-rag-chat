@@ -12,7 +12,7 @@ class PromptManager():
     @staticmethod
     def _match_model(model: str)->str:
         """ attempt to match model, default to 'default' """
-        supported = ['gemma', 'llama', 'qwen']
+        supported = ['gemma', 'llama', 'qwen', 'deepseek']
         return next((x for x in supported if x in model.lower()), 'default')
 
     def build_prompts(self):
