@@ -267,9 +267,13 @@ class RenderWindow(PromptManager):
             self.console.print('Warn: I had to help the LLM close meta_tags',
                                style=f'color({self.color})',highlight=False)
         self.meta_capture = ''
-        self.common.chat_history_session.append(f'\nUSER:{documents["user_query"]}\n'
-                                                f'AI: {current_response}\n\n')
-        self.cm.handle_context([current_response],
+        _response = str(current_response)
+        self.cm.handle_context([_response],
                                 direction='store')
+        matches = self.common.meta_data.findall(current_response)
+        for match in matches:
+            response = current_response.replace(f'<meta_tags: {match}>','')
+        self.common.chat_history_session.append(f'\nUSER: {documents["user_query"]}\n\n'
+                                                f'AI: {response}')
         self.common.save_chat(self.common.history_dir, self.common.chat_history_session)
         self.common.check_prompt(current_response)
