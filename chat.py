@@ -460,7 +460,7 @@ def extract_text_from_markdown(d_session: SessionContext,
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=300)
     for fdir, _, files in os.walk(v_args.import_dir):
         for file in files:
-            if file.endswidth('.md') or file.endswidth('.html') or file.endswidth('.txt'):
+            if file.endswith('.md') or file.endswith('.html') or file.endswith('.txt'):
                 _file = os.path.join(fdir, file)
                 with open(_file, 'r', encoding='utf-8') as file:
                     document_content = file.read()
@@ -491,24 +491,27 @@ def extract_text_from_web(d_session: SessionContext,
 if __name__ == '__main__':
     args = parse_args(sys.argv[1:])
     session = SessionContext.from_args(console, args)
-    if args.import_txt:
-        if os.path.exists(args.import_txt):
-            store_text(session, args)
-        else:
-            print(f'Error: The file at {args.import_txt} does not exist.')
-            sys.exit(1)
-    if args.import_pdf:
-        if os.path.exists(args.import_pdf):
-            extract_text_from_pdf(session, args)
-        else:
-            print(f"Error: The file at {args.import_pdf} does not exist.")
-            sys.exit(1)
-    if args.import_web:
-        extract_text_from_web(session, args)
-        sys.exit(0)
-    if args.import_dir:
-        if os.path.exists(args.import_dir):
-            extract_text_from_markdown(session, args)
+    try:
+        if args.import_txt:
+            if os.path.exists(args.import_txt):
+                store_text(session, args)
+            else:
+                print(f'Error: The file at {args.import_txt} does not exist.')
+                sys.exit(1)
+        if args.import_pdf:
+            if os.path.exists(args.import_pdf):
+                extract_text_from_pdf(session, args)
+            else:
+                print(f"Error: The file at {args.import_pdf} does not exist.")
+                sys.exit(1)
+        if args.import_web:
+            extract_text_from_web(session, args)
             sys.exit(0)
-    chat = Chat(session, **vars(args))
-    chat.chat()
+        if args.import_dir:
+            if os.path.exists(args.import_dir):
+                extract_text_from_markdown(session, args)
+                sys.exit(0)
+        chat = Chat(session, **vars(args))
+        chat.chat()
+    except KeyboardInterrupt:
+        sys.exit()

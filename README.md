@@ -1,7 +1,7 @@
 # 🧠 dynamic-rag-chat
 
 **A dynamic, context-aware chat system powered by LLMs, RAGs, and context management.**
-_Built for immersive role-playing experiences with evolving knowledge and deep context._
+*Built for immersive role-playing with evolving memory and rich, dynamic context.*
 
 ---
 
@@ -26,10 +26,32 @@ Perfect for storytelling, world-building, AI role-play, and narrative design —
 - 🧾 **Persistent chat history**: Your context survives between runs
 - 🧠 **Dynamic RAGs**: Retrieval is triggered by user input or LLM output
 - ✍️ **Preconditioning layer**: Lightweight LLM summarizes RAG output before the larger model (saves tokens while retaining depth)
-  _[Note: still in development]_
-- 🧩 **Recursive RAG import**: `./chat.py --import-dir /path/to/dir` scans, tags, and loads `.txt`, `.md`, `.html`, and `.pdf` files. HTML is parsed using BeautifulSoup.
+    *(Note: in active development)*
+- 🧩 **Recursive RAG import**:
+    `./chat.py --import-dir /path/to/dir` scans, tags, and loads `.txt`, `.md`, `.html`, and `.pdf` files. HTML is parsed using BeautifulSoup.
 - 🧪 **Debug mode**: View prompt assembly, RAG matches, and context composition
+- 📂 **Inline File & Image Loading**:
+    The chat tool supports inline resource references, letting you embed file, image, or URL content directly in your message using double braces:
 
+    ```text
+    images: {{/path/to/image.png}}
+    files: {{/path/to/textfile.txt}}
+    url: {{https://example.com}}
+    ```
+
+    Example:
+
+    ```text
+    Compare these two docs: {{/home/user/doc1.txt}} and {{/home/user/doc2.txt}}
+    What do you make of this photo? {{/Users/me/Pictures/tree.png}}
+    Summarize this page: {{https://somenewssite.com/article123}}
+    ```
+
+    Supported file types:
+
+    - ✅ `.txt`, `.md`, `.html`, `.pdf`
+    - ✅ `.png`, `.jpg`, `.jpeg` (base64 encoded and injected for vision models)
+    - ✅ URLs (scraped via BeautifulSoup for readable text)
 
 <img width="764" alt="light_mode" src="https://github.com/user-attachments/assets/df7bd018-0354-45e7-8451-903d2834fcfd" />
 
@@ -81,7 +103,7 @@ ollama pull nomic-embed-text
 ollama pull gemma3:1b
 ollama pull gemma3:27b  # Only if you’re not using OpenAI
 ```
-More information Gemma3 models:
+Recommended Ollama-hosted models:
 - Heavy Weight LLM [gemma-3-27b-it](https://ollama.com/library/gemma3:27b)
 - Light Weight LLM (preprosser) [gemma-3-1b-it](https://ollama.com/library/gemma3:1b)
 - Embedding LLM (for RAG work) [nomic-embed-text](https://ollama.com/library/nomic-embed-text)
@@ -118,26 +140,32 @@ chat:
 The above will leverage the powerful GPT-4o model, while using your local machine to provide
 pre-processing and embeddings through Ollama. With the above set, you would simple run:
 ```bash
+conda activate dynamic-rag-chat
 ./chat.py
 ```
 
 ### Under the hood design process
 
-```pre
+```
 [User Input]
+     ↳ [Inline resource detected: {{/path/to/file}}, {{https://url}}, etc]
+          ↓
+          → If text file: open and inject content into context
+          → If image: base64-encode and embed for LLM vision support
+          → If URL: fetch and extract readable text via BeautifulSoup
      ↓
-[Pre-conditioner (Tags query with metadata)]
+[Pre-conditioner (Lightweight LLM applies metadata tags)]
      ↓
-[Metadata tags parsed → Field-filtered RAG invoked]
+[Metadata tags parsed → field-filtered RAG retrieval]
      ↓
-[Context Manager (dedup, chat history, scene/meta, RAG, etc)]
+[Context Manager: deduplication, chat history, scene/meta injection]
      ↓
 [Prompt Template Constructed]
      ↓
 [Heavyweight LLM Generates Response]
      ↓
 [Chat + Context Saved]
-        ↳ (non-blocking: new RAG tags → collections updated)
+     ↳ (threaded: new metadata tags → RAG collections updated)
 ```
 
 ### ❓Why This?
