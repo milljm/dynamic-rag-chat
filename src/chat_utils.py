@@ -150,27 +150,41 @@ class CommonUtils():
         self.save_scene(self.history_dir, self.scene_meta)
         return scene_str
 
-    def get_tags(self, response: str, debug=False) -> list[RAGTag]:
-        """Extract tags from either JSON or meta_tag format in the LLM response."""
+    def sanatize_response(self, response: str)->str:
+        """ remove emojis, meta data tagging, etc """
+        response = self.remove_tags(response)
+        response = self.normalize_for_dedup(response)
+        return response
+
+    def remove_tags(self, response: str)->str:
+        """ remove meta_tags from response """
+        _response = str(response)
+        for match in self.meta_data.findall(_response):
+            _response = _response.replace(f'<meta_tags: {match}>', '')
+            _response = _response.replace(f'<meta_tags: {match}\n>', '')
+        return _response
+
+    def get_tags(self, response: str)->list[RAGTag]:
+        """ Extract tags in JSON and meta_tag format from the LLM's response """
+        _tags = []
         try:
-            # Check for JSON-style block
+            # JSON-style block
             json_match = self.json_style.search(response)
             if json_match:
                 data = json.loads(json_match.group(1))
-                return self.parse_tags(data)
+                _tags.extend(self.parse_tags(data))
 
-            # Fallback to meta_tag format
+            # meta_tag format
             meta_matches = self.meta_data.findall(response)
             if meta_matches:
                 flat_pairs = []
                 for match in meta_matches:
                     flat_pairs.extend(self.meta_iter.findall(match))
-                return self.parse_tags(flat_pairs)
-
-            return []
+                _tags.extend(self.parse_tags(flat_pairs))
+            return list(set(_tags))
         # pylint: disable=broad-exception-caught  # too many ways for this to go wrong
         except Exception as e:
-            if debug:
+            if self.debug:
                 print(f'[get_tags error] {e}')
             return []
 
@@ -244,13 +258,12 @@ class CommonUtils():
             print(f'Warning: Error loading scene file: {e}')
         return loaded_scene
 
-    @staticmethod
-    def save_chat(history_path, chat_history) ->None:
+    def save_chat(self) ->None:
         """ Persist chat history (save) """
-        history_file = os.path.join(history_path, 'chat_history.pkl')
+        history_file = os.path.join(self.history_dir, 'chat_history.pkl')
         try:
             with open(history_file, "wb") as f:
-                pickle.dump(chat_history, f)
+                pickle.dump(self.chat_history_session, f)
         except FileNotFoundError as e:
             print(f'Error saving chat. Check --history-dir\n{e}')
 

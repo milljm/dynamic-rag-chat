@@ -12,52 +12,86 @@
 #     "prompt_toolkit",
 #     "rich",
 #     "pypdf",
+#     "pillow"
 #     "requests",
 #     "beautifulsoup4",
 # ]
 # ///
 import os
+import io
 import sys
 import time
+import base64
 import argparse
 import datetime
+from dataclasses import dataclass
 import yaml
 import pytz
 import requests
 from rich.console import Console
 from bs4 import BeautifulSoup
+from PIL import Image
 from prompt_toolkit import PromptSession
 from prompt_toolkit.key_binding import KeyBindings
 import pypdf # for error handling of PyPDFLoader
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from src import ContextManager
-from src import RAG
+from src import RAG, RAGTagManager
 from src import RenderWindow
 from src import CommonUtils
 console = Console(highlight=True)
 current_dir = os.path.dirname(os.path.abspath(__file__))
 
-# pylint: disable=too-many-instance-attributes
+@dataclass
+class SessionContext:
+    """
+    Common Objects used through out the project
+
+    common = CommonUtils
+    rag = RAG
+    context = ContextManager
+    renderer = RenderWindow
+
+    """
+    common: CommonUtils
+    rag: RAG
+    rag_tag: RAGTagManager
+    context: ContextManager
+    renderer: RenderWindow
+
+    @classmethod
+    def from_args(cls, c_console, vargs)->'SessionContext':
+        """ instance and return session dataclass """
+        args_dict = vars(vargs)
+        _common = CommonUtils(c_console, **args_dict)
+        _rag = RAG(c_console, _common, **args_dict)
+        _rag_tag = RAGTagManager(console, _common, **args_dict)
+        _context = ContextManager(console, _common, _rag, _rag_tag, current_dir, **args_dict)
+        _renderer = RenderWindow(console, _common, _context, current_dir, **args_dict)
+        return cls(common=_common,
+                   rag=_rag,
+                   rag_tag=_rag_tag,
+                   context=_context,
+                   renderer=_renderer)
+
 class Chat():
     """ Begin initializing variables classes. Call .chat() to begin """
-    def __init__(self, **kwargs):
+    # pylint: disable=too-many-instance-attributes
+    def __init__(self, o_session, **kwargs):
+        self.session = o_session
+        self.console = console
         self.debug = kwargs['debug']
         self.host = kwargs['host']
         self.model = kwargs['model']
         self.num_ctx = kwargs['num_ctx']
         self.time_zone = kwargs['time_zone']
         self.light_mode = kwargs['light_mode']
-        self.common = CommonUtils(console, **kwargs)
-        self.renderer = RenderWindow(console, self.common, current_dir, **kwargs)
-        self.cm = ContextManager(console, self.common, current_dir, **kwargs)
-
-        # Class variables
         self.name = kwargs['name']
         self.verbose = kwargs['verbose']
         self.chat_sessions = kwargs['chat_sessions']
         if self.debug:
-            console.print('[italic dim grey30]Debug mode enabled. I will re-read the '
+            self.console.print('[italic dim grey30]Debug mode enabled. I will re-read the '
                                'prompt files each time[/]\n')
 
     @staticmethod
@@ -82,7 +116,7 @@ class Chat():
     def token_counter(self, documents: dict):
         """ report each document token counts """
         for key, value in documents.items():
-            yield (key, self.cm.token_retreiver(value))
+            yield (key, self.session.context.token_retreiver(value))
 
     def token_manager(self, documents: dict,
                             token_reduction: int)->tuple[int,int]:
@@ -92,14 +126,15 @@ class Chat():
             tokens += token_cnt
 
         # Set timers, and completion token counter, colors...
-        self.common.heat_map = self.common.create_heatmap(tokens, reverse=True)
+        self.session.common.heat_map = self.session.common.create_heatmap(tokens,
+                                                                          reverse=True)
         cleaned_color = [v for k,v in
-                         self.common.create_heatmap(tokens * 8).items()
+                         self.session.common.create_heatmap(tokens * 8).items()
                          if k<=token_reduction][-1:][0]
 
         return (tokens, cleaned_color)
 
-    def get_documents(self, user_input)->tuple[dict,int,int,int]:
+    def get_documents(self, user_input)->tuple[dict,int,int,int,float]:
         """
         Populate documents, the object which is fed to prompt formaters, and
         ultimately is what makes up the context for the LLM
@@ -107,16 +142,17 @@ class Chat():
         pre_process_time = time.time()
         (documents,
          pre_t,
-         post_t) = self.cm.handle_context([user_input])
+         post_t) = self.session.context.handle_context([user_input])
 
         # pylint: disable=consider-using-f-string  # no, this is how it is done
         pre_process_time = '{:.1f}s'.format(time.time() - pre_process_time)
 
         token_savings = max(0, pre_t - post_t)
         documents.update(
-            {'llm_prompt'      : self.common.llm_prompt,
+            {'llm_prompt'      : self.session.common.llm_prompt,
              'user_query'      : user_input,
              'dynamic_files'   : '',
+             'dynamic_images'  : [],
              'chat_sessions'   : self.chat_sessions,
              'name'            : self.name,
              'date_time'       : self.get_time(self.time_zone),
@@ -124,9 +160,11 @@ class Chat():
              'pre_process_time': pre_process_time,
              'light_mode'      : self.set_lightmode_aware(self.light_mode)}
         )
-        # Stringify everything
+        # Stringify everything (except images)
         for k, v in documents.items():
-            documents[k] = self.common.stringify_lists(v)
+            if k in ['dynamic_images']:
+                continue
+            documents[k] = self.session.common.stringify_lists(v)
 
         # Do heat map stuff
         (prompt_tokens, cleaned_color) = self.token_manager(documents,
@@ -150,14 +188,26 @@ class Chat():
         prompt_tokens,
         cleaned_color,
         pre_process_time) = self.get_documents(user_input)
-        included_files = self.common.json_template.findall(user_input)
+        included_files = self.session.common.json_template.findall(user_input)
         for included_file in included_files:
             if os.path.exists(included_file):
-                with open(included_file, 'r', encoding='utf-8') as f:
-                    _tmp = f.read()
-                    documents['dynamic_files'] = f'{documents.get("dynamic_files", "")}{_tmp}\n'
-                    documents['user_query'] = documents['user_query'].replace(included_file,
-                        f'{os.path.basename(included_file)} ✅')
+                if (included_file.lower().endswith('.png')
+                    or included_file.lower().endswith('.jpeg')):
+                    with Image.open(included_file) as img:
+                        buffered = io.BytesIO()
+                        if included_file.endswith('.png'):
+                            img.save(buffered, format="PNG")
+                        elif included_file.endswith('.jpeg'):
+                            img.save(buffered, format="JPEG")
+                        image_base64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
+                        documents['dynamic_images'].append(image_base64)
+                else:
+                    with open(included_file, 'r', encoding='utf-8') as f:
+                        _tmp = f.read()
+                        documents['dynamic_files'] = f'{documents.get("dynamic_files",
+                                                                      "")}{_tmp}\n'
+                        documents['user_query'] = documents['user_query'].replace(included_file,
+                            f'{os.path.basename(included_file)} ✅')
             elif included_file.startswith('http'):
                 response = requests.get(included_file, timeout=300)
                 if response.status_code == 200:
@@ -178,6 +228,7 @@ class Chat():
                      'name'            : self.name,
                      'chat_history'    : '',
                      'dynamic_files'   : '',
+                     'dynamic_images'  : [],
                      'chat_sessions'   : self.chat_sessions,
                      'ai_documents'    : '',
                      'user_documents'  : '',
@@ -191,33 +242,33 @@ class Chat():
         preprocessing = 0
         token_savings = 0
         cleaned_color = 0
-        prompt_tokens = self.cm.token_retreiver(user_input)
+        prompt_tokens = self.session.context.token_retreiver(user_input)
         cleaned_color = 0
-        self.common.heat_map = self.common.create_heatmap(prompt_tokens,
+        self.session.common.heat_map = self.session.common.create_heatmap(prompt_tokens,
                                                             reverse=True)
         cleaned_color = [v for k,v in
-                            self.common.create_heatmap(prompt_tokens / 2).items()
+                            self.session.common.create_heatmap(prompt_tokens / 2).items()
                             if k<=token_savings][-1:][0]
         return (documents, token_savings, prompt_tokens, cleaned_color, preprocessing)
 
     def chat(self):
         """ Prompt the User for questions, and begin! """
-        session = PromptSession()
+        c_session = PromptSession()
         kb = KeyBindings()
         @kb.add('enter')
         def _(event):
             buffer = event.current_buffer
             buffer.insert_text('\n')
-        console.print('💬 Press [italic red]Esc+Enter[/italic red] to send (multi-line), '
+        self.console.print('💬 Press [italic red]Esc+Enter[/italic red] to send (multi-line), '
                       r'[red]\? Esc+Enter[/red] for help, '
                       '[italic red]Ctrl+C[/italic red] to quit.\n')
         try:
             while True:
-                user_input = session.prompt(">>> ", multiline=True, key_bindings=kb).strip()
+                user_input = c_session.prompt(">>> ", multiline=True, key_bindings=kb).strip()
                 if not user_input:
                     continue
                 if user_input == r'\?':
-                    console.print('in-command switches you can use:\n\n\t\\no-context '
+                    self.console.print('in-command switches you can use:\n\n\t\\no-context '
                                   '[italic]msg[/italic] (perform a query with no context)\n'
                                   '\t{{/absolute/path/to/file}}   - Include a file as context\n'
                                   '\t{{https://somewebsite.com/}} - Include URL as context')
@@ -231,7 +282,7 @@ class Chat():
                      cleaned_color,
                      preprocessing) = self.no_context(user_input)
 
-                if self.common.json_template.findall(user_input):
+                if self.session.common.json_template.findall(user_input):
                     (documents,
                     token_savings,
                     prompt_tokens,
@@ -247,11 +298,11 @@ class Chat():
                     preprocessing) = self.get_documents(user_input)
 
                 # handoff to rich live
-                self.renderer.live_stream(documents,
-                                          token_savings,
-                                          prompt_tokens,
-                                          cleaned_color,
-                                          preprocessing)
+                self.session.renderer.live_stream(documents,
+                                                  token_savings,
+                                                  prompt_tokens,
+                                                  cleaned_color,
+                                                  preprocessing)
 
         except KeyboardInterrupt:
             sys.exit()
@@ -356,17 +407,22 @@ See .chat.yaml.example for details.
 
     return verify_args(parser.parse_args(argv))
 
+def store_chunks(d_session: SessionContext,
+                 pages: list[str])->None:
+    """ iterate over list, tagging content before storing to RAG """
+    for ind, text in enumerate(pages):
+        print(f'\t\tmetadata tagging chunk {ind+1}/{len(pages)}')
+        _, meta_tags, _  = d_session.context.pre_processor(text)
+        _normal = d_session.common.normalize_for_dedup(text)
+        d_session.rag.store_data(_normal, tags_metadata=meta_tags)
+
 # pylint: disable=redefined-outer-name #  we exit immediately
-def extract_text_from_pdf(args: argparse.ArgumentParser)->None:
+def extract_text_from_pdf(d_session: SessionContext,
+                          v_args: argparse.ArgumentParser)->None:
     """ Store imported PDF text directly into the RAG """
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=300)
-    common = CommonUtils(console, **vars(args))
-    rag = RAG(console,
-              CommonUtils(console, **vars(args)),
-              **vars(args),)
-    chat = Chat(**vars(args))
-    print(f'Importing document: {args.import_pdf}')
-    loader = PyPDFLoader(args.import_pdf)
+    print(f'Importing document: {v_args.import_pdf}')
+    loader = PyPDFLoader(v_args.import_pdf)
     pages = []
     try:
         for page in loader.lazy_load():
@@ -376,87 +432,57 @@ def extract_text_from_pdf(args: argparse.ArgumentParser)->None:
             if page_text:
                 print(f'\tPage {p_cnt+1}/{len(page_texts)}')
                 texts = text_splitter.split_text(page_text)
-                for ind, text in enumerate(texts):
-                    print(f'\t\tmetadata tagging chunk {ind+1}/{len(texts)}')
-                    _, meta_tags, _  = chat.cm.pre_processor(text)
-                    _normal = common.normalize_for_dedup(text)
-                    rag.store_data(_normal, tags_metadata=meta_tags)
+                store_chunks(d_session, texts)
             else:
                 print(f'\tPage {p_cnt+1}/{len(page_texts)} blank')
-
-
     except pypdf.errors.PdfStreamError as e:
         print(f'Error loading PDF:\n\n\t{e}\n\nIs this a valid PDF?')
         sys.exit(1)
     sys.exit()
 
-def store_text(args: argparse.ArgumentParser)->None:
+def store_text(d_session: SessionContext,
+               v_args: argparse.ArgumentParser)->None:
     """ Store imported text file directly into the RAG """
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=300)
-    common = CommonUtils(console, **vars(args))
-    chat = Chat(**vars(args))
-    rag = RAG(console,
-              CommonUtils(console, **vars(args)),
-              **vars(args),)
-    print(f'Importing document: {args.import_txt}')
-    with open(args.import_txt, 'r', encoding='utf-8') as file:
+    print(f'Importing document: {v_args.import_txt}')
+    with open(v_args.import_txt, 'r', encoding='utf-8') as file:
         document_content = file.read()
         texts = text_splitter.split_text(document_content)
-        for ind, text in enumerate(texts):
-            print(f'\tmetadata tagging chunk {ind+1}/{len(texts)}')
-            _, meta_tags, _  = chat.cm.pre_processor(text)
-            _normal = common.normalize_for_dedup(text)
-            rag.store_data(_normal, tags_metadata=meta_tags)
+        store_chunks(d_session, texts)
     sys.exit()
 
-def extract_text_from_markdown(args: argparse.ArgumentParser)->None:
+def extract_text_from_markdown(d_session: SessionContext,
+                               v_args: argparse.ArgumentParser)->None:
     """
     walk recursively through provided directory and import *.md, *.html, *.txt
     file directly into the RAG
     """
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=300)
-    common = CommonUtils(console, **vars(args))
-    chat = Chat(**vars(args))
-    rag = RAG(console,
-              CommonUtils(console, **vars(args)),
-              **vars(args),)
-    for fdir, _, files in os.walk(args.import_dir):
+    for fdir, _, files in os.walk(v_args.import_dir):
         for file in files:
-            if file.find('.md') != -1 or file.find('.html') != -1 or file.find('.txt'):
+            if file.endswidth('.md') or file.endswidth('.html') or file.endswidth('.txt'):
                 _file = os.path.join(fdir, file)
                 with open(_file, 'r', encoding='utf-8') as file:
                     document_content = file.read()
-                if _file.find('.html') != -1:
+                if _file.endswith('.html'):
                     soup = BeautifulSoup(document_content, 'html.parser')
                     document_content = soup.get_text()
                 print(f'Importing document: {_file}')
                 texts = text_splitter.split_text(document_content)
-                for ind, text in enumerate(texts):
-                    print(f'\tmetadata tagging chunk {ind+1}/{len(texts)}')
-                    _, meta_tags, _  = chat.cm.pre_processor(text)
-                    _normal = common.normalize_for_dedup(text)
-                    rag.store_data(_normal, tags_metadata=meta_tags)
+                store_chunks(d_session, texts)
     sys.exit()
 
-def extract_text_from_web(args: argparse.ArgumentParser)->None:
+def extract_text_from_web(d_session: SessionContext,
+                          v_args: argparse.ArgumentParser)->None:
     """ extract plain text from web address """
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=300)
-    common = CommonUtils(console, **vars(args))
-    chat = Chat(**vars(args))
-    rag = RAG(console,
-              CommonUtils(console, **vars(args)),
-              **vars(args),)
-    response = requests.get(args.import_web, timeout=300)
+    response = requests.get(v_args.import_web, timeout=300)
     if response.status_code == 200:
-        print(f"Document loaded from: {args.import_web}")
+        print(f"Document loaded from: {v_args.import_web}")
         soup = BeautifulSoup(response.content, 'html.parser')
         text = soup.get_text()
         texts = text_splitter.split_text(text)
-        for ind, text in enumerate(texts):
-            print(f'\tmetadata tagging chunk {ind+1}/{len(texts)}')
-            _, meta_tags, _  = chat.cm.pre_processor(text)
-            _normal = common.normalize_for_dedup(text)
-            rag.store_data(_normal, tags_metadata=meta_tags)
+        store_chunks(d_session, texts)
     else:
         print(f'Error obtaining webpage: {response.status_code}\n{response.raw}')
         sys.exit(1)
@@ -464,24 +490,25 @@ def extract_text_from_web(args: argparse.ArgumentParser)->None:
 # pylint: enable=redefined-outer-name
 if __name__ == '__main__':
     args = parse_args(sys.argv[1:])
+    session = SessionContext.from_args(console, args)
     if args.import_txt:
         if os.path.exists(args.import_txt):
-            store_text(args)
+            store_text(session, args)
         else:
             print(f'Error: The file at {args.import_txt} does not exist.')
             sys.exit(1)
     if args.import_pdf:
         if os.path.exists(args.import_pdf):
-            extract_text_from_pdf(args)
+            extract_text_from_pdf(session, args)
         else:
             print(f"Error: The file at {args.import_pdf} does not exist.")
             sys.exit(1)
     if args.import_web:
-        extract_text_from_web(args)
+        extract_text_from_web(session, args)
         sys.exit(0)
     if args.import_dir:
         if os.path.exists(args.import_dir):
-            extract_text_from_markdown(args)
+            extract_text_from_markdown(session, args)
             sys.exit(0)
-    chat = Chat(**vars(args))
+    chat = Chat(session, **vars(args))
     chat.chat()

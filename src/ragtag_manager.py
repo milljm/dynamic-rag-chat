@@ -40,7 +40,8 @@ class RAGTagManager():
 
     def update_rag(self, response, collection: str='ai_documents')->None:
         """ regular expression through message and attempt to create key:value tuples """
-        list_rag_tags = self.common.get_tags(response, debug=self.debug)
+        list_rag_tags = self.common.get_tags(response)
+        # Update the scene
         self.common.scene_tracker_from_tags(list_rag_tags)
         if self.debug:
             self.console.print(f'META TAGS PARSED: {list_rag_tags}',
@@ -144,23 +145,12 @@ class RAG():
                                style=f'color({self.color})')
         return results
 
-    def sanatize_response(self, response: str)->str:
-        """ remove emojis, meta data tagging, etc """
-        matches = self.common.meta_data.findall(response)
-        for match in matches:
-            response = response.replace(f'<meta_tags: {match}>','')
-        response = self.common.normalize_for_dedup(response)
-        return response
-
     def store_data(self, data,
                          tags_metadata: list[RAGTag] = None,
                          collection: str = 'ai_documents')->None:
         """ store data into the RAG """
         # Remove meta_data tagging information from data
-        reg_meta = self.common.meta_data.findall(data)
-        if reg_meta:
-            data = data.replace(f'<meta_tags: {reg_meta[0]}>', '')
-
+        data = self.common.sanatize_response(data)
         if tags_metadata is None:
             tags_metadata = {}
         meta_dict = dict(tags_metadata)
@@ -168,6 +158,6 @@ class RAG():
             self.console.print(f'STORE DATA: {data}\nTAGS: {meta_dict}',
                                style=f'color({self.color})',
                                highlight=False)
-        doc = Document(self.sanatize_response(data), metadata=meta_dict)
+        doc = Document(data, metadata=meta_dict)
         retriever = self.parent_retriever(collection)
         retriever.add_documents([doc])

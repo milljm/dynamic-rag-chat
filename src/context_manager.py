@@ -12,34 +12,29 @@ import threading
 from langchain.schema import Document
 from langchain.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
-from .ragtag_manager import RAGTagManager, RAG, RAGTag
+from .ragtag_manager import RAGTag # For type hinting
 from .prompt_manager import PromptManager
 from .filter_builder import FilterBuilder
 
 class ContextManager(PromptManager):
     """ A collection of methods aimed at producing/reducing the context """
-    def __init__(self, console, common, current_dir, **kwargs):
+    # pylint: disable=too-many-positional-arguments, too-many-arguments
+    def __init__(self, console, common, rag, rag_tag, current_dir, **kwargs):
         super().__init__(console, current_dir)
         self.console = console
         self.common = common
-        self.pre_host = kwargs['pre_host']
+        self.rag = rag
+        self.rag_tagger = rag_tag
         self.matches = kwargs['matches']
-        self.preconditioner = kwargs['preconditioner']
         self.debug = kwargs['debug']
-        self.name = kwargs['name']
         self.chat_sessions = kwargs['chat_sessions']
-        self.light_mode = kwargs['light_mode']
-        self.color = 245 if self.light_mode else 233
-        self.rag = RAG(console, self.common, **kwargs)
-        self.rag_tagger = RAGTagManager(console,
-                                        self.common,
-                                        **kwargs)
+        self.color = 245 if kwargs['light_mode'] else 233
         self.prompts = PromptManager(self.console,
                                      current_dir,
-                                     model=self.preconditioner,
+                                     model=kwargs['preconditioner'],
                                      debug=self.debug)
-        self.pre_llm = ChatOpenAI(base_url=self.pre_host,
-                                  model=self.preconditioner,
+        self.pre_llm = ChatOpenAI(base_url=kwargs['pre_host'],
+                                  model=kwargs['preconditioner'],
                                   temperature=0.3,
                                   streaming=False,
                                   max_tokens=4096,
@@ -48,6 +43,7 @@ class ContextManager(PromptManager):
         self.prompts.build_prompts()
         self.warn = True
 
+    # pylint: enable=too-many-positional-arguments,too-many-arguments
     def deduplication(self, base_reference: list[str],
                             response_list: list[str],
                             threshold: float = 0.92) -> list[str]:
@@ -56,7 +52,9 @@ class ContextManager(PromptManager):
         Returns cleaned RAG chunks.
         """
         def is_similar(a: str, b: str) -> bool:
-            return SequenceMatcher(None, a.lower().strip(), b.lower().strip()).ratio() > threshold
+            return SequenceMatcher(None,
+                                   a.lower().strip(),
+                                   b.lower().strip()).ratio() > threshold
 
         cleaned_chunks = []
         for chunk in response_list:
@@ -108,7 +106,7 @@ class ContextManager(PromptManager):
         if self.debug:
             self.console.print(f'PRE-PROCESSOR RESPONSE:\n{content}\n\n',
                                 style=f'color({self.color})', highlight=False)
-        tags = self.common.get_tags(content, debug=self.debug)
+        tags = self.common.get_tags(content)
         if self.no_entity(tags) and previous:
             try:
                 last_contents = self.common.chat_history_session[-1:]
@@ -171,6 +169,53 @@ class ContextManager(PromptManager):
                                            matches=self.matches)
         return documents
 
+    def hanlde_entity(self,
+                      meta_tags: list[RAGTag],
+                      query: str,
+                      collection: str,
+                      field: str)->list:
+        """ perform entity context matching routines """
+        flat_entities = []
+        storage = []
+        entity_weights = max(1, int(self.matches * .75))
+        # Obtain the entities tag, and it's contents
+        entities = [x.content for x in meta_tags if x.tag == 'entity']
+
+        # Clean the entities tag and store its contents
+        past_multi_entity = []
+        for key, tag in enumerate(meta_tags):
+            if entities and tag.tag == 'entity':
+                past_multi_entity = meta_tags.pop(key)
+
+        # Generate a list of entities
+        for entity in entities:
+            if isinstance(entity, list):
+                flat_entities.extend(entity)
+            elif isinstance(entity, str):
+                flat_entities.extend([e.strip() for e in entity.split(',')
+                                                if e.strip()])
+        # Perform a balanced search for each entity
+        for a_entity in flat_entities:
+            meta_tags.append(RAGTag(tag='entity', content=a_entity.lower()))
+            for _ in range(max(1, int(entity_weights / len(flat_entities)))):
+                storage.extend(self.gather_context(query,
+                                                    collection,
+                                                    meta_tags,
+                                                    field))
+            # Remove the entities RAGTag from the list each time
+            for key, tag in enumerate(meta_tags):
+                if entities and tag.tag == 'entity':
+                    meta_tags.pop(key)
+
+        # add the pruned entity tag back in (allow a search for combination)
+        if past_multi_entity:
+            meta_tags.append(past_multi_entity)
+            storage.extend(self.gather_context(query,
+                                                collection,
+                                                meta_tags,
+                                                field))
+        return storage
+
     def handle_context(self, data_set: list,
                              direction='query')->tuple[dict[str,list], int]:
         """ Method to handle all the lovely context """
@@ -184,60 +229,24 @@ class ContextManager(PromptManager):
             if data_set:
                 query = self.common.stringify_lists(data_set[0])
                 # Try to tagify the users query
-                (_, meta_tags, scene_meta) = self.pre_processor(query)
-                documents['scene_meta'] = scene_meta
+                (_, meta_tags, documents['scene_meta']) = self.pre_processor(query)
                 if self.debug:
                     self.console.print(f'TAG RETREIVAL:\n{meta_tags}\n\n',
                                        style=f'color({self.color})',
                                        highlight=False)
-                important_fields = ['entity', 'focus', 'tone', 'emotion', 'other']
                 for collection in collection_list:
                     storage = []
                     # Extensive RAG retreival: field filter dictionary, highly relevant
-                    # Loop until we've exhausted important_fields or collected maximum
-                    for field in important_fields:
+                    # Loop until we've exhausted fields or collected maximum
+                    for field in ['entity', 'focus', 'tone', 'emotion', 'other']:
                         # Entity is very important, as it represents an NPC/Character. We
                         # will therefor spend 75% of our allotted context window budget
                         # on Entity field-filtering matches
                         if field == 'entity':
-                            flat_entities = []
-                            entity_weights = max(1, int(self.matches * .75))
-                            # Obtain the entities tag, and it's contents
-                            entities = [x.content for x in meta_tags if x.tag == 'entity']
-
-                            # Clean the entities tag and store its contents
-                            past_multi_entity = []
-                            for key, tag in enumerate(meta_tags):
-                                if entities and tag.tag == 'entity':
-                                    past_multi_entity = meta_tags.pop(key)
-
-                            # Generate a list of entities
-                            for entity in entities:
-                                if isinstance(entity, list):
-                                    flat_entities.extend(entity)
-                                elif isinstance(entity, str):
-                                    flat_entities.extend([e.strip() for e in entity.split(',')
-                                                                    if e.strip()])
-                            # Perform a balanced search for each entity
-                            for a_entity in flat_entities:
-                                meta_tags.append(RAGTag(tag='entity', content=a_entity.lower()))
-                                for _ in range(max(1, int(entity_weights / len(flat_entities)))):
-                                    storage.extend(self.gather_context(query,
-                                                                       collection,
-                                                                       meta_tags,
-                                                                       field))
-                                # Remove the entities RAGTag from the list each time
-                                for key, tag in enumerate(meta_tags):
-                                    if entities and tag.tag == 'entity':
-                                        meta_tags.pop(key)
-
-                            # add the pruned entity tag back in (allow a search for combination)
-                            if past_multi_entity:
-                                meta_tags.append(past_multi_entity)
-                                storage.extend(self.gather_context(query,
-                                                                   collection,
-                                                                   meta_tags,
-                                                                   field))
+                            storage.extend(self.hanlde_entity(meta_tags,
+                                                              query,
+                                                              collection,
+                                                              field))
                         # 25% other field-filters
                         storage.extend(self.gather_context(query,
                                                            collection,
@@ -249,7 +258,8 @@ class ContextManager(PromptManager):
                             break
 
                     if self.debug:
-                        self.console.print(f'BALANCE: {balance}', style=f'color({self.color})')
+                        self.console.print(f'BALANCE: {balance}',
+                                           style=f'color({self.color})')
 
                     # Fallback to simularity search based on the difference. Always allow one.
                     storage.extend(self.rag.retrieve_data(query,

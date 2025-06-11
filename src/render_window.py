@@ -7,8 +7,9 @@ from rich.markdown import Markdown
 from rich.text import Text
 from rich.console import Group
 from langchain.prompts import ChatPromptTemplate
+from langchain.schema.messages import HumanMessage
+from langchain.schema import BaseMessage   # for Type Hinting
 from langchain_openai import ChatOpenAI
-from .context_manager import ContextManager
 from .prompt_manager import PromptManager
 class AnimationThread(Thread):
     """ Allow pulsing animation to run as a thread """
@@ -23,7 +24,7 @@ class AnimationThread(Thread):
 
 class RenderWindow(PromptManager):
     """ Responsible for printing Rich Text/Markdown Live to the screen """
-    def __init__(self, console, common, current_dir, **kwargs):
+    def __init__(self, console, common, context, current_dir, **kwargs):
         super().__init__(console, current_dir)
         self.debug = kwargs['debug']
         self.console = console
@@ -36,7 +37,7 @@ class RenderWindow(PromptManager):
         self.color = 245 if self.light_mode else 233
         self.model_re = re.compile(r'(\w+)\W+')
         self.common = common
-        self.cm = ContextManager(console, self.common, current_dir, **kwargs)
+        self.cm = context
         self.prompts = PromptManager(console, current_dir, model=self.model, debug=self.debug)
         self.llm = ChatOpenAI(base_url=self.host,
                                model=self.model,
@@ -138,6 +139,33 @@ class RenderWindow(PromptManager):
             self.pulse_index = (self.pulse_index + 1) % len(self.pulsing_chars)
             self.render_chat()
 
+    @staticmethod
+    def add_image_block(messages: list[BaseMessage], images: list)->list[BaseMessage]:
+        """ add/return image block if images are present """
+        # Optional: inject images into HumanMessage if present
+        if images:
+            image_blocks = [
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:image/jpeg;base64,{img_b64}"
+                    }
+                }
+                for img_b64 in images
+            ]
+            # Replace or extend HumanMessage with image blocks
+            for i, msg in enumerate(messages):
+                if isinstance(msg, HumanMessage):
+                    if isinstance(msg.content, str):
+                        messages[i] = HumanMessage(content=[
+                            {"type": "text", "text": msg.content},
+                            *image_blocks
+                        ])
+                    elif isinstance(msg.content, list):
+                        messages[i].content.extend(image_blocks)
+                    break  # Only handle first HumanMessage
+        return messages
+
     # Stream response as chunks
     def stream_response(self, documents: dict):
         """ Parse LLM Prompt """
@@ -159,13 +187,20 @@ class RenderWindow(PromptManager):
                                f'{documents["performance"]}\n',
                                style=f'color({self.color})',
                                highlight=False)
-        prompt = prompt_template.format_messages(**documents)
+
+        # Format text messages from template
+        images = documents.pop('dynamic_images', [])
+        formatted_messages = prompt_template.format_messages(**documents)
+
+        # Optional: inject images into HumanMessage if present
+        messages = self.add_image_block(formatted_messages, images)
+
         # pylint: enable=no-member
         if self.debug:
-            self.console.print(f'HEAVY LLM PROMPT (llm.stream()):\n{prompt}\n\n',
+            self.console.print(f'HEAVY LLM PROMPT (llm.stream()):\n{formatted_messages}\n\n',
                           style=f'color({self.color})',
                           highlight=False)
-        for chunk in self.llm.stream(prompt):
+        for chunk in self.llm.stream(messages):
             chunk = self.reveal_thinking(chunk, self.verbose)
             chunk = self.if_hiding(chunk, self.verbose)
             yield chunk
@@ -267,13 +302,10 @@ class RenderWindow(PromptManager):
             self.console.print('Warn: I had to help the LLM close meta_tags',
                                style=f'color({self.color})',highlight=False)
         self.meta_capture = ''
-        _response = str(current_response)
-        self.cm.handle_context([_response],
+        self.cm.handle_context([str(current_response)],
                                 direction='store')
-        matches = self.common.meta_data.findall(current_response)
-        for match in matches:
-            response = current_response.replace(f'<meta_tags: {match}>','')
+        current_response = self.common.sanatize_response(current_response)
         self.common.chat_history_session.append(f'\nUSER: {documents["user_query"]}\n\n'
-                                                f'AI: {response}')
-        self.common.save_chat(self.common.history_dir, self.common.chat_history_session)
+                                                f'AI: {current_response}')
+        self.common.save_chat()
         self.common.check_prompt(current_response)

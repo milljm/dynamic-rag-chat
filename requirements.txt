@@ -8,5 +8,6 @@ prompt_toolkit
 rich
 pypdf
 pytz
+pillow
 requests
 beautifulsoup4
