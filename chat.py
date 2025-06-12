@@ -24,6 +24,7 @@ import time
 import base64
 import argparse
 import datetime
+import mimetypes
 from dataclasses import dataclass
 import yaml
 import pytz
@@ -167,8 +168,7 @@ class Chat():
             documents[k] = self.session.common.stringify_lists(v)
 
         # Do heat map stuff
-        (prompt_tokens, cleaned_color) = self.token_manager(documents,
-                                                            token_savings)
+        (prompt_tokens, cleaned_color) = self.token_manager(documents, token_savings)
 
         performance_summary = ''
         for k, v in self.token_counter(documents):
@@ -178,24 +178,9 @@ class Chat():
         documents['performance'] = (f'Total Tokens: {prompt_tokens}\n'
                                     f'Duplicate Tokens removed: {max(0, pre_t - post_t)}\n'
                                     f'My maximum Context Window size: {self.num_ctx}')
-
         return (documents, token_savings, prompt_tokens, cleaned_color, pre_process_time)
 
-    @staticmethod
-    def file_type_icon(filename: str) -> str:
-        """ Return a emoji/icon relevant to the file type """
-        if filename.startswith("http"):
-            return "🌐"
-        elif filename.lower().endswith((".png", ".jpg", ".jpeg", ".webp")):
-            return "🖼️"
-        elif filename.lower().endswith((".txt", ".md", ".json", ".yaml", ".yml")):
-            return "📄"
-        elif filename.lower().endswith((".html", ".htm")):
-            return "🌍"
-        elif filename.lower().endswith(".pdf"):
-            return "📕"
-        return "📁"  # generic file
-
+    # pylint: disable=too-many-locals,too-many-branches  # Handling a lot of different formats
     def load_content_as_context(self, user_input):
         """ parse user_input for all occurrences of {{ /path/to/file }} """
         (documents,
@@ -205,27 +190,41 @@ class Chat():
         pre_process_time) = self.get_documents(user_input)
         included_files = self.session.common.json_template.findall(user_input)
         for included_file in included_files:
-            icon = self.file_type_icon(included_file)
             if os.path.exists(included_file):
-                if (included_file.lower().endswith('.png')
-                    or included_file.lower().endswith('.jpeg')):
-                    with Image.open(included_file) as img:
-                        buffered = io.BytesIO()
-                        if included_file.endswith('.png'):
-                            img.save(buffered, format="PNG")
-                        elif included_file.endswith('.jpeg'):
-                            img.save(buffered, format="JPEG")
-                        image_base64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
-                        documents['dynamic_images'].append(image_base64)
-                        documents['user_query'] = documents['user_query'].replace(included_file,
-                            f'{os.path.basename(included_file)} {icon} ✅')
-                else:
-                    with open(included_file, 'r', encoding='utf-8') as f:
-                        _tmp = f.read()
-                        documents['dynamic_files'] = f'{documents.get("dynamic_files",
-                                                                      "")}{_tmp}\n'
-                        documents['user_query'] = documents['user_query'].replace(included_file,
-                            f'{os.path.basename(included_file)} {icon} ✅')
+                mime_format = mimetypes.guess_type(included_file)[0]
+                data = ''
+                if mime_format:
+                    mime, _format = mime_format.split('/')
+                    if 'image' == mime:
+                        icon = "🖼️"
+                        with Image.open(included_file) as img:
+                            img = img.convert("RGB")
+                            buffered = io.BytesIO()
+                            img.save(buffered, format=_format)
+                            data = base64.b64encode(buffered.getvalue()).decode("utf-8")
+                    elif 'pdf' == _format:
+                        icon = "📕"
+                        loader = PyPDFLoader(included_file)
+                        pages = []
+                        for page in loader.lazy_load():
+                            pages.append(page)
+                            page_texts = list(map(lambda doc: doc.page_content, pages))
+                        for page_text in page_texts:
+                            data += page_text
+                    elif 'html' == _format:
+                        icon = "🌍"
+                    elif 'text' == mime:
+                        icon = "📄"
+                    else:
+                        icon = "📁"
+                    if not data:
+                        with open(included_file, 'r', encoding='utf-8') as f:
+                            data = f.read()
+                    _file = os.path.basename(included_file)
+                    documents['dynamic_files'] = f'{documents.get("dynamic_files",
+                                                                  "")}{data}\n\n'
+                    documents['user_query'] = documents['user_query'].replace(included_file,
+                                                                    f'{_file} {icon} ✅')
             elif included_file.startswith('http'):
                 response = requests.get(included_file, timeout=300)
                 if response.status_code == 200:
@@ -233,10 +232,10 @@ class Chat():
                     documents['dynamic_files'] = (f'{documents.get("dynamic_files", "")}'
                                                   f'{soup.get_text()}\n')
                     documents['user_query'] = documents['user_query'].replace(included_file,
-                        f'{included_file} {icon} ✅')
+                                                                     f'{included_file} {icon} ✅')
             else:
                 documents['user_query'] = documents['user_query'].replace(included_file,
-                        f'{included_file} ❌')
+                                                                     f'{included_file} ❌')
         return (documents, token_savings, prompt_tokens, cleaned_color, pre_process_time)
 
     def no_context(self, user_input)->tuple:
