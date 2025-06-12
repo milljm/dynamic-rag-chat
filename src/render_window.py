@@ -1,4 +1,5 @@
 """ module responsible for rendering output to the screen """
+import os
 import re
 import time
 from threading import Thread
@@ -187,6 +188,10 @@ class RenderWindow(PromptManager):
                                f'{documents["performance"]}\n',
                                style=f'color({self.color})',
                                highlight=False)
+        else:
+            with open(os.path.join(self.common.history_dir, 'debug.log'),
+                      'w', encoding='utf-8') as f:
+                f.write(f'LLM DOCUMENTS: {documents.keys()}')
 
         # Format text messages from template
         images = documents.pop('dynamic_images', [])
@@ -200,6 +205,10 @@ class RenderWindow(PromptManager):
             self.console.print(f'HEAVY LLM PROMPT (llm.stream()):\n{formatted_messages}\n\n',
                           style=f'color({self.color})',
                           highlight=False)
+        else:
+            with open(os.path.join(self.common.history_dir, 'debug.log'),
+                      'w', encoding='utf-8') as f:
+                f.write(f'HEAVY LLM PROMPT (llm.stream()): {formatted_messages}')
         for chunk in self.llm.stream(messages):
             chunk = self.reveal_thinking(chunk, self.verbose)
             chunk = self.if_hiding(chunk, self.verbose)

@@ -322,3 +322,8 @@ class CommonUtils():
             if self.debug:
                 self.console.print(f'PROMPT CHANGE: {self.llm_prompt}',
                                    style=f'color({self.color})', highlight=True)
+            else:
+                with open(os.path.join(self.history_dir, 'debug.log'),
+                          'w', encoding='utf-8') as f:
+                    f.write(f'PROMPT CHANGE: {self.llm_prompt}')
+

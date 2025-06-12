@@ -7,6 +7,7 @@ being supplied to the LLM. It utilizing several methods:
     Staggered History.
     ParentDocument/ChildDocument retrieval (return one large response with many small one)
 """
+import os
 from difflib import SequenceMatcher
 import threading
 from langchain.schema import Document
@@ -102,10 +103,18 @@ class ContextManager(PromptManager):
         if self.debug:
             self.console.print(f'PRE-PROCESSOR PROMPT:\n{prompt}\n\n',
                                 style=f'color({self.color})', highlight=False)
+        else:
+            with open(os.path.join(self.common.history_dir, 'debug.log'),
+                      'w', encoding='utf-8') as f:
+                f.write(f'PRE-PROCESSOR PROMPT: {prompt}')
         content = self.pre_llm.invoke(prompt).content
         if self.debug:
             self.console.print(f'PRE-PROCESSOR RESPONSE:\n{content}\n\n',
                                 style=f'color({self.color})', highlight=False)
+        else:
+            with open(os.path.join(self.common.history_dir, 'debug.log'),
+                      'w', encoding='utf-8') as f:
+                f.write(f'PRE-PROCESSOR RESPONSE: {content}')
         tags = self.common.get_tags(content)
         if self.no_entity(tags) and previous:
             try:
@@ -150,6 +159,10 @@ class ContextManager(PromptManager):
                     self.console.print(f'MAX CHAT TOKENS: {_tk_cnt}',
                                        style=f'color({self.color})',
                                        highlight=False)
+                else:
+                    with open(os.path.join(self.common.history_dir, 'debug.log'),
+                              'w', encoding='utf-8') as f:
+                        f.write(f'MAX CHAT TOKENS: {_tk_cnt}')
                 return abridged
             abridged.append(response)
         return abridged
@@ -234,6 +247,10 @@ class ContextManager(PromptManager):
                     self.console.print(f'TAG RETREIVAL:\n{meta_tags}\n\n',
                                        style=f'color({self.color})',
                                        highlight=False)
+                else:
+                    with open(os.path.join(self.common.history_dir, 'debug.log'),
+                              'w', encoding='utf-8') as f:
+                        f.write(f'TAG RETREIVAL: {meta_tags}')
                 for collection in collection_list:
                     storage = []
                     # Extensive RAG retreival: field filter dictionary, highly relevant
@@ -260,7 +277,10 @@ class ContextManager(PromptManager):
                     if self.debug:
                         self.console.print(f'BALANCE: {balance}',
                                            style=f'color({self.color})')
-
+                    else:
+                        with open(os.path.join(self.common.history_dir, 'debug.log'),
+                                  'w', encoding='utf-8') as f:
+                            f.write(f'BALANCE: {balance}')
                     # Fallback to simularity search based on the difference. Always allow one.
                     storage.extend(self.rag.retrieve_data(query,
                                                           collection,
@@ -283,6 +303,10 @@ class ContextManager(PromptManager):
                     self.console.print(f'CONTEXT RETRIEVAL:\n{documents}\n\n',
                                        style=f'color({self.color})',
                                        highlight=False)
+                else:
+                    with open(os.path.join(self.common.history_dir, 'debug.log'),
+                              'w', encoding='utf-8') as f:
+                        f.write(f'CONTEXT RETRIEVAL: {documents}')
 
             # Store the users query to their RAG, now that we are done pre-processing
             # (so as not to bring back identical information in their query)

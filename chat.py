@@ -181,6 +181,21 @@ class Chat():
 
         return (documents, token_savings, prompt_tokens, cleaned_color, pre_process_time)
 
+    @staticmethod
+    def file_type_icon(filename: str) -> str:
+        """ Return a emoji/icon relevant to the file type """
+        if filename.startswith("http"):
+            return "🌐"
+        elif filename.lower().endswith((".png", ".jpg", ".jpeg", ".webp")):
+            return "🖼️"
+        elif filename.lower().endswith((".txt", ".md", ".json", ".yaml", ".yml")):
+            return "📄"
+        elif filename.lower().endswith((".html", ".htm")):
+            return "🌍"
+        elif filename.lower().endswith(".pdf"):
+            return "📕"
+        return "📁"  # generic file
+
     def load_content_as_context(self, user_input):
         """ parse user_input for all occurrences of {{ /path/to/file }} """
         (documents,
@@ -190,6 +205,7 @@ class Chat():
         pre_process_time) = self.get_documents(user_input)
         included_files = self.session.common.json_template.findall(user_input)
         for included_file in included_files:
+            icon = self.file_type_icon(included_file)
             if os.path.exists(included_file):
                 if (included_file.lower().endswith('.png')
                     or included_file.lower().endswith('.jpeg')):
@@ -201,13 +217,15 @@ class Chat():
                             img.save(buffered, format="JPEG")
                         image_base64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
                         documents['dynamic_images'].append(image_base64)
+                        documents['user_query'] = documents['user_query'].replace(included_file,
+                            f'{os.path.basename(included_file)} {icon} ✅')
                 else:
                     with open(included_file, 'r', encoding='utf-8') as f:
                         _tmp = f.read()
                         documents['dynamic_files'] = f'{documents.get("dynamic_files",
                                                                       "")}{_tmp}\n'
                         documents['user_query'] = documents['user_query'].replace(included_file,
-                            f'{os.path.basename(included_file)} ✅')
+                            f'{os.path.basename(included_file)} {icon} ✅')
             elif included_file.startswith('http'):
                 response = requests.get(included_file, timeout=300)
                 if response.status_code == 200:
@@ -215,7 +233,7 @@ class Chat():
                     documents['dynamic_files'] = (f'{documents.get("dynamic_files", "")}'
                                                   f'{soup.get_text()}\n')
                     documents['user_query'] = documents['user_query'].replace(included_file,
-                        f'{included_file} ✅')
+                        f'{included_file} {icon} ✅')
             else:
                 documents['user_query'] = documents['user_query'].replace(included_file,
                         f'{included_file} ❌')

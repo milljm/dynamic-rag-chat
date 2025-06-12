@@ -47,6 +47,10 @@ class RAGTagManager():
             self.console.print(f'META TAGS PARSED: {list_rag_tags}',
                                style=f'color({self.color})',
                                highlight=False)
+        else:
+            with open(os.path.join(self.common.history_dir, 'debug.log'),
+                      'w', encoding='utf-8') as f:
+                f.write(f'META TAGS PARSED: {list_rag_tags}')
         rag = RAG(self.console, self.common, **self.kwargs)
         # New way: Of course its practically built in. Note to self: Never pretend
         # to think you are planting a flag somewhere when it comes to coding.
@@ -143,6 +147,10 @@ class RAG():
                                f'meta: {meta_data}\n',
                                f'\n{results}\n\n',
                                style=f'color({self.color})')
+        else:
+            with open(os.path.join(self.common.history_dir, 'debug.log'),
+                      'w', encoding='utf-8') as f:
+                f.write(f'RETRIEVED FROM {collection}: {meta_data}, {results}')
         return results
 
     def store_data(self, data,
@@ -158,6 +166,10 @@ class RAG():
             self.console.print(f'STORE DATA: {data}\nTAGS: {meta_dict}',
                                style=f'color({self.color})',
                                highlight=False)
+        else:
+            with open(os.path.join(self.common.history_dir, 'debug.log'),
+                      'w', encoding='utf-8') as f:
+                f.write(f'STORE DATA: TAGS:{meta_dict}, {data}')
         doc = Document(data, metadata=meta_dict)
         retriever = self.parent_retriever(collection)
         retriever.add_documents([doc])
