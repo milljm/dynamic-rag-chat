@@ -158,7 +158,7 @@ class RAG():
                          collection: str = 'ai_documents')->None:
         """ store data into the RAG """
         # Remove meta_data tagging information from data
-        data = self.common.sanatize_response(data)
+        data = self.common.sanatize_response(data, strip=True)
         if tags_metadata is None:
             tags_metadata = {}
         meta_dict = dict(tags_metadata)

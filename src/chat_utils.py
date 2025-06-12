@@ -150,10 +150,11 @@ class CommonUtils():
         self.save_scene(self.history_dir, self.scene_meta)
         return scene_str
 
-    def sanatize_response(self, response: str)->str:
+    def sanatize_response(self, response: str, strip: bool = False)->str:
         """ remove emojis, meta data tagging, etc """
         response = self.remove_tags(response)
-        response = self.normalize_for_dedup(response)
+        if strip:
+            response = self.normalize_for_dedup(response)
         return response
 
     def remove_tags(self, response: str)->str:
