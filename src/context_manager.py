@@ -131,16 +131,28 @@ class ContextManager(PromptManager):
                          daemon=True).start()
 
     @staticmethod
-    def stagger_history(history_size, max_elements=20):
-        """ stagger chat history """
-        indices = []
-        current = history_size - 1
-        step = 1
-        while current >= 0 and len(indices) < max_elements:
-            indices.append(current)
-            current -= step
-            step += 1
-        return sorted(indices)
+    def stagger_history(history_size: int,
+                        max_elements: int = 20,
+                        recent_tail: int = 4) -> list[int]:
+        """
+        Returns a list of indices from chat history with decaying density.
+        - Guarantees `recent_tail` most recent indices.
+        - Remaining slots are staggered across earlier history.
+        """
+        if history_size <= max_elements:
+            return list(range(history_size))
+
+        recent_tail = min(recent_tail, max_elements)
+        base_count = max_elements - recent_tail
+        earlier = history_size - recent_tail
+
+        # Spread earlier indices linearly
+        step = earlier / base_count
+        indices = [int(i * step) for i in range(base_count)]
+
+        # Add tail
+        indices += list(range(history_size - recent_tail, history_size))
+        return sorted(set(indices))
 
     def get_chat_history(self)->list:
         """
