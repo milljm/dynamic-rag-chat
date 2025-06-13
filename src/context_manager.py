@@ -56,7 +56,6 @@ class ContextManager(PromptManager):
             return SequenceMatcher(None,
                                    a.lower().strip(),
                                    b.lower().strip()).ratio() > threshold
-
         cleaned_chunks = []
         for chunk in response_list:
             if any(is_similar(chunk, base) for base in base_reference):
@@ -64,7 +63,6 @@ class ContextManager(PromptManager):
             if any(is_similar(chunk, prior) for prior in cleaned_chunks):
                 continue
             cleaned_chunks.append(chunk)
-
         return cleaned_chunks
 
     @staticmethod
@@ -242,9 +240,9 @@ class ContextManager(PromptManager):
             meta_tags.append(RAGTag(tag='entity', content=a_entity.lower()))
             for _ in range(max(1, int(entity_weights / len(flat_entities)))):
                 storage.extend(self.gather_context(query,
-                                                    collection,
-                                                    meta_tags,
-                                                    field))
+                                                   collection,
+                                                   meta_tags,
+                                                   field))
             # Remove the entities RAGTag from the list each time
             for key, tag in enumerate(meta_tags):
                 if entities and tag.tag == 'entity':
@@ -254,9 +252,9 @@ class ContextManager(PromptManager):
         if past_multi_entity:
             meta_tags.append(past_multi_entity)
             storage.extend(self.gather_context(query,
-                                                collection,
-                                                meta_tags,
-                                                field))
+                                               collection,
+                                               meta_tags,
+                                               field))
         return storage
 
     def handle_context(self, data_set: list,

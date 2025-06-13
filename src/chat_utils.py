@@ -54,10 +54,11 @@ class CommonUtils():
             'location': 'unknown',                  # e.g., 'Beast cockpit'
             'time': 'unknown',                      # 'day', 'night', 'dusk', 'morning'
             'status': 'unknown',                    # 'in motion', 'camped', 'combat'
-            'entity_location': ['unknown'],         # john backseat, jane frontseat, bo navigation
 
             # Character Presence & Perspective
+            'entity': [],                           # Characters mentioned
             'audience': [],                         # Characters being spoken to directly
+            'entity_location': ['unknown'],         # john backseat, jane frontseat, bo navigation
 
             # Narrative Flow / Contextual Arc
             'narrative_arc': 'unspecified',         # e.g., 'john_trust_arc'
