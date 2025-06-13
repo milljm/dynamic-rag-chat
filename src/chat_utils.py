@@ -101,21 +101,37 @@ class CommonUtils():
     @staticmethod
     def validate_entity_presence(scene: dict) -> list[str]:
         """
-        Checks that all entities in 'entity' are accounted for in either 'audience'
-        or 'entity_location'. Returns list of phantom entity names.
+        Ensure all characters in `entity` are grounded in either `audience` or `entity_location`.
+        Returns a list of phantom entities (those not grounded).
         """
-        entities = set(scene.get("entity", []))
-        audience = set(scene.get("audience", []))
-        locations = scene.get("entity_location", [])
+        def normalize_entity_list(field) -> set[str]:
+            """
+            Accepts a list or comma-delimited string and returns a set of cleaned entity names.
+            """
+            if isinstance(field, str):
+                return set(e.strip() for e in field.split(',') if e.strip())
+            elif isinstance(field, list):
+                result = set()
+                for item in field:
+                    if isinstance(item, str):
+                        result.update(e.strip() for e in item.split(',') if e.strip())
+                return result
+            return set()
+        raw_entities = scene.get('entity', [])
+        raw_audience = scene.get('audience', [])
+        raw_locations = scene.get('entity_location', [])
+        entities = normalize_entity_list(raw_entities)
+        audience = normalize_entity_list(raw_audience)
+        locations = normalize_entity_list(raw_locations)
 
-        # Flatten entity_location text and check for each entity’s presence by name match
         physically_present = set()
-        for loc in locations:
-            for ent in entities:
-                if ent.lower() in loc.lower():
+        for ent in entities:
+            ent_lower = ent.strip().lower()
+            for loc in locations:
+                if ent_lower in loc.lower():
                     physically_present.add(ent)
-
-        phantoms = [e for e in entities if e not in audience and e not in physically_present]
+        grounded = audience.union(physically_present)
+        phantoms = [e for e in entities if e not in grounded]
         return phantoms
 
     def scene_tracker_from_tags(self, tags: list[RAGTag]) -> str:
