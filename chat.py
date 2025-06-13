@@ -221,8 +221,11 @@ class Chat():
                         with open(included_file, 'r', encoding='utf-8') as f:
                             data = f.read()
                     _file = os.path.basename(included_file)
-                    documents['dynamic_files'] = f'{documents.get("dynamic_files",
-                                                                  "")}{data}\n\n'
+                    if 'image' == mime:
+                        documents['dynamic_images'].append(data)
+                    else:
+                        documents['dynamic_files'] = f'{documents.get("dynamic_files",
+                                                                      "")}{data}\n\n'
                     documents['user_query'] = documents['user_query'].replace(included_file,
                                                                     f'{_file} {icon} ✅')
             elif included_file.startswith('http'):
