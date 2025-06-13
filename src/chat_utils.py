@@ -97,6 +97,26 @@ class CommonUtils():
             tags.append(RAGTag(key.lower(), str(val).strip().lower()))
         return tags
 
+    @staticmethod
+    def validate_entity_presence(scene: dict) -> list[str]:
+        """
+        Checks that all entities in 'entity' are accounted for in either 'audience'
+        or 'entity_location'. Returns list of phantom entity names.
+        """
+        entities = set(scene.get("entity", []))
+        audience = set(scene.get("audience", []))
+        locations = scene.get("entity_location", [])
+
+        # Flatten entity_location text and check for each entity’s presence by name match
+        physically_present = set()
+        for loc in locations:
+            for ent in entities:
+                if ent.lower() in loc.lower():
+                    physically_present.add(ent)
+
+        phantoms = [e for e in entities if e not in audience and e not in physically_present]
+        return phantoms
+
     def scene_tracker_from_tags(self, tags: list[RAGTag]) -> str:
         """ Build a formatted scene state string based on incoming RAGTags and internal memory """
         tag_dict = {tag.tag: tag.content for tag in tags}
@@ -147,7 +167,24 @@ class CommonUtils():
             if v in (None, '', [], {}, 'none', 'unknown'):
                 return f'{k}=none'
             return f'{k}={v}'
+        phantoms = self.validate_entity_presence(scene)
         scene_str = '#SCENE_STATE: ' + '; '.join(stringify(k, v) for k, v in sorted(scene.items()))
+        if phantoms:
+            scene_str += (
+    '\n\n⚠️ CRITICAL WARNING: The following entities are listed in `entity:` '
+    f'but are NOT grounded in `audience:` or `entity_location:`: {", ".join(phantoms)}.\n'
+    'They may only be referenced passively. These characters must not speak, act, or appear. '
+    'They are not physically present in the scene.\n'
+    '🧠 You may reference them emotionally (e.g., thoughts, memories, feelings), but they must '
+    'NOT:\n'
+    '- Perform actions (e.g., enter the room, move, react)\n'
+    '- Speak or interrupt\n'
+    '- Be visually or physically described unless in remembered detail\n'
+    'They may NOT arrive, emerge, appear, or be discovered mid-scene.\n'
+    'Scene location is LOCKED. Character list is FINAL.\n'
+    'Any attempt to use these characters as if present is a violation of story continuity.\n'
+    '### 🔐 Scene Presence Rules (Active)'
+)
         self.save_scene(self.history_dir, self.scene_meta)
         return scene_str
 

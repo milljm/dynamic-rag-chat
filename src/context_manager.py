@@ -91,7 +91,7 @@ class ContextManager(PromptManager):
         prompts = self.prompts
         query = self.common.normalize_for_dedup(query)
         # pylint: disable=no-member # dynamic prompts (see self.__build_prompts)
-        human_prompt = (prompts.get_prompt(f'{prompts.tag_prompt_file}_human.txt')
+        human_prompt = (prompts.get_prompt(f'{prompts.tag_prompt_file}_human.md')
                         if self.debug else prompts.tag_prompt_human)
         # pylint: enable=no-member
         prompt_template = ChatPromptTemplate.from_messages([

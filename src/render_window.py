@@ -172,10 +172,10 @@ class RenderWindow(PromptManager):
         """ Parse LLM Prompt """
         prompts = self.prompts
         # pylint: disable=no-member # dynamic prompts (see self.__build_prompts)
-        system_prompt = (prompts.get_prompt(f'{prompts.plot_prompt_file}_system.txt')
+        system_prompt = (prompts.get_prompt(f'{prompts.plot_prompt_file}_system.md')
                      if self.debug else prompts.plot_prompt_system)
 
-        human_prompt = (prompts.get_prompt(f'{prompts.plot_prompt_file}_human.txt')
+        human_prompt = (prompts.get_prompt(f'{prompts.plot_prompt_file}_human.md')
                      if self.debug else prompts.plot_prompt_human)
         # pylint: enable=no-member
         prompt_template = ChatPromptTemplate.from_messages([
