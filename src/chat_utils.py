@@ -42,10 +42,11 @@ class CommonUtils():
 
         # Regular expression in use throughout the project
         self.find_prompt  = re.compile(r'(?<=[<m]eta_prompt: ).*?(?=[>)])', re.DOTALL)
-        self.meta_data = re.compile(r'(?<=[<m]eta_tags: ).*?(?=[>)])', re.DOTALL)
+        self.meta_data = re.compile(r"[<]?(meta_tags:.*?)\s*>", re.DOTALL)
         self.meta_iter = re.compile(r'(\w+):\s*([^;]*)')
         self.json_style = re.compile(r'```json(.*)```', re.DOTALL)
         self.json_template = re.compile(r'\{\{\s*(.*?)\s*\}\}', re.DOTALL)
+        self.meta_block = re.compile(r"[<]?meta_tags:.*?\s*>", re.DOTALL)
 
 
         # Ephemeral scene tracking
@@ -198,9 +199,8 @@ class CommonUtils():
     def remove_tags(self, response: str)->str:
         """ remove meta_tags from response """
         _response = str(response)
-        for match in self.meta_data.findall(_response):
-            _response = _response.replace(f'<meta_tags: {match}>', '')
-            _response = _response.replace(f'<meta_tags: {match}\n>', '')
+        for match in self.meta_block.findall(_response):
+            _response = _response.replace(f'{match}', '')
         return _response
 
     def get_tags(self, response: str)->list[RAGTag]:
