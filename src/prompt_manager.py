@@ -19,7 +19,7 @@ class PromptManager():
         """
         A way to manage a growing number of prompt templates
         {key : value} pairs become self.key_* : contents-of-file
-        filenaming convention: {value}_system.txt / {value}_human.txt
+        filenaming convention: {value}_system.md / {value}_human.md
         """
         prompt_files = {
             'pre_prompt'  :f'pre_conditioner_prompt_{self.model}',
@@ -30,15 +30,17 @@ class PromptManager():
             prompt_dir = os.path.join('prompts', prompt_base)
             setattr(self, f'{prompt_key}_file', os.path.join(self.current_dir, prompt_dir))
             setattr(self, f'{prompt_key}_system',
-                    self.get_prompt(f'{prompt_dir}_system.txt'))
+                    self.get_prompt(f'{prompt_dir}_system.md'))
             setattr(self, f'{prompt_key}_human',
-                    self.get_prompt(f'{prompt_dir}_human.txt'))
+                    self.get_prompt(f'{prompt_dir}_human.md'))
 
     def get_prompt(self, path):
         """ Keep the prompts as files for easier manipulation """
         if os.path.exists(path):
             with open(path, 'r', encoding='utf-8') as prompt:
                 return prompt.read()
-        else:
-            print(f'Prompt not found! I expected to find it at:\n\n\t{path}')
-            sys.exit(1)
+        elif path.find('default') == -1:
+            default_path = path.replace(self.model, 'default')
+            return self.get_prompt(default_path)
+        print(f'Prompt not found! I expected to find it at:\n\n\t{path}')
+        sys.exit(1)

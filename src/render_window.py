@@ -297,7 +297,7 @@ class RenderWindow(PromptManager):
                     # Reset (erase) the thinking output
                     current_response = ''
                 rich_content = Group(header, query, seperator, seperator,
-                                     Markdown(f'**{self.name}:**'), response, footer)
+                                     Markdown(f'**{self.name}**'), response, footer)
                 live.update(rich_content)
 
         # Finish by saving chat history, finding and storing new RAG/Tags or

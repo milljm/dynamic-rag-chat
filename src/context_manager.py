@@ -194,6 +194,24 @@ class ContextManager(PromptManager):
                                            matches=self.matches)
         return documents
 
+    def prompt_entities(self, meta_tags: list[RAGTag])->list[str]:
+        """
+        Return list of strings with grounding info for each entity detected in meta_tags.
+        """
+        entities = [x.content for x in meta_tags if x.tag == 'entity']
+        if not entities:
+            return ['No specific entities active in this scene.']
+        _entity_prompt = []
+        for entity in entities:
+            entity_file = os.path.join(self.current_dir,
+                                       'prompts',
+                                       'entities',
+                                       f'{entity.lower()}.txt')
+            if os.path.exists(entity_file):
+                with open(entity_file, 'r', encoding='utf-8') as f:
+                    _entity_prompt.append(f.read())
+        return _entity_prompt
+
     def hanlde_entity(self,
                       meta_tags: list[RAGTag],
                       query: str,
@@ -255,6 +273,11 @@ class ContextManager(PromptManager):
                 query = self.common.stringify_lists(data_set[0])
                 # Try to tagify the users query
                 (_, meta_tags, documents['scene_meta']) = self.pre_processor(query)
+
+                # set entities. We will use this to load a grounded character sheet
+                # if it exists in promts/entities/entity.txt
+                documents['entities'] = '\n\n'.join(self.prompt_entities(meta_tags))
+
                 if self.debug:
                     self.console.print(f'TAG RETREIVAL:\n{meta_tags}\n\n',
                                        style=f'color({self.color})',
@@ -270,7 +293,8 @@ class ContextManager(PromptManager):
                     for field in ['entity', 'focus', 'tone', 'emotion', 'other']:
                         # Entity is very important, as it represents an NPC/Character. We
                         # will therefor spend 75% of our allotted context window budget
-                        # on Entity field-filtering matches
+                        # on Entity field-filtering matches. We will also include a full
+                        # file dedicated to said character, if the file exists.
                         if field == 'entity':
                             storage.extend(self.hanlde_entity(meta_tags,
                                                               query,

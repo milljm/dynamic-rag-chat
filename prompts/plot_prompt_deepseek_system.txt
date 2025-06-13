@@ -1,1 +1,0 @@
-plot_prompt_qwen_system.txt
