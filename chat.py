@@ -430,10 +430,7 @@ See .chat.yaml.example for details.
 def store_data(d_session: SessionContext,
                data: str)->None:
     """ iterate over list, tagging content before storing to RAG """
-    # Do not pollute RAG import
-    d_session.common.clear_scene()
-
-    _, meta_tags, _  = d_session.context.pre_processor(data)
+    _, meta_tags, _  = d_session.context.pre_processor(data, do_scene=False)
     _normal = d_session.common.normalize_for_dedup(data)
     d_session.rag.store_data(_normal, tags_metadata=meta_tags)
 

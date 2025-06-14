@@ -48,6 +48,7 @@ class RenderWindow(PromptManager):
                                api_key=kwargs['api_key'])
         self.prompts.build_prompts()
         self.meta_capture = ''
+        self.meta_buffer = ''
 
         # Thinking animation
         self.pulsing_chars = ["⠇", "⠋", "⠙", "⠸", "⠴", "⠦"]
@@ -73,9 +74,12 @@ class RenderWindow(PromptManager):
 
     def hide_reasons(self, chunk_content)->bool:
         """ return bool on reasons to hide token """
-        reasons = ['<meta', '<th', '<status']
+        reasons = ['<meta', '<th', '<status', '<']
         for reason in reasons:
-            if chunk_content.find(f'>{reason}') != -1 or chunk_content.find(reason) != -1:
+            if (chunk_content.find(f'>{reason}') != -1
+                or chunk_content.find(reason) != -1
+                or reason in self.meta_buffer):
+                self.meta_buffer = ''
                 return True
         return False
 
@@ -210,6 +214,7 @@ class RenderWindow(PromptManager):
                       'w', encoding='utf-8') as f:
                 f.write(f'HEAVY LLM PROMPT (llm.stream()): {formatted_messages}')
         for chunk in self.llm.stream(messages):
+            self.meta_buffer += chunk.content
             chunk = self.reveal_thinking(chunk, self.verbose)
             chunk = self.if_hiding(chunk, self.verbose)
             yield chunk

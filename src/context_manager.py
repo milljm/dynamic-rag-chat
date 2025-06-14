@@ -84,7 +84,9 @@ class ContextManager(PromptManager):
             return True
         return entity.lower().find('none') != -1
 
-    def pre_processor(self, query: str, previous: str='')->tuple[str,list[RAGTag]]:
+    def pre_processor(self, query: str,
+                      previous: str='',
+                      do_scene: bool=True)->tuple[str,list[RAGTag]]:
         """
         lightweight LLM as a tagging pre-processor
         """
@@ -120,7 +122,10 @@ class ContextManager(PromptManager):
             except IndexError:
                 last_contents = ''
             return self.pre_processor(query, previous=last_contents)
-        scene_consistency = self.common.scene_tracker_from_tags(tags)
+        # when importing documents directly into the RAG, we don't want to produce a scene
+        scene_consistency = self.common.no_scene()
+        if do_scene:
+            scene_consistency = self.common.scene_tracker_from_tags(tags)
         return (content, tags, scene_consistency)
 
     def post_process(self, response)->None:
@@ -198,13 +203,15 @@ class ContextManager(PromptManager):
         """
         entities = [x.content for x in meta_tags if x.tag == 'entity']
         if not entities:
-            return ['No specific entities active in this scene.']
+            return ['']
         _entity_prompt = []
         for entity in entities:
             entity_file = os.path.join(self.current_dir,
                                        'prompts',
                                        'entities',
                                        f'{entity.lower()}.txt')
+            if self.debug:
+                print(f'DEBUG: {entity_file}')
             if os.path.exists(entity_file):
                 with open(entity_file, 'r', encoding='utf-8') as f:
                     _entity_prompt.append(f.read())

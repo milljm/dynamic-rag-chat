@@ -134,6 +134,10 @@ class CommonUtils():
         phantoms = [e for e in entities if e not in grounded]
         return phantoms
 
+    def no_scene(self):
+        """ return an empty scene """
+        return self._scene_meta
+
     def clear_scene(self):
         """ clear the scene """
         self.scene_meta = self._scene_meta

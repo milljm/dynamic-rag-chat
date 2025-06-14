@@ -163,7 +163,7 @@ class RAG():
             tags_metadata = {}
         meta_dict = dict(tags_metadata)
         if self.debug:
-            self.console.print(f'STORE DATA: {data}\nTAGS: {meta_dict}',
+            self.console.print(f'STORE DATA:\n{data}\n\nTAGS:\n{meta_dict}',
                                style=f'color({self.color})',
                                highlight=False)
         else:
