@@ -21,7 +21,7 @@ class ContextManager(PromptManager):
     """ A collection of methods aimed at producing/reducing the context """
     # pylint: disable=too-many-positional-arguments, too-many-arguments
     def __init__(self, console, common, rag, rag_tag, current_dir, **kwargs):
-        super().__init__(console, current_dir)
+        super().__init__(console, current_dir, **kwargs)
         self.console = console
         self.common = common
         self.rag = rag
@@ -32,8 +32,8 @@ class ContextManager(PromptManager):
         self.color = 245 if kwargs['light_mode'] else 233
         self.prompts = PromptManager(self.console,
                                      current_dir,
-                                     model=kwargs['preconditioner'],
-                                     debug=self.debug)
+                                     prompt_model=kwargs['preconditioner'],
+                                     **kwargs)
         self.pre_llm = ChatOpenAI(base_url=kwargs['pre_host'],
                                   model=kwargs['preconditioner'],
                                   temperature=0.3,

@@ -12,6 +12,7 @@
 #     "prompt_toolkit",
 #     "rich",
 #     "pypdf",
+#     "pytz",
 #     "pillow"
 #     "requests",
 #     "beautifulsoup4",
@@ -36,7 +37,6 @@ from prompt_toolkit import PromptSession
 from prompt_toolkit.key_binding import KeyBindings
 import pypdf # for error handling of PyPDFLoader
 from langchain_community.document_loaders import PyPDFLoader
-from langchain_text_splitters import RecursiveCharacterTextSplitter
 from src import ContextManager
 from src import RAG, RAGTagManager
 from src import RenderWindow
@@ -374,6 +374,7 @@ See .chat.yaml.example for details.
     time_zone = arg_dict.get('time_zone', 'GMT')
     debug = arg_dict.get('debug', False)
     light = arg_dict.get('light_mode', False)
+    assistant_mode = arg_dict.get('assistant_mode', False)
     if vector_dir is None:
         vector_dir = os.path.join(current_dir, 'vector_data')
     parser = argparse.ArgumentParser(description=f'{about}',
@@ -419,6 +420,8 @@ See .chat.yaml.example for details.
                         help='Path to recursively find and import assorted files (*.md *.html)')
     parser.add_argument('--light-mode', action='store_true', default=light,
                         help='Use a color scheme suitible for light background terminals')
+    parser.add_argument('--assistant-mode', action='store_true', default=assistant_mode,
+                        help='Do not utilize story-telling mode prompts')
     parser.add_argument('-d', '--debug', action='store_true', default=debug,
                         help='Print preconditioning message, prompt, etc')
     parser.add_argument('-v','--verbose', action='store_true', default=debug,

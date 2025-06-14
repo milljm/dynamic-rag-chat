@@ -48,7 +48,6 @@ class CommonUtils():
         self.json_template = re.compile(r'\{\{\s*(.*?)\s*\}\}', re.DOTALL)
         self.meta_block = re.compile(r"[<]?meta_tags:.*?\s*>", re.DOTALL)
 
-
         # Ephemeral scene tracking
         self._scene_meta = {
             # Core Spatial-Temporal Anchors

@@ -25,6 +25,7 @@ Perfect for storytelling, world-building, AI role-play, and narrative design —
 - 🔁 **Streaming responses**: Token-level generation, async-ready
 - 🧾 **Persistent chat history**: Your context survives between runs
 - 🧠 **Dynamic RAGs**: Retrieval is triggered by user input or LLM output
+- ♻️ **Assistant Swap**: Switch between story-teller and assistant mode with an argument
 - ✍️ **Preconditioning layer**: Lightweight LLM summarizes RAG output before the larger model (saves tokens while retaining depth)
     *(Note: in active development)*
 - 🧩 **Recursive RAG import**:
@@ -113,7 +114,7 @@ Recommended Ollama-hosted models:
     - [Mixtral](https://ollama.com/library/mixtral:8x22b)
     - [llama4:maverick](https://ollama.com/library/llama4:maverick)
     - [qwen2.5](https://ollama.com/library/qwen2.5:72b)
-- As for preprocessor models, there may be better as well:
+- As for preprocessor models, there may be better ones as well:
     - [qwen2.5-coder](https://ollama.com/library/qwen2.5-coder/tags)
 
 Mix and Match, Explore and have fun!
@@ -135,7 +136,7 @@ If you have an OpenAI account (note: **not** https://chatgpt.com, but https://pl
 chat:
   model: gpt-4o
   llm_server: https://api.openai.com/v1
-  pre_llm: gemma-3-1b-it
+  pre_llm: gemma3:1b
   pre_server: http://localhost:11434/v1
   embedding_llm: nomic-embed-text
   embedding_server: http://localhost:11434/v1

@@ -3,16 +3,18 @@ import os
 import sys
 class PromptManager():
     """ Handle all the possible prompt files we may introduce with RAG/Tagging """
-    def __init__(self, console, current_dir, model: str = 'default', debug=False):
+    def __init__(self, console, current_dir, prompt_model: str = 'default', **kwargs):
         self.console = console
-        self.debug = debug
-        self.model = self._match_model(model)
+        self.assistant_prompt = kwargs['assistant_mode']
+        self.debug = kwargs['debug']
+        self.model = self._match_model(prompt_model)
         self.current_dir = current_dir
 
-    @staticmethod
-    def _match_model(model: str)->str:
+    def _match_model(self, model: str)->str:
         """ attempt to match model, default to 'default' """
-        supported = ['gemma', 'llama', 'qwen', 'deepseek']
+        if self.assistant_prompt:
+            return 'nostory'
+        supported = ['gemma', 'llama', 'qwen', 'deepseek', 'mixtral']
         return next((x for x in supported if x in model.lower()), 'default')
 
     def build_prompts(self):

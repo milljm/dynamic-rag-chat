@@ -26,7 +26,7 @@ class AnimationThread(Thread):
 class RenderWindow(PromptManager):
     """ Responsible for printing Rich Text/Markdown Live to the screen """
     def __init__(self, console, common, context, current_dir, **kwargs):
-        super().__init__(console, current_dir)
+        super().__init__(console, current_dir, **kwargs)
         self.debug = kwargs['debug']
         self.console = console
         self.host = kwargs['host']
@@ -39,7 +39,10 @@ class RenderWindow(PromptManager):
         self.model_re = re.compile(r'(\w+)\W+')
         self.common = common
         self.cm = context
-        self.prompts = PromptManager(console, current_dir, model=self.model, debug=self.debug)
+        self.prompts = PromptManager(console,
+                                     current_dir,
+                                     prompt_model=self.model,
+                                     **kwargs)
         self.llm = ChatOpenAI(base_url=self.host,
                                model=self.model,
                                temperature=0.9,
