@@ -366,7 +366,7 @@ See .chat.yaml.example for details.
     host = arg_dict.get('llm_server', 'http://localhost:11434/v1')
     pre_host = arg_dict.get('pre_server', host)
     emb_host = arg_dict.get('embedding_server', host)
-    api_key = arg_dict.get('api_key', None)
+    api_key = arg_dict.get('api_key', 'none')
     num_ctx = arg_dict.get('context_window', 4192)
     chat_history = arg_dict.get('history_max', 1000)
     history_sessions = arg_dict.get('history_sessions', 5)
@@ -427,20 +427,21 @@ See .chat.yaml.example for details.
 
     return verify_args(parser.parse_args(argv))
 
-def store_chunks(d_session: SessionContext,
-                 pages: list[str])->None:
+def store_data(d_session: SessionContext,
+               data: str)->None:
     """ iterate over list, tagging content before storing to RAG """
-    for ind, text in enumerate(pages):
-        print(f'\t\tmetadata tagging chunk {ind+1}/{len(pages)}')
-        _, meta_tags, _  = d_session.context.pre_processor(text)
-        _normal = d_session.common.normalize_for_dedup(text)
-        d_session.rag.store_data(_normal, tags_metadata=meta_tags)
+    # Do not pollute RAG import
+    d_session.common.clear_scene()
+
+    _, meta_tags, _  = d_session.context.pre_processor(data)
+    _normal = d_session.common.normalize_for_dedup(data)
+    d_session.rag.store_data(_normal, tags_metadata=meta_tags)
 
 # pylint: disable=redefined-outer-name #  we exit immediately
 def extract_text_from_pdf(d_session: SessionContext,
-                          v_args: argparse.ArgumentParser)->None:
+                          v_args: argparse.ArgumentParser,
+                          do_exit=True)->None:
     """ Store imported PDF text directly into the RAG """
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=300)
     print(f'Importing document: {v_args.import_pdf}')
     loader = PyPDFLoader(v_args.import_pdf)
     pages = []
@@ -451,24 +452,22 @@ def extract_text_from_pdf(d_session: SessionContext,
         for p_cnt, page_text in enumerate(page_texts):
             if page_text:
                 print(f'\tPage {p_cnt+1}/{len(page_texts)}')
-                texts = text_splitter.split_text(page_text)
-                store_chunks(d_session, texts)
+                store_data(d_session, page_text)
             else:
                 print(f'\tPage {p_cnt+1}/{len(page_texts)} blank')
     except pypdf.errors.PdfStreamError as e:
         print(f'Error loading PDF:\n\n\t{e}\n\nIs this a valid PDF?')
         sys.exit(1)
-    sys.exit()
+    if do_exit:
+        sys.exit()
 
 def store_text(d_session: SessionContext,
                v_args: argparse.ArgumentParser)->None:
     """ Store imported text file directly into the RAG """
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=300)
     print(f'Importing document: {v_args.import_txt}')
     with open(v_args.import_txt, 'r', encoding='utf-8') as file:
         document_content = file.read()
-        texts = text_splitter.split_text(document_content)
-        store_chunks(d_session, texts)
+        store_data(d_session, document_content)
     sys.exit()
 
 def extract_text_from_markdown(d_session: SessionContext,
@@ -477,7 +476,6 @@ def extract_text_from_markdown(d_session: SessionContext,
     walk recursively through provided directory and import *.md, *.html, *.txt
     file directly into the RAG
     """
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=300)
     for fdir, _, files in os.walk(v_args.import_dir):
         for file in files:
             if file.endswith('.md') or file.endswith('.html') or file.endswith('.txt'):
@@ -488,21 +486,21 @@ def extract_text_from_markdown(d_session: SessionContext,
                     soup = BeautifulSoup(document_content, 'html.parser')
                     document_content = soup.get_text()
                 print(f'Importing document: {_file}')
-                texts = text_splitter.split_text(document_content)
-                store_chunks(d_session, texts)
+                store_data(d_session, document_content)
+            elif file.endswith('.pdf'):
+                v_args.import_pdf = file
+                extract_text_from_pdf(d_session, v_args, do_exit=False)
     sys.exit()
 
 def extract_text_from_web(d_session: SessionContext,
                           v_args: argparse.ArgumentParser)->None:
     """ extract plain text from web address """
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=300)
     response = requests.get(v_args.import_web, timeout=300)
     if response.status_code == 200:
         print(f"Document loaded from: {v_args.import_web}")
         soup = BeautifulSoup(response.content, 'html.parser')
         text = soup.get_text()
-        texts = text_splitter.split_text(text)
-        store_chunks(d_session, texts)
+        store_data(d_session, text)
     else:
         print(f'Error obtaining webpage: {response.status_code}\n{response.raw}')
         sys.exit(1)

@@ -134,6 +134,10 @@ class CommonUtils():
         phantoms = [e for e in entities if e not in grounded]
         return phantoms
 
+    def clear_scene(self):
+        """ clear the scene """
+        self.scene_meta = self._scene_meta
+
     def scene_tracker_from_tags(self, tags: list[RAGTag]) -> str:
         """ Build a formatted scene state string based on incoming RAGTags and internal memory """
         tag_dict = {tag.tag: tag.content for tag in tags}
@@ -247,7 +251,6 @@ class CommonUtils():
     def normalize_for_dedup(text: str) -> str:
         """ remove emojis and other markdown """
         text = re.sub(r'[\U0001F600-\U0001F64F\u2600-\u26FF\u2700-\u27BF]', '', text)
-        #text = re.sub(r'[^\w\s]', '', text)
         return ' '.join(text.lower().split())
 
     @staticmethod

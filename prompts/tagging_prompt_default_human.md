@@ -19,7 +19,8 @@ My task is to read the following text and extract a fixed set of metadata fields
   "tone": string, // e.g., "introspective", "tense", "hopeful"
   "emotion": string, // e.g., "calm", "frustrated", "affectionate"
   "focus": string | [string], // e.g., "greeting", "planning", "flirting"
-  "entity": [string], // all named characters mentioned (e.g., ["john", "jane"]), or [] if none. Do not use pronounes, or the use of "I", "They", etc
+  "entity": [string], // all named characters mentioned, do not use pro-nouns (e.g, ["jane"])
+  "audience": [string] | [], // who is physically present in the scene (e.g., ["john", "jane"])
   "location": [string] | [], // active locations (e.g., ["excursion vehicle"])
   "items": [string] | [], // objects present or interacted with (e.g., ["journal"])
   "weather": string | null, // e.g., "clear night", "sandstorm", "none" if not applicable
@@ -30,7 +31,6 @@ My task is to read the following text and extract a fixed set of metadata fields
   "sensory_mood": string | null, // e.g., "warm dashboard glow", "sterile silence"
   "user_choice": string | null, // e.g., "asks yuna to speak", "draws weapon"
   "speaker": string | null, // who is narrating or speaking
-  "audience": [string] | [], // who is physically present this turn (e.g., ["john", "jane"])
   "last_object_interacted": string | null, // last object touched or manipulated
   "time": string | null, // "morning", "midday", "dusk", "night"
   "scene_locked": boolean, // true = location/characters stable; false = scene could shift
