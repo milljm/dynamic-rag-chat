@@ -171,7 +171,8 @@ class CommonUtils():
                 elif isinstance(incoming, str) and incoming.strip():
                     scene[key].add(incoming.strip())
                 try:
-                    for _mission in scene[key]:
+                    _arcs = set(scene[key])
+                    for _mission in _arcs:
                         scene['completed_narrative_arcs'].remove(_mission)
                         scene['narrative_arcs'].remove(_mission)
                 except KeyError:
