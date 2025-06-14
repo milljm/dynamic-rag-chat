@@ -358,9 +358,9 @@ See .chat.yaml.example for details.
         with open(rc_file, 'r', encoding='utf-8') as f:
             options = yaml.safe_load(f) or {}
     arg_dict = options.get('chat', {})
-    model = arg_dict.get('model', '')
-    preconditioner = arg_dict.get('pre_llm', 'gemma-3-1B-it-QAT-Q4_0')
-    embeddings = arg_dict.get('embedding_llm', 'nomic-embed-text-v1.5.f16')
+    model = arg_dict.get('model', 'gemma3:27b')
+    preconditioner = arg_dict.get('pre_llm', 'gemma3:1b')
+    embeddings = arg_dict.get('embedding_llm', 'nomic-embed-text')
     vector_dir = arg_dict.get('history_dir', None)
     matches = int(arg_dict.get('history_matches', 5)) # 5 from each RAG (User & AI)
     host = arg_dict.get('llm_server', 'http://localhost:11434/v1')

@@ -95,6 +95,8 @@ conda install ollama
 export OLLAMA_MAX_LOADED_MODELS=3
 ollama serve
 ```
+*`OLLAMA_MAX_LOADED_MODELS=3` is encouraged, as this tool uses three models simultaneously*
+
 In another terminal:
 ```bash
 conda activate dynamic-rag-chat
@@ -104,17 +106,23 @@ ollama pull gemma3:1b
 ollama pull gemma3:27b  # Only if you’re not using OpenAI
 ```
 Recommended Ollama-hosted models:
-- Heavy Weight LLM [gemma-3-27b-it](https://ollama.com/library/gemma3:27b)
-- Light Weight LLM (preprosser) [gemma-3-1b-it](https://ollama.com/library/gemma3:1b)
+- Heavy Weight LLM [gemma3:27b](https://ollama.com/library/gemma3:27b)
+- Light Weight LLM (preprocessor) [gemma3:1b](https://ollama.com/library/gemma3:1b)
 - Embedding LLM (for RAG work) [nomic-embed-text](https://ollama.com/library/nomic-embed-text)
+- If you have the hardware, I encourage you to explore and use the thousands of available models out there! Some are better than others for story-telling:
+    - [Mixtral](https://ollama.com/library/mixtral:8x22b)
+    - [llama4:maverick](https://ollama.com/library/llama4:maverick)
+    - [qwen2.5](https://ollama.com/library/qwen2.5:72b)
+- As for preprocessor models, there may be better as well:
+    - [qwen2.5-coder](https://ollama.com/library/qwen2.5-coder/tags)
+
+Mix and Match, Explore and have fun!
 
 #### ⚙️ Example usage
+If you pulled the default models above, you only need to launch `./chat.py` without arguments:
 ```bash
 conda activate dynamic-rag-chat
-./chat.py --model gemma3:27b \
-          --pre-llm gemma3:1b \
-          --embedding-llm nomic-embed-text \
-          --llm-server http://localhost:11434/v1
+./chat.py
 ./chat.py --help  # for more details on available options
 ```
 You can also configure arguments in .chat.yaml. See .chat.yaml.example for a template.
