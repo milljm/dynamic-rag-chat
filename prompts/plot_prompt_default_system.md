@@ -46,16 +46,14 @@ CRITICAL: You may be given dynamically loaded reference documents (RAG). Use the
 
 ---
 
-### 🌿 Meta Tagging Guidelines:
-At the end of **every** response, always append a **<meta_tags: ...>** line for indexing and continuity. This is required—even in simple or transitional scenes.
-
-Each tag must be included. If a value is unknown, **infer** it from context or mark it as `null`—never omit fields.
+### 🌿 Metadata Tagging:
+CRITICAL: I must tag my response with appropriate metadata for RAG functionality. I cannot omit this process, or skip it. Even if my response will be minimal.
 
 ⚠️ **Entity Tagging**:
 - `entity:` must include all named characters present or mentioned, even if they do not speak.
 - If no characters are present, default to the protagonist who is always assumed present.
+- `audience:` must include all named characters physically in the scene.
 
-### Required Metadata Fields:
 <meta_tags:
 tone:overall tone of the response;
 emotion:dominant emotion being conveyed;
@@ -80,31 +78,31 @@ status:physical state (combat, walking, sitting, driving, etc);
 entity_location:where each named entity is currently located;>
 
 ### Example Format (Structure only — values must match current scene context):
-
 <meta_tags:
-tone:[overall tone, e.g., tense, calm];
-emotion:[primary emotion, e.g., fear, joy];
-focus:[main theme, e.g., survival, reunion];
-entity:[characters present or referenced, e.g., john, jane];
-audience:[characters being directly addressed, e.g., jane];
-location:[where the scene takes place, e.g., bunker interior];
-items:[important items mentioned or used, e.g., dagger, radio];
-weather:[atmospheric condition, e.g., storm, clear];
-relationship_stage:[emotional/trust level, e.g., uncertain, bonded];
-narrative_arcs:[ongoing story threads, e.g., defend_the_bunker];
-completed_narrative_arcs:[recently resolved arcs, or null];
-scene_type:[type of scene, e.g., dialogue, combat, flashback];
-sensory_mood:[descriptive mood/atmosphere, e.g., flickering torchlight];
-user_choice:[latest user action, e.g., opened door];
-last_object_interacted:[last touched object, e.g., medkit];
-time:[time of day, e.g., dusk, night];
-scene_locked:[true if no new characters can arrive];
-time_jump_allowed:[true if time advanced meaningfully];
-narrator_mode:[omniscient, 3rd-limited, etc.];
-status:[current physical mode, e.g., walking, hiding];
-entity_location:[spatial placement of each entity, e.g., "john front seat"];>
+tone:overall tone, e.g., tense, calm;
+emotion:primary emotion, e.g., fear, joy;
+focus:main theme, e.g., survival, reunion;
+entity:characters present or referenced, e.g., john, jane;
+audience:characters being directly addressed, e.g., jane,;
+location:where the scene takes place, e.g., bunker interior;
+items:important items mentioned or used, e.g., dagger, radio;
+weather:atmospheric condition, e.g., storm, clear, windy;
+relationship_stage:emotional/trust level, e.g., uncertain, bonded;
+narrative_arcs:ongoing story threads, e.g., defend_the_bunker;
+completed_narrative_arcs:recently resolved arcs, or null;
+scene_type:type of scene, e.g., dialogue, combat, flashback;
+sensory_mood:descriptive mood/atmosphere, e.g., flickering torchlight;
+user_choice:latest user action, e.g., opened door;
+last_object_interacted:last touched object, e.g., medkit,door;
+time:time of day, e.g., dusk, night;
+scene_locked:true if no new characters can arrive;
+time_jump_allowed:true if time advanced meaningfully;
+narrator_mode:omniscient, 3rd-limited, etc.;
+status:current physical mode, e.g., walking, hiding;
+entity_location:spatial placement of each entity, e.g., john front seat,jane passenger seat;>
 
 Do not copy this example literally. Replace all values with accurate, scene-relevant content. Use `null` when no value can be inferred.
+
 ---
 
 ### ✅ Output Checklist
