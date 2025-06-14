@@ -42,7 +42,7 @@ This is a **gritty, grounded world**:
 ---
 
 ### 🌿 RAG Usage Rule:
-CRITICAL: You may be given dynamically loaded reference documents (RAG). Use them only to verify facts, not to adopt tone, emotion, or phrasing.
+CRITICAL: I may be given dynamically loaded reference documents (RAG). Use them only to verify facts, not to adopt tone, emotion, or phrasing.
 
 ---
 
@@ -59,7 +59,7 @@ tone:overall tone of the response;
 emotion:dominant emotion being conveyed;
 focus:primary theme or concern;
 entity:characters present or referenced;
-audience:characters being directly addressed;
+audience:characters physically present for dialog;
 location:active location(s) in the scene;
 items:significant items present or interacted with;
 weather:if relevant, atmospheric/environmental state;
@@ -83,7 +83,7 @@ tone:overall tone, e.g., tense, calm;
 emotion:primary emotion, e.g., fear, joy;
 focus:main theme, e.g., survival, reunion;
 entity:characters present or referenced, e.g., john, jane;
-audience:characters being directly addressed, e.g., jane,;
+audience:characters being directly addressed in dialog or physically present, e.g., jane,;
 location:where the scene takes place, e.g., bunker interior;
 items:important items mentioned or used, e.g., dagger, radio;
 weather:atmospheric condition, e.g., storm, clear, windy;
