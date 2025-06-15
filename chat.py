@@ -16,6 +16,7 @@
 #     "pillow"
 #     "requests",
 #     "beautifulsoup4",
+#     "pygments",
 # ]
 # ///
 import os
@@ -375,6 +376,7 @@ See .chat.yaml.example for details.
     debug = arg_dict.get('debug', False)
     light = arg_dict.get('light_mode', False)
     assistant_mode = arg_dict.get('assistant_mode', False)
+    syntax_theme = arg_dict.get('syntax_theme', 'fruity')
     if vector_dir is None:
         vector_dir = os.path.join(current_dir, 'vector_data')
     parser = argparse.ArgumentParser(description=f'{about}',
@@ -387,7 +389,7 @@ See .chat.yaml.example for details.
     parser.add_argument('--embedding-llm', metavar='', dest='embeddings', default=embeddings,
                         type=str, help='LM embedding model (default: %(default)s)')
     parser.add_argument('--history-dir', metavar='', dest='vector_dir', default=vector_dir,
-                        type=str, help='history directory (default: %(default)s)')
+                        type=str, help='History directory (default: %(default)s)')
     parser.add_argument('--llm-server', metavar='', dest='host', default=host, type=str,
                         help='OpenAI API server address (default: %(default)s)')
     parser.add_argument('--pre-server', metavar='', dest='pre_host', default=pre_host, type=str,
@@ -397,7 +399,7 @@ See .chat.yaml.example for details.
     parser.add_argument('--api-key', metavar='', default=api_key, type=str,
                         help='You API Key (default: %(default)s)')
     parser.add_argument('--name', metavar='', dest='name', default=name, type=str,
-                        help='your assistants name (default: %(default)s)')
+                        help='Your assistants name (default: %(default)s)')
     parser.add_argument('--time-zone', metavar='', dest='time_zone', default=time_zone, type=str,
                         help='your assistants name (default: %(default)s)')
     parser.add_argument('--history-matches', metavar='', dest='matches', default=matches, type=int,
@@ -409,7 +411,11 @@ See .chat.yaml.example for details.
                         type=int,
                         help='Chat history responses to save to disk (default: %(default)s)')
     parser.add_argument('--context-window', metavar='', dest='num_ctx', default=num_ctx, type=int,
-                        help='the maximum context window size (default: %(default)s)')
+                        help='The maximum context window size (default: %(default)s)')
+    parser.add_argument('--syntax-style', metavar='', dest='syntax_theme', default=syntax_theme,
+                        type=str,
+                        help=('Your desired syntax-highlight theme (default: %(default)s).'
+                              'See https://pygments.org/styles/ for available themes'))
     parser.add_argument('--import-pdf', metavar='', type=str,
                         help='Path to pdf to pre-populate main RAG')
     parser.add_argument('--import-txt', metavar='', type=str,

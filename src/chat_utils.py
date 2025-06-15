@@ -42,11 +42,13 @@ class CommonUtils():
 
         # Regular expression in use throughout the project
         self.find_prompt  = re.compile(r'(?<=[<m]eta_prompt: ).*?(?=[>)])', re.DOTALL)
-        self.meta_data = re.compile(r"[<]?(meta_tags:.*?);?\s*>", re.DOTALL)
+        self.meta_data = re.compile(r"[<]?meta_tags:(.*?);?\s*>", re.DOTALL)
+        self.meta_block = re.compile(r"[<]?meta_tags:.*?\s*>", re.DOTALL)
+        self.meta_start_re = re.compile(r"<\s*meta[_\-:]?", re.IGNORECASE)
         self.meta_iter = re.compile(r'(\w+):\s*([^;]*)')
         self.json_style = re.compile(r'```json(.*)```', re.DOTALL)
         self.json_template = re.compile(r'\{\{\s*(.*?)\s*\}\}', re.DOTALL)
-        self.meta_block = re.compile(r"[<]?meta_tags:.*?\s*>", re.DOTALL)
+        self.model_re = re.compile(r'(\w+)\W+')
 
         # Ephemeral scene tracking
         self._scene_meta = {

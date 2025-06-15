@@ -24,6 +24,7 @@ chat:
   context_window: 4192                    (ask the server to use this context window size. Sometimes can be ignore)
   name: your assistants name              (name your assistant/story-teller)
   assitant_mode: True                     (use non-story telling prompts. Useful if you're using this chat script as a tool instead of a story teller)
+  syntax_style: fruity                    (specify a syntax highlighting theme see: https://pygments.org/styles/ for themes)
   debug: False
 
 # Ollama server switches of note:

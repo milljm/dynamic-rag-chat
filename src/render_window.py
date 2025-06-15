@@ -1,11 +1,11 @@
 """ module responsible for rendering output to the screen """
 import os
-import re
+from dataclasses import dataclass, field
+from typing import Any
 import time
 from threading import Thread
 from rich.live import Live
-from rich.markdown import Markdown
-from rich.markdown import CodeBlock
+from rich.markdown import Markdown, CodeBlock
 from rich.syntax import Syntax
 from rich.text import Text
 from rich.console import Group
@@ -14,6 +14,42 @@ from langchain.schema.messages import HumanMessage
 from langchain.schema import BaseMessage   # for Type Hinting
 from langchain_openai import ChatOpenAI
 from .prompt_manager import PromptManager
+
+# pylint: disable=too-many-instance-attributes  # this is what a dataclass is for
+@dataclass
+class StreamState:
+    """ RenderWindow animation (thinking) dataclass attributes """
+    partial_chunk: str = ''
+    meta_capture: str = ''
+    meta_hiding: bool = False
+    thinking: bool = False
+    do_once: bool = False
+    pulse_index: int = 0
+    pulsing_chars: list[str] = field(default_factory=lambda: ["⠇", "⠋", "⠙", "⠸", "⠴", "⠦"])
+
+@dataclass
+class RenderWindowState:
+    """ RenderWindow dataclass attributes """
+    debug: bool
+    verbose: bool
+    light_mode: bool
+    model: str
+    host: str
+    api_key: str
+    num_ctx: int
+    syntax_theme: str
+    console: Any
+    common: Any
+    context: Any
+    current_dir: str
+
+    color: int = field(init=False)
+    stream: StreamState = field(default_factory=StreamState)
+
+    def __post_init__(self):
+        self.color = 245 if self.light_mode else 233
+# pylint: enable=too-many-instance-attributes
+
 class AnimationThread(Thread):
     """ Allow pulsing animation to run as a thread """
     def __init__(self, owner):
@@ -29,72 +65,74 @@ class RenderWindow(PromptManager):
     """ Responsible for printing Rich Text/Markdown Live to the screen """
     def __init__(self, console, common, context, current_dir, **kwargs):
         super().__init__(console, current_dir, **kwargs)
-        self.debug = kwargs['debug']
-        self.console = console
-        self.host = kwargs['host']
-        self.model = kwargs['model']
-        self.num_ctx = kwargs['num_ctx']
-        self.verbose = kwargs['verbose']
-        self.name = kwargs['name']
-        self.light_mode = kwargs['light_mode']
-        self.color = 245 if self.light_mode else 233
-        self.model_re = re.compile(r'(\w+)\W+')
-        self.common = common
-        self.cm = context
-        self.prompts = PromptManager(console,
-                                     current_dir,
-                                     prompt_model=self.model,
-                                     **kwargs)
-        self.llm = ChatOpenAI(base_url=self.host,
-                               model=self.model,
-                               temperature=0.9,
-                               streaming=True,
-                               max_tokens=kwargs['num_ctx'],
-                               api_key=kwargs['api_key'])
-        self.prompts.build_prompts()
-        self.meta_capture = ''
-        self.meta_buffer = ''
 
-        # CodeBlock Hack (prevent truncation of last character when word equals terminal width)
-        # pylint: disable=redefined-outer-name, unused-variable
-        if self.light_mode:
-            class SimpleCodeBlock(CodeBlock):
-                """ Code Block Syntax injection """
-                def __rich_console__(self, console, options):
-                    code = str(self.text).rstrip()
-                    syntax = Syntax(code,
-                                    self.lexer_name,
-                                    theme="default",
-                                    word_wrap=True,
-                                    background_color="#dfd5cd",
-                                    padding=(1,0),
-                                    )
-                    yield syntax
-        else:
-            class SimpleCodeBlock(CodeBlock):
-                """ Code Block Syntax injection """
-                def __rich_console__(self, console, options):
-                    code = str(self.text).rstrip()
-                    syntax = Syntax(code,
-                                    self.lexer_name,
-                                    theme="monokai",
-                                    word_wrap=True,
-                                    background_color="#111111",
-                                    padding=(1,0),
-                                    )
-                    yield syntax
-
-        Markdown.elements["fence"] = SimpleCodeBlock
-        # pylint: enable=redefined-outer-name, unused-variable
-
-        # Thinking animation
-        self.pulsing_chars = ["⠇", "⠋", "⠙", "⠸", "⠴", "⠦"]
-        self.do_once = False
-        self.pulse_index = 0
-        self.thinking = False
-        self.meta_hiding = False
-        self.animation_active = False
+        # Load config into dataclass
+        self.state = RenderWindowState(
+            debug=kwargs['debug'],
+            verbose=kwargs['verbose'],
+            light_mode=kwargs['light_mode'],
+            model=kwargs['model'],
+            host=kwargs['host'],
+            api_key=kwargs['api_key'],
+            num_ctx=kwargs['num_ctx'],
+            syntax_theme=kwargs['syntax_theme'],
+            console=console,
+            common=common,
+            context=context,
+            current_dir=current_dir
+        )
+        self.animation_active: bool = False
         self.animation_thread = Thread(target=self.update_animation)
+        self.console = self.state.console
+        self.common = self.state.common
+
+        self.prompts = PromptManager(
+            console,
+            current_dir,
+            prompt_model=self.state.model,
+            **kwargs
+        )
+
+        self.llm = ChatOpenAI(
+            base_url=self.state.host,
+            model=self.state.model,
+            temperature=0.9,
+            streaming=True,
+            max_tokens=self.state.num_ctx,
+            api_key=self.state.api_key
+        )
+
+        self.prompts.build_prompts()
+
+        class SimpleCodeBlock(CodeBlock):
+            """ Code Block Syntax injection """
+            state = self.state
+            def __rich_console__(self, console, options):
+                code = str(self.text).rstrip()
+                syntax = Syntax(code,
+                                self.lexer_name,
+                                theme=self.state.syntax_theme,
+                                word_wrap=True,
+                                padding=(1,0))
+                yield syntax
+        Markdown.elements["fence"] = SimpleCodeBlock
+
+    def _format_model_name(self) -> str:
+        """Extracts a cleaned model identifier from full model name."""
+        return '-'.join(self.common.model_re.findall(self.state.model)[:2])
+
+    def _pulse_emoji(self) -> str:
+        stream = self.state.stream
+        return f' {stream.pulsing_chars[stream.pulse_index]} ' if self.animation_active else ' '
+
+    def _calc_tokens_per_sec(self, tokens: int, duration: float) -> float:
+        return tokens / duration if duration > 0 else 0
+
+    def _color_for_context(self, prompt_tokens: int) -> int:
+        return [v for k, v in self.common.prompt_map.items() if k <= prompt_tokens][-1]
+
+    def _color_for_completion(self, token_count: int) -> int:
+        return [v for k, v in self.common.heat_map.items() if token_count * 4 >= k][-1]
 
     @staticmethod
     def response_count(response)->int:
@@ -109,56 +147,81 @@ class RenderWindow(PromptManager):
             return len(response.split())
         return 1
 
-    def hide_reasons(self, chunk_content)->bool:
-        """ return bool on reasons to hide token """
-        reasons = ['<meta', '<th', '<status', '<']
-        for reason in reasons:
-            if (chunk_content.find(f'>{reason}') != -1
-                or chunk_content.find(reason) != -1
-                or reason in self.meta_buffer):
-                self.meta_buffer = ''
-                return True
-        return False
-
-    def if_hiding(self, chunk, verbose)->object:
-        """ hide meta tags from user (unless in verbose mode) """
+    def if_metatags(self, chunk: object, verbose: bool)->object:
+        """
+        Hide the LLM's response when performing <meta_tags operation
+        """
         if verbose:
             return chunk
         content = str(chunk.content)
-        if self.meta_hiding:
-            if self.hide_reasons(content):
-                self.meta_capture += content
-                content = ''
-            elif content.find('>') != -1:
-                self.meta_hiding = False
+        stream = self.state.stream  # shorthand
+
+        # === CASE 1: Chunk is just '<' – buffer it
+        if content == '<':
+            stream.partial_chunk = '<'
+            chunk.content = ''
+
+        # === CASE 2: We're continuing from a previous partial '<'
+        elif stream.partial_chunk:
+            combined = stream.partial_chunk + content
+            stream.partial_chunk = ''
+
+            if self.common.meta_start_re.search(combined):
+                stream.meta_capture = combined
+                stream.meta_hiding = True
+                self.start_thinking()
+                chunk.content = ''
+                return chunk
+
+            chunk.content = combined
+
+        # === CASE 3: Normal hiding mode
+        elif stream.meta_hiding:
+            stream.meta_capture += content
+            if '>' in content:
+                stream.meta_hiding = False
                 self.stop_thinking()
-            self.meta_capture += content
             chunk.content = ''
-        elif self.hide_reasons(content):
+
+        # === CASE 4: Tag started cleanly with no split '<'
+        elif self.common.meta_start_re.search(content):
+            stream.meta_capture = content
+            stream.meta_hiding = True
             self.start_thinking()
-            self.meta_hiding = True
-            # Capture multiple during this response
-            if self.meta_capture:
-                self.meta_capture += content
-            else:
-                self.meta_capture = content
             chunk.content = ''
+
         return chunk
 
-    def reveal_thinking(self, chunk, show: bool = False)->object:
-        """ return thinking chunk if verbose """
-        content = chunk.content
-        if self.thinking and '</think>' in chunk.content:
-            chunk.content = ''
-            self.thinking = False
+    def reveal_thinking(self, chunk: object, show: bool = False)->object:
+        """
+        Intercept <think> tags in streamed content and optionally hide or reveal them.
+
+        If `show` is True, actual thinking content is shown.
+        If `show` is False, replaces it with 'AI thinking...' at start, then hides remaining.
+        """
+        stream = self.state.stream
+        content = str(chunk.content)
+
+        # End of <think> block
+        if stream.thinking and '</think>' in content:
+            stream.thinking = False
             self.stop_thinking()
-        elif not self.thinking and '<think>' in chunk.content:
-            self.do_once = True
-            self.thinking = True
+            chunk.content = ''
+            return chunk
+
+        # Start of <think> block
+        if not stream.thinking and '<think>' in content:
+            stream.thinking = True
+            stream.do_once = True
             self.start_thinking()
             chunk.content = 'AI thinking...'
-        elif self.thinking:
+            return chunk
+
+        # Middle of thinking stream
+        if stream.thinking:
             chunk.content = content if show else ''
+            return chunk
+
         return chunk
 
     def start_thinking(self):
@@ -176,9 +239,10 @@ class RenderWindow(PromptManager):
 
     def update_animation(self):
         """ a threaded method to run the thinking animation """
+        stream = self.state.stream  # shorthand
         while self.animation_active:
             time.sleep(0.1)  # Adjust speed (0.1 seconds per frame)
-            self.pulse_index = (self.pulse_index + 1) % len(self.pulsing_chars)
+            stream.pulse_index = (stream.pulse_index + 1) % len(stream.pulsing_chars)
             self.render_chat()
 
     @staticmethod
@@ -227,7 +291,7 @@ class RenderWindow(PromptManager):
         if self.debug:
             self.console.print(f'LLM DOCUMENTS: {documents.keys()}\n'
                                f'{documents["performance"]}\n',
-                               style=f'color({self.color})',
+                               style=f'color({self.state.color})',
                                highlight=False)
         else:
             with open(os.path.join(self.common.history_dir, 'debug.log'),
@@ -244,61 +308,48 @@ class RenderWindow(PromptManager):
         # pylint: enable=no-member
         if self.debug:
             self.console.print(f'HEAVY LLM PROMPT (llm.stream()):\n{formatted_messages}\n\n',
-                          style=f'color({self.color})',
+                          style=f'color({self.state.color})',
                           highlight=False)
         else:
             with open(os.path.join(self.common.history_dir, 'debug.log'),
                       'w', encoding='utf-8') as f:
                 f.write(f'HEAVY LLM PROMPT (llm.stream()): {formatted_messages}')
         for chunk in self.llm.stream(messages):
-            self.meta_buffer += chunk.content
-            chunk = self.reveal_thinking(chunk, self.verbose)
-            chunk = self.if_hiding(chunk, self.verbose)
+            chunk = self.reveal_thinking(chunk, self.state.verbose)
+            chunk = self.if_metatags(chunk, self.state.verbose)
             yield chunk
 
-    def render_footer(self, time_taken: float = 0, **kwargs)->Text:
-        """ Handle the footer statistics """
+    def render_footer(self, time_taken: float = 0, **kwargs) -> Text:
+        """Render footer stats with heatmapped colors and token metrics."""
         prompt_tokens = kwargs['prompt_tokens']
         token_count = kwargs['token_count']
         cleaned_color = kwargs['cleaned_color']
         token_savings = kwargs['token_savings']
         pre_processing_time = kwargs['pre_process_time']
 
-        # Calculate real-time heat maps
-        context_size = [v for k,v in self.common.prompt_map.items() if k<=prompt_tokens][-1:][0]
-        produced = [v for k,v in self.common.heat_map.items() if token_count*4>=k][-1:][0]
+        foot_color = self.state.color - 6 if self.state.light_mode else self.state.color
 
-        # Calculate Tokens/s
-        if time_taken > 0:
-            tokens_per_second = token_count / time_taken
-        else:
-            tokens_per_second = 0
-
-        # Implement a thinking emoji
-        emoji = f' {self.pulsing_chars[self.pulse_index]} ' if self.animation_active else ' '
-
-        foot_color = self.color-6 if self.light_mode else self.color
-        # Create the footer text with model info, time, and token count
-        model = '-'.join(self.model_re.findall(self.model)[:2])
         footer = Text('\n', style=f'color({foot_color})')
-        footer.append(f'{model}', style='color(202)')
-        footer.append(emoji, style=f'color({12 if self.light_mode else 51})')
+        footer.append(self._format_model_name(), style='color(202)')
+        footer.append(self._pulse_emoji(), style=f'color({12 if self.state.light_mode else 51})')
         footer.append(f'{time_taken:.2f}', style='color(94)')
         footer.append('s Tokens(deduplication:', style=f'color({foot_color})')
         footer.append(f'{token_savings}', style=f'color({cleaned_color})')
         footer.append(' context:', style=f'color({foot_color})')
-        footer.append(f'{prompt_tokens}', style=f'color({context_size})')
+        footer.append(f'{prompt_tokens}', style=f'color({self._color_for_context(prompt_tokens)})')
         footer.append(f':{pre_processing_time}', style=f'color({foot_color})')
         footer.append(' completion:', style=f'color({foot_color})')
-        footer.append(f'{token_count}', style=f'color({produced})')
-        footer.append(f') {tokens_per_second:.1f}T/s', style=f'color({foot_color})')
+        footer.append(f'{token_count}', style=f'color({self._color_for_completion(token_count)})')
+        footer.append(f') {self._calc_tokens_per_sec(token_count, time_taken):.1f}T/s',
+                      style=f'color({foot_color})')
+
         return footer
 
     # Compose the full chat display with footer (model name, time taken, token count)
     def render_chat(self, current_stream: str = "")->Text|Markdown:
         """ render and return markdown/syntax """
-        if self.thinking and self.verbose:
-            chat_content = Text(current_stream, style=f'color({self.color})')
+        if self.state.stream.thinking and self.state.verbose:
+            chat_content = Text(current_stream, style=f'color({self.state.color})')
         else:
             chat_content = Markdown(current_stream)
 
@@ -310,6 +361,7 @@ class RenderWindow(PromptManager):
                           cleaned_color: int,
                           preprocessing)->None:
         """ Handle the Rich Live updating process """
+        stream = self.state.stream  # shorthand
         current_response = ''
         footer_meta = {'token_savings'   : token_savings,
                        'prompt_tokens'   : prompt_tokens,
@@ -318,7 +370,7 @@ class RenderWindow(PromptManager):
                        'token_count'     : 0}
 
         start_time = 0
-        color = self.color-5 if self.light_mode else self.color
+        color = self.state.color-5 if self.state.light_mode else self.state.color
         header = Text(f'Submitting relevant RAG+History tokens: {footer_meta["prompt_tokens"]} '
                       f'(took {preprocessing})...', style=f'color({color})')
         seperator = Markdown('---')
@@ -334,27 +386,27 @@ class RenderWindow(PromptManager):
                 response = self.render_chat(current_response)
                 footer = self.render_footer(time.time()-start_time, **footer_meta)
                 # replace 'thinking' output with Mode's Markdown response
-                if isinstance(response, Markdown) and self.do_once:
-                    self.do_once = False
+                if isinstance(response, Markdown) and stream.do_once:
+                    stream.do_once = False
                     # Reset (erase) the thinking output
                     current_response = ''
                 rich_content = Group(header, query, seperator, seperator,
-                                     Markdown(f'**{self.name}**'), response, footer)
+                                     Markdown(f'**{documents["name"]}**'), response, footer)
                 live.update(rich_content)
 
         # Finish by saving chat history, finding and storing new RAG/Tags or
         # llm_prompt changes, then reset it.
-        current_response += self.meta_capture
+        current_response += stream.meta_capture
         # Pesky LLM forgot to close meta_tags with '>'
         if "<meta_tags:" in current_response and not current_response.strip().endswith(">"):
             current_response += '>'
-            self.meta_hiding = False
+            stream.meta_hiding = False
             self.stop_thinking()
             self.console.print('Warn: I had to help the LLM close meta_tags',
-                               style=f'color({self.color})',highlight=False)
-        self.meta_capture = ''
-        self.cm.handle_context([str(current_response)],
-                                direction='store')
+                               style=f'color({self.state.color})',highlight=False)
+        stream.meta_capture = ''
+        self.state.context.handle_context([str(current_response)],
+                                          direction='store')
         current_response = self.common.sanatize_response(current_response)
         self.common.chat_history_session.append(f'\nUSER: {documents["user_query"]}\n\n'
                                                 f'AI: {current_response}')

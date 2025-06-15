@@ -172,4 +172,12 @@ class RAG():
                 f.write(f'STORE DATA: TAGS:{meta_dict}, {data}')
         doc = Document(data, metadata=meta_dict)
         retriever = self.parent_retriever(collection)
-        retriever.add_documents([doc])
+        try:
+            retriever.add_documents([doc])
+        # pylint: disable=bare-except  # Sometimes this can fail for a variety of reasons
+        except:
+            self.console.print(f'ERROR STORING DATA:\n{data}\n\nTAGS:\n{meta_dict}',
+                               style=f'color({self.color})',
+                               highlight=False)
+            pass
+        # pylint: enable=bare-except
