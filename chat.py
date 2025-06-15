@@ -32,6 +32,7 @@ import yaml
 import pytz
 import requests
 from rich.console import Console
+from rich.theme import Theme
 from bs4 import BeautifulSoup
 from PIL import Image
 from prompt_toolkit import PromptSession
@@ -514,6 +515,11 @@ def extract_text_from_web(d_session: SessionContext,
 # pylint: enable=redefined-outer-name
 if __name__ == '__main__':
     args = parse_args(sys.argv[1:])
+    light_mode_theme = Theme({
+            "markdown.code": "black on #e6e6e6",
+    })
+    if args.light_mode:
+        console = Console(theme=light_mode_theme)
     session = SessionContext.from_args(console, args)
     try:
         if args.import_txt:

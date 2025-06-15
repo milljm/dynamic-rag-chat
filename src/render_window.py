@@ -103,7 +103,6 @@ class RenderWindow(PromptManager):
         )
 
         self.prompts.build_prompts()
-
         class SimpleCodeBlock(CodeBlock):
             """ Code Block Syntax injection """
             state = self.state
