@@ -5,6 +5,8 @@ import time
 from threading import Thread
 from rich.live import Live
 from rich.markdown import Markdown
+from rich.markdown import CodeBlock
+from rich.syntax import Syntax
 from rich.text import Text
 from rich.console import Group
 from langchain.prompts import ChatPromptTemplate
@@ -52,6 +54,38 @@ class RenderWindow(PromptManager):
         self.prompts.build_prompts()
         self.meta_capture = ''
         self.meta_buffer = ''
+
+        # CodeBlock Hack (prevent truncation of last character when word equals terminal width)
+        # pylint: disable=redefined-outer-name, unused-variable
+        if self.light_mode:
+            class SimpleCodeBlock(CodeBlock):
+                """ Code Block Syntax injection """
+                def __rich_console__(self, console, options):
+                    code = str(self.text).rstrip()
+                    syntax = Syntax(code,
+                                    self.lexer_name,
+                                    theme="default",
+                                    word_wrap=True,
+                                    background_color="#dfd5cd",
+                                    padding=(1,0),
+                                    )
+                    yield syntax
+        else:
+            class SimpleCodeBlock(CodeBlock):
+                """ Code Block Syntax injection """
+                def __rich_console__(self, console, options):
+                    code = str(self.text).rstrip()
+                    syntax = Syntax(code,
+                                    self.lexer_name,
+                                    theme="monokai",
+                                    word_wrap=True,
+                                    background_color="#111111",
+                                    padding=(1,0),
+                                    )
+                    yield syntax
+
+        Markdown.elements["fence"] = SimpleCodeBlock
+        # pylint: enable=redefined-outer-name, unused-variable
 
         # Thinking animation
         self.pulsing_chars = ["⠇", "⠋", "⠙", "⠸", "⠴", "⠦"]
