@@ -42,10 +42,10 @@ class CommonUtils():
 
         # Regular expression in use throughout the project
         self.find_prompt  = re.compile(r'(?<=[<m]eta_prompt: ).*?(?=[>)])', re.DOTALL)
-        self.meta_data = re.compile(r"[<]?meta_tags:(.*?);?\s*>", re.DOTALL)
-        self.meta_block = re.compile(r"[<]?meta_tags:.*?\s*>", re.DOTALL)
-        self.meta_start_re = re.compile(r"<\s*meta[_\-:]?", re.IGNORECASE)
-        self.meta_iter = re.compile(r'(\w+):\s*([^;]*)')
+        self.meta_data = re.compile(r'[<]?meta_tags:(.*?);?\s*>', re.DOTALL)
+        self.meta_block = re.compile(r'[<]?meta_tags:.*?\s*>', re.DOTALL)
+        self.meta_start_re = re.compile(r'[\(<\[]\s*meta[_\-:]?', re.IGNORECASE)
+        self.meta_iter = re.compile(r'(\w+):\s*(.+?)(?=[;\n>]|$)')
         self.json_style = re.compile(r'```json(.*)```', re.DOTALL)
         self.json_template = re.compile(r'\{\{\s*(.*?)\s*\}\}', re.DOTALL)
         self.model_re = re.compile(r'(\w+)\W+')
@@ -58,7 +58,7 @@ class CommonUtils():
             'status': 'unknown',                    # 'in motion', 'camped', 'combat'
 
             # Character Presence & Perspective
-            'entity': [],                           # Characters mentioned
+            'entities': [],                         # Characters mentioned
             'audience': [],                         # Characters being spoken to directly
             'entity_location': ['unknown'],         # john backseat, jane frontseat, bo navigation
 
@@ -84,20 +84,23 @@ class CommonUtils():
             'scene_locked': False,                  # Prevents new characters from entering scene
             'narrator_mode': False,                 # If True, LLM may use omniscient 3rd-person
         }
+        # Determine which keys support multiple values
+        self.multi_keys = {
+            k.strip().lower() for k, v in self._scene_meta.items()
+            if isinstance(v, (list, set))
+        }
+        self.alias_map = {
+            "entities": "entity",
+            "locations": "location",
+            "characters": "entity",
+            "audiences": "audience",
+            "items": "items",
+            "narrative_arcs": "narrative_arcs",
+            "completed_narrative_arcs": "completed_narrative_arcs",
+            "entity_locations": "entity_location"
+        }
         # Load from file. If file does not exist then self.scene_meta == self._scene_meta above
         self.scene_meta = self.load_scene(self.history_dir)
-
-    @staticmethod
-    def parse_tags(tag_input: dict | list[tuple[str, str]]) -> list[RAGTag]:
-        """Normalize any kind of tag input into RAGTag list."""
-        tags = []
-        for key, val in dict(tag_input).items():
-            if val is None or (isinstance(val, str) and val.lower() in {'null', 'none', ''}):
-                continue
-            if isinstance(val, list):
-                val = ",".join(str(v).strip() for v in val if v)
-            tags.append(RAGTag(key.lower(), str(val).strip().lower()))
-        return tags
 
     @staticmethod
     def validate_entity_presence(scene: dict) -> list[str]:
@@ -210,8 +213,7 @@ class CommonUtils():
     'They may NOT arrive, emerge, appear, or be discovered mid-scene.\n'
     'Scene location is LOCKED. Character list is FINAL.\n'
     'Any attempt to use these characters as if present is a violation of story continuity.\n'
-    '### 🔐 Scene Presence Rules (Active)'
-)
+    '### 🔐 Scene Presence Rules (Active)')
         self.save_scene(self.history_dir, self.scene_meta)
         return scene_str
 
@@ -229,7 +231,19 @@ class CommonUtils():
             _response = _response.replace(f'{match}', '')
         return _response
 
-    def get_tags(self, response: str)->list[RAGTag]:
+    def parse_tags(self, flat_pairs: dict | list[tuple[str, str]]) -> list[RAGTag]:
+        """Normalize any kind of tag input into RAGTag list."""
+        tags = []
+        for k, v in flat_pairs:
+            canonical_key = self.alias_map.get(k.strip().lower(), k.strip().lower())
+            if canonical_key in self.multi_keys:
+                values = [i.strip() for i in v.split(',') if i.strip()]
+            else:
+                values = v.strip()
+            tags.append(RAGTag(canonical_key, values))
+        return tags
+
+    def get_tags(self, response: str)->list[RAGTag[str, str]]:
         """ Extract tags in JSON and meta_tag format from the LLM's response """
         _tags = []
         try:

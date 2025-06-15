@@ -19,9 +19,10 @@ My task is to read the following text and extract a fixed set of metadata fields
   "tone": string, // e.g., "introspective", "tense", "hopeful"
   "emotion": string, // e.g., "calm", "frustrated", "affectionate"
   "focus": string | [string], // e.g., "greeting", "planning", "flirting"
-  "entity": [string], // all named characters mentioned, do not use pro-nouns (e.g, ["jane"])
+  "entities": [string], // all named characters mentioned, do not use pro-nouns (e.g, ["jane"])
   "audience": [string] | [], // who is physically present in the scene (e.g., ["john", "jane"])
-  "location": [string] | [], // active locations (e.g., ["excursion vehicle"])
+  "entity_location": [string] // where each entity is located (e.g., ["jane backseat", "john passenger"])
+  "locations": [string] | [], // active locations (e.g., ["excursion vehicle"])
   "items": [string] | [], // objects present or interacted with (e.g., ["journal"])
   "weather": string | null, // e.g., "clear night", "sandstorm", "none" if not applicable
   "relationship_stage": string | null, // e.g., "growing trust", "tense silence"
@@ -37,7 +38,6 @@ My task is to read the following text and extract a fixed set of metadata fields
   "time_jump_allowed": boolean, // true = time can progress unprompted
   "narrator_mode": boolean, // true = omniscient 3rd-person; false = protagonist-focused
   "status": string | null, // e.g., "sitting", "in motion", "driving", or null
-  "entity_location": [string] // where each entity is located (e.g., ["jane backseat", "john passenger"])
 }}
 
 ☀️ Inference Hints (Time of Day):

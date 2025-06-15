@@ -8,6 +8,7 @@ from rich.live import Live
 from rich.markdown import Markdown, CodeBlock
 from rich.syntax import Syntax
 from rich.text import Text
+from rich.align import Align
 from rich.console import Group
 from langchain.prompts import ChatPromptTemplate
 from langchain.schema.messages import HumanMessage
@@ -42,23 +43,37 @@ class RenderWindowState:
     common: Any
     context: Any
     current_dir: str
-
     color: int = field(init=False)
+    pulse_colors: list[int] = field(default_factory=lambda: list(
+                                              range(234,254)) + list(range(252,233,-1))
+                                              )
+    pulse_color_index: int = 0
     stream: StreamState = field(default_factory=StreamState)
 
     def __post_init__(self):
         self.color = 245 if self.light_mode else 233
 # pylint: enable=too-many-instance-attributes
 
-class AnimationThread(Thread):
+class ThinkingThread(Thread):
     """ Allow pulsing animation to run as a thread """
     def __init__(self, owner):
         super().__init__()
         self.owner = owner
 
     def run(self):
-        while self.owner.animation_active:
-            self.owner.update_animation()
+        while self.owner.thinking_active:
+            self.owner.animate_thinking()
+            time.sleep(0.5)
+
+class NamepulseThread(Thread):
+    """ Allow pulsing animation to run as a thread """
+    def __init__(self, owner):
+        super().__init__()
+        self.owner = owner
+
+    def run(self):
+        while self.owner.namepulse_active:
+            self.owner.animate_namepulse()
             time.sleep(0.5)
 
 class RenderWindow(PromptManager):
@@ -81,8 +96,12 @@ class RenderWindow(PromptManager):
             context=context,
             current_dir=current_dir
         )
-        self.animation_active: bool = False
-        self.animation_thread = Thread(target=self.update_animation)
+
+        self.thinking_active: bool = False
+        self.thinking_thread = Thread(target=self.animate_thinking)
+        self.namepulse_active: bool = False
+        self.namepulse_thread = Thread(target=self.animate_namepulse)
+
         self.console = self.state.console
         self.common = self.state.common
 
@@ -122,7 +141,7 @@ class RenderWindow(PromptManager):
 
     def _pulse_emoji(self) -> str:
         stream = self.state.stream
-        return f' {stream.pulsing_chars[stream.pulse_index]} ' if self.animation_active else ' '
+        return f' {stream.pulsing_chars[stream.pulse_index]} ' if self.thinking_active else ' '
 
     def _calc_tokens_per_sec(self, tokens: int, duration: float) -> float:
         return tokens / duration if duration > 0 else 0
@@ -155,17 +174,21 @@ class RenderWindow(PromptManager):
         content = str(chunk.content)
         stream = self.state.stream  # shorthand
 
-        # === CASE 1: Chunk is just '<' – buffer it
-        if content == '<':
-            stream.partial_chunk = '<'
+        # === CASE 1: Chunk has '<' – buffer it
+        #print(f'DEBUG START>{content}<END')
+        if '<' in content and not stream.meta_hiding:
+            #print(f'DEBUG: < found {content}')
+            stream.partial_chunk = content
             chunk.content = ''
 
         # === CASE 2: We're continuing from a previous partial '<'
-        elif stream.partial_chunk:
+        elif stream.partial_chunk and not stream.meta_hiding:
+            #print('DEBUG: partial_chunk true')
             combined = stream.partial_chunk + content
             stream.partial_chunk = ''
 
             if self.common.meta_start_re.search(combined):
+                #print(f'DEBUG: partial_chunk match {combined}')
                 stream.meta_capture = combined
                 stream.meta_hiding = True
                 self.start_thinking()
@@ -176,6 +199,7 @@ class RenderWindow(PromptManager):
 
         # === CASE 3: Normal hiding mode
         elif stream.meta_hiding:
+            #print(f'DEBUG HIDING: waiting for ">" curently:{content}:{">" in content}')
             stream.meta_capture += content
             if '>' in content:
                 stream.meta_hiding = False
@@ -184,6 +208,7 @@ class RenderWindow(PromptManager):
 
         # === CASE 4: Tag started cleanly with no split '<'
         elif self.common.meta_start_re.search(content):
+            #print(f'DEBUG NOT HIDING: waiting for "reason to hide" curently:{content}')
             stream.meta_capture = content
             stream.meta_hiding = True
             self.start_thinking()
@@ -225,21 +250,42 @@ class RenderWindow(PromptManager):
 
     def start_thinking(self):
         """ method to start thinking animation """
-        if hasattr(self, 'animation_thread') and self.animation_thread.is_alive():
-            self.animation_thread.join(timeout=0.1)
-        self.animation_active = True
-        self.animation_thread = AnimationThread(self)
-        self.animation_thread.daemon = True
-        self.animation_thread.start()
+        if hasattr(self, 'thinking_thread') and self.thinking_thread.is_alive():
+            self.thinking_thread.join(timeout=0.1)
+        self.thinking_active = True
+        self.thinking_thread = ThinkingThread(self)
+        self.thinking_thread.daemon = True
+        self.thinking_thread.start()
 
     def stop_thinking(self):
         """ method to stop thinking animation """
-        self.animation_active = False
+        self.thinking_active = False
 
-    def update_animation(self):
+    def start_namepulse(self):
+        """ method to start thinking animation """
+        if hasattr(self, 'namepulse_thread') and self.namepulse_thread.is_alive():
+            self.namepulse_thread.join(timeout=0.1)
+        self.namepulse_active = True
+        self.namepulse_thread = NamepulseThread(self)
+        self.namepulse_thread.daemon = True
+        self.namepulse_thread.start()
+
+    def stop_namepulse(self):
+        """ method to stop thinking animation """
+        self.namepulse_active = False
+
+    def animate_namepulse(self):
+        """ animate the assistants name """
+        state = self.state
+        while self.namepulse_active:
+            time.sleep(0.1)
+            state.pulse_color_index = (state.pulse_color_index  + 1) % len(state.pulse_colors)
+            self.render_chat()  # Re-render chat with updated pulse
+
+    def animate_thinking(self):
         """ a threaded method to run the thinking animation """
         stream = self.state.stream  # shorthand
-        while self.animation_active:
+        while self.thinking_active:
             time.sleep(0.1)  # Adjust speed (0.1 seconds per frame)
             stream.pulse_index = (stream.pulse_index + 1) % len(stream.pulsing_chars)
             self.render_chat()
@@ -376,7 +422,13 @@ class RenderWindow(PromptManager):
         query = Markdown(f'**You:** {documents["user_query"]}')
         with Live(refresh_per_second=20, console=self.console) as live:
             live.console.clear(home=True)
-            live.update(Group(header, query, seperator, seperator))
+            live.update(Group(header,
+                              query,
+                              seperator,
+                              Align.right(Text(documents["name"],
+                                               style='bold color(208)'))))
+
+            self.start_namepulse()
             for piece in self.stream_response(documents):
                 if start_time == 0:
                     start_time = time.time()
@@ -389,9 +441,24 @@ class RenderWindow(PromptManager):
                     stream.do_once = False
                     # Reset (erase) the thinking output
                     current_response = ''
-                rich_content = Group(header, query, seperator, seperator,
-                                     Markdown(f'**{documents["name"]}**'), response, footer)
+                name_color = self.state.pulse_colors[self.state.pulse_color_index]
+                rich_content = Group(header,
+                                     query,
+                                     seperator,
+                                     Align.right(Text(documents["name"],
+                                                      style=f'bold color({name_color})')),
+                                     response,
+                                     footer)
                 live.update(rich_content)
+            self.stop_namepulse()
+            rich_content = Group(header,
+                                     query,
+                                     seperator,
+                                     Align.right(Text(documents["name"],
+                                                      style='bold color(208)')),
+                                     response,
+                                     footer)
+            live.update(rich_content)
 
         # Finish by saving chat history, finding and storing new RAG/Tags or
         # llm_prompt changes, then reset it.

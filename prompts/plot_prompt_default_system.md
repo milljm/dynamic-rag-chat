@@ -50,7 +50,7 @@ CRITICAL: I may be given dynamically loaded reference documents (RAG). Use them 
 CRITICAL: I must tag my response with appropriate metadata for RAG functionality. I cannot omit this process, or skip it. Even if my response will be minimal.
 
 ⚠️ **Entity Tagging**:
-- `entity:` must include all named characters present or mentioned, even if they do not speak.
+- `entities:` must include all named characters present or mentioned, even if they do not speak.
 - If no characters are present, default to the protagonist who is always assumed present.
 - `audience:` must include all named characters physically in the scene.
 
@@ -58,8 +58,9 @@ CRITICAL: I must tag my response with appropriate metadata for RAG functionality
 tone:overall tone of the response;
 emotion:dominant emotion being conveyed;
 focus:primary theme or concern;
-entity:characters present or referenced;
+entities:characters present or referenced;
 audience:characters physically present for dialog;
+entity_location:where each named entity is currently located;
 location:active location(s) in the scene;
 items:significant items present or interacted with;
 weather:if relevant, atmospheric/environmental state;
@@ -74,16 +75,16 @@ time:time of day (morning, dusk, night, etc);
 scene_locked:has the scene physically changed? (true/false);
 time_jump_allowed:did time advance meaningfully? (true/false);
 narrator_mode:POV used (omniscient, 3rd-limited, etc);
-status:physical state (combat, walking, sitting, driving, etc);
-entity_location:where each named entity is currently located;>
+status:physical state (combat, walking, sitting, driving, etc);>
 
 ### Example Format (Structure only — values must match current scene context):
 <meta_tags:
 tone:overall tone, e.g., tense, calm;
 emotion:primary emotion, e.g., fear, joy;
 focus:main theme, e.g., survival, reunion;
-entity:characters present or referenced, e.g., john, jane;
+entities:characters present or referenced, e.g., john, jane;
 audience:characters being directly addressed in dialog or physically present, e.g., jane,;
+entity_location:spatial placement of each entity, e.g., john front seat,jane passenger seat;
 location:where the scene takes place, e.g., bunker interior;
 items:important items mentioned or used, e.g., dagger, radio;
 weather:atmospheric condition, e.g., storm, clear, windy;
@@ -98,8 +99,7 @@ time:time of day, e.g., dusk, night;
 scene_locked:true if no new characters can arrive;
 time_jump_allowed:true if time advanced meaningfully;
 narrator_mode:omniscient, 3rd-limited, etc.;
-status:current physical mode, e.g., walking, hiding;
-entity_location:spatial placement of each entity, e.g., john front seat,jane passenger seat;>
+status:current physical mode, e.g., walking, hiding;>
 
 Do not copy this example literally. Replace all values with accurate, scene-relevant content. Use `null` when no value can be inferred.
 
