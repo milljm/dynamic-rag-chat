@@ -38,9 +38,9 @@ class RAGTagManager():
         self.light_mode = kwargs['light_mode']
         self.color = 245 if self.light_mode else 233
 
-    def update_rag(self, response, collection: str='ai_documents')->None:
+    def update_rag(self, response: str, collection: str='ai_documents')->None:
         """ regular expression through message and attempt to create key:value tuples """
-        list_rag_tags = self.common.get_tags(response)
+        list_rag_tags: list[RAGTag[str, str]] = self.common.get_tags(response)
         # Update the scene
         self.common.scene_tracker_from_tags(list_rag_tags)
         if self.debug:
@@ -176,8 +176,7 @@ class RAG():
             retriever.add_documents([doc])
         # pylint: disable=bare-except  # Sometimes this can fail for a variety of reasons
         except:
-            self.console.print(f'ERROR STORING DATA:\n{data}\n\nTAGS:\n{meta_dict}',
-                               style=f'color({self.color})',
-                               highlight=False)
-            pass
+            self.console.print(f'\nERROR STORING DATA:\n{data}\n\nTAGS:\n{meta_dict}',
+                                style=f'color({self.color})',
+                                highlight=False)
         # pylint: enable=bare-except
