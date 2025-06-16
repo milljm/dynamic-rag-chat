@@ -47,7 +47,7 @@ class CommonUtils():
         self.meta_start_re = re.compile(r'[\(<\[]\s*meta[_\-:]?', re.IGNORECASE)
         self.meta_iter = re.compile(r'(\w+):\s*(.+?)(?=[;\n>]|$)')
         self.json_style = re.compile(r'```json(.*)```', re.DOTALL)
-        self.json_template = re.compile(r'\{\{\s*(.*?)\s*\}\}', re.DOTALL)
+        self.json_template = re.compile(r'\{+\s*((?:".+?":.+?)+)\s*\}+', re.DOTALL)
         self.model_re = re.compile(r'(\w+)\W+')
 
         # Ephemeral scene tracking
@@ -58,7 +58,7 @@ class CommonUtils():
             'status': 'unknown',                    # 'in motion', 'camped', 'combat'
 
             # Character Presence & Perspective
-            'entities': [],                         # Characters mentioned
+            'entity': [],                           # Characters mentioned
             'audience': [],                         # Characters being spoken to directly
             'entity_location': ['unknown'],         # john backseat, jane frontseat, bo navigation
 
@@ -90,9 +90,7 @@ class CommonUtils():
             if isinstance(v, (list, set))
         }
         self.alias_map = {
-            "entities": "entity",
             "locations": "location",
-            "characters": "entity",
             "audiences": "audience",
             "items": "items",
             "narrative_arcs": "narrative_arcs",
@@ -103,12 +101,12 @@ class CommonUtils():
         self.scene_meta = self.load_scene(self.history_dir)
 
     @staticmethod
-    def validate_entity_presence(scene: dict) -> list[str]:
+    def validate_entity_presence(scene: dict)->list[str]:
         """
         Ensure all characters in `entity` are grounded in either `audience` or `entity_location`.
         Returns a list of phantom entities (those not grounded).
         """
-        def normalize_entity_list(field) -> set[str]:
+        def normalize_entity_list(field)->set[str]:
             """
             Accepts a list or comma-delimited string and returns a set of cleaned entity names.
             """
@@ -138,15 +136,15 @@ class CommonUtils():
         phantoms = [e for e in entities if e not in grounded]
         return phantoms
 
-    def no_scene(self):
+    def no_scene(self)->dict:
         """ return an empty scene """
         return self._scene_meta
 
-    def clear_scene(self):
+    def clear_scene(self)->dict:
         """ clear the scene """
         self.scene_meta = self._scene_meta
 
-    def scene_tracker_from_tags(self, tags: list[RAGTag]) -> str:
+    def scene_tracker_from_tags(self, tags: list[RAGTag])->str:
         """ Build a formatted scene state string based on incoming RAGTags and internal memory """
         tag_dict = {tag.tag: tag.content for tag in tags}
         # Allow for an update to self._scene_meta
@@ -224,6 +222,26 @@ class CommonUtils():
             response = self.normalize_for_dedup(response)
         return response
 
+    @staticmethod
+    def tags_to_dict(tags: list[RAGTag])->dict:
+        """ Convert list of RAGTag objects to a dictionary """
+        return {tag.tag: tag.content for tag in tags}
+
+    @staticmethod
+    def normalize_metadata_for_rag(meta: dict)->dict:
+        """ serialize values for RAG meta-fields """
+        result = {}
+        for key, val in meta.items():
+            if isinstance(val, list):
+                result[key] = ', '.join(str(v) for v in val)
+            elif isinstance(val, bool):
+                result[key] = str(val).lower()  # optional: keep as string for uniformity
+            elif val is None:
+                result[key] = "none"
+            else:
+                result[key] = str(val)
+        return result
+
     def remove_tags(self, response: str)->str:
         """ remove meta_tags from response """
         _response = str(response)
@@ -231,15 +249,25 @@ class CommonUtils():
             _response = _response.replace(f'{match}', '')
         return _response
 
-    def parse_tags(self, flat_pairs: dict | list[tuple[str, str]]) -> list[RAGTag]:
-        """Normalize any kind of tag input into RAGTag list."""
+    def parse_tags(self, flat_pairs: dict | list[tuple[str, str]])->list[RAGTag[str, str]]:
+        """Normalize any kind of tag input into RAGTag list of (str, str)"""
         tags = []
+        # Normalize input to iterable of (k, v) pairs
+        if isinstance(flat_pairs, dict):
+            flat_pairs = flat_pairs.items()
         for k, v in flat_pairs:
             canonical_key = self.alias_map.get(k.strip().lower(), k.strip().lower())
+            # Normalize to comma-separated string if multi_key
             if canonical_key in self.multi_keys:
-                values = [i.strip() for i in v.split(',') if i.strip()]
+                if isinstance(v, list):
+                    values = ', '.join(str(i).strip() for i in v if str(i).strip())
+                elif isinstance(v, str):
+                    # If it’s already a string, assume it's comma-separated
+                    values = ', '.join(i.strip() for i in v.split(',') if i.strip())
+                else:
+                    values = str(v).strip() if v is not None else ''
             else:
-                values = v.strip()
+                values = str(v).strip() if v is not None else ''
             tags.append(RAGTag(canonical_key, values))
         return tags
 
@@ -248,9 +276,10 @@ class CommonUtils():
         _tags = []
         try:
             # JSON-style block
-            json_match = self.json_style.search(response)
+            json_match = self.json_template.search(response)
             if json_match:
-                data = json.loads(json_match.group(1))
+                json_str = '{' + json_match.group(1).strip() + '}'
+                data = json.loads(json_str)
                 _tags.extend(self.parse_tags(data))
 
             # meta_tag format
@@ -260,7 +289,17 @@ class CommonUtils():
                 for match in meta_matches:
                     flat_pairs.extend(self.meta_iter.findall(match))
                 _tags.extend(self.parse_tags(flat_pairs))
-            return list(set(_tags))
+
+            seen = set()
+            deduped = []
+            for tag in _tags:
+                key = (tag.tag,
+                       tuple(tag.content) if isinstance(tag.content, (list, set)) else tag.content)
+                if key not in seen:
+                    seen.add(key)
+                    deduped.append(tag)
+            return deduped
+
         # pylint: disable=broad-exception-caught  # too many ways for this to go wrong
         except Exception as e:
             if self.debug:
@@ -268,7 +307,7 @@ class CommonUtils():
             return []
 
     @staticmethod
-    def normalize_for_dedup(text: str) -> str:
+    def normalize_for_dedup(text: str)->str:
         """ remove emojis and other markdown """
         text = re.sub(r'[\U0001F600-\U0001F64F\u2600-\u26FF\u2700-\u27BF]', '', text)
         return ' '.join(text.lower().split())
@@ -309,7 +348,7 @@ class CommonUtils():
         return heat
 
     @staticmethod
-    def save_scene(history_path, scene):
+    def save_scene(history_path, scene)->None:
         """ persist scenes """
         scene_file = os.path.join(history_path, 'ephemeral_scene.pkl')
         try:
@@ -336,7 +375,7 @@ class CommonUtils():
             print(f'Warning: Error loading scene file: {e}')
         return loaded_scene
 
-    def save_chat(self) ->None:
+    def save_chat(self)->None:
         """ Persist chat history (save) """
         history_file = os.path.join(self.history_dir, 'chat_history.pkl')
         try:
@@ -391,7 +430,7 @@ class CommonUtils():
             print(f'Warning: Error loading chat: {e}')
         return prompt_str
 
-    def check_prompt(self, last_message):
+    def check_prompt(self, last_message)->None:
         """ allow the LLM to add to its own system prompt """
         prompt = self.find_prompt.findall(last_message)[-1:]
         if prompt:

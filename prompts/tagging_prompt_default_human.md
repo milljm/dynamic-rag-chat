@@ -19,7 +19,7 @@ My task is to read the following text and extract a fixed set of metadata fields
   "tone": string, // e.g., "introspective", "tense", "hopeful"
   "emotion": string, // e.g., "calm", "frustrated", "affectionate"
   "focus": string | [string], // e.g., "greeting", "planning", "flirting"
-  "entities": [string], // all named characters mentioned, do not use pro-nouns (e.g, ["jane"])
+  "entity": [string], // all named characters mentioned, do not use pro-nouns (e.g, ["jane"])
   "audience": [string] | [], // who is physically present in the scene (e.g., ["john", "jane"])
   "entity_location": [string] // where each entity is located (e.g., ["jane backseat", "john passenger"])
   "locations": [string] | [], // active locations (e.g., ["excursion vehicle"])

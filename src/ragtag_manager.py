@@ -162,6 +162,7 @@ class RAG():
         if tags_metadata is None:
             tags_metadata = {}
         meta_dict = dict(tags_metadata)
+        meta_dict = self.common.normalize_metadata_for_rag(meta_dict)
         if self.debug:
             self.console.print(f'STORE DATA:\n{data}\n\nTAGS:\n{meta_dict}',
                                style=f'color({self.color})',
@@ -176,7 +177,6 @@ class RAG():
             retriever.add_documents([doc])
         # pylint: disable=bare-except  # Sometimes this can fail for a variety of reasons
         except:
-            self.console.print(f'\nERROR STORING DATA:\n{data}\n\nTAGS:\n{meta_dict}',
-                                style=f'color({self.color})',
-                                highlight=False)
+            print(f'\nERROR STORING DATA:\n{data}\n\nTAGS:\n{meta_dict}\n\n'
+                  'Check for malformed TAGS (no list items is usually the culprit)')
         # pylint: enable=bare-except

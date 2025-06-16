@@ -1,4 +1,5 @@
 """ Build filter objects suitable for Chroma use """
+import ast
 from .ragtag_manager import RAGTag # for type hinting
 class FilterBuilder:
     """
@@ -24,11 +25,11 @@ class FilterBuilder:
         if not must_conditions and not soft_conditions:
             return None
         if not must_conditions:
-            return soft_conditions[0] if len(soft_conditions) == 1 else {"$or": soft_conditions}
+            return {"$or": soft_conditions}
         if not soft_conditions:
-            return must_conditions[0] if len(must_conditions) == 1 else {"$and": must_conditions}
+            return {"$and": must_conditions}
         return {
-            "$and": must_conditions + ( [{"$or": soft_conditions}] if len(soft_conditions) > 1 else soft_conditions )
+            "$and": must_conditions + [{"$or": soft_conditions}]
         }
 
     def build(self, tags: list[RAGTag[str, str]], field: str)->dict|None:
