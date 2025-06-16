@@ -190,7 +190,7 @@ class Chat():
         prompt_tokens,
         cleaned_color,
         pre_process_time) = self.get_documents(user_input)
-        included_files = self.session.common.json_template.findall(user_input)
+        included_files = self.session.common.curly_match.findall(user_input)
         for included_file in included_files:
             if os.path.exists(included_file):
                 mime_format = mimetypes.guess_type(included_file)[0]
@@ -231,13 +231,22 @@ class Chat():
                     documents['user_query'] = documents['user_query'].replace(included_file,
                                                                     f'{_file} {icon} ✅')
             elif included_file.startswith('http'):
-                response = requests.get(included_file, timeout=300)
-                if response.status_code == 200:
-                    soup = BeautifulSoup(response.content, 'html.parser')
-                    documents['dynamic_files'] = (f'{documents.get("dynamic_files", "")}'
-                                                  f'{soup.get_text()}\n')
-                    documents['user_query'] = documents['user_query'].replace(included_file,
-                                                                     f'{included_file} {icon} ✅')
+                headers = {'User-Agent': ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+                                          'AppleWebKit/537.36 (KHTML, like Gecko) '
+                                          'Chrome/120.0.0.0 Safari/537.36')}
+                try:
+                    response = requests.get(included_file, headers=headers, timeout=10)
+                    if response.status_code == 200:
+                        soup = BeautifulSoup(response.content, 'html.parser')
+                        documents['dynamic_files'] = (f'{documents.get("dynamic_files", "")}'
+                                                      f'{soup.get_text()}\n')
+                        documents['user_query'] = documents['user_query'].replace(included_file,
+                                                                        f'{included_file} 🌍 ✅')
+                    else:
+                        documents['user_query'] = documents['user_query'].replace(included_file,
+                                                  f'{included_file} {response.status_code} ❌')
+                except:
+                    pass
             else:
                 documents['user_query'] = documents['user_query'].replace(included_file,
                                                                      f'{included_file} ❌')
@@ -304,7 +313,7 @@ class Chat():
                      cleaned_color,
                      preprocessing) = self.no_context(user_input)
 
-                if self.session.common.json_template.findall(user_input):
+                if self.session.common.curly_match.findall(user_input):
                     (documents,
                     token_savings,
                     prompt_tokens,

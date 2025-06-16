@@ -47,6 +47,7 @@ class CommonUtils():
         self.meta_start_re = re.compile(r'[\(<\[]\s*meta[_\-:]?', re.IGNORECASE)
         self.meta_iter = re.compile(r'(\w+):\s*(.+?)(?=[;\n>]|$)')
         self.json_style = re.compile(r'```json(.*)```', re.DOTALL)
+        self.curly_match = re.compile(r'\{\{\s*(.*?)\s*\}\}', re.DOTALL)
         self.json_template = re.compile(r'\{+\s*((?:".+?":.+?)+)\s*\}+', re.DOTALL)
         self.model_re = re.compile(r'(\w+)\W+')
 
