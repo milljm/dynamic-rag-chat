@@ -183,13 +183,9 @@ class Chat():
         return (documents, token_savings, prompt_tokens, cleaned_color, pre_process_time)
 
     # pylint: disable=too-many-locals,too-many-branches  # Handling a lot of different formats
-    def load_content_as_context(self, user_input):
+    def load_content_as_context(self, user_input:str)->dict:
         """ parse user_input for all occurrences of {{ /path/to/file }} """
-        (documents,
-        token_savings,
-        prompt_tokens,
-        cleaned_color,
-        pre_process_time) = self.get_documents(user_input)
+        documents = {'dynamic_images': [], 'dynamic_files': '', 'user_query': user_input}
         included_files = self.session.common.curly_match.findall(user_input)
         for included_file in included_files:
             if os.path.exists(included_file):
@@ -245,12 +241,14 @@ class Chat():
                     else:
                         documents['user_query'] = documents['user_query'].replace(included_file,
                                                   f'{included_file} {response.status_code} ❌')
+                # pylint: disable=bare-except
                 except:
                     pass
+                # pylint: enable=bare-except
             else:
                 documents['user_query'] = documents['user_query'].replace(included_file,
                                                                      f'{included_file} ❌')
-        return (documents, token_savings, prompt_tokens, cleaned_color, pre_process_time)
+        return documents
 
     def no_context(self, user_input)->tuple:
         """ perform search without any context involved """
@@ -313,13 +311,6 @@ class Chat():
                      cleaned_color,
                      preprocessing) = self.no_context(user_input)
 
-                if self.session.common.curly_match.findall(user_input):
-                    (documents,
-                    token_savings,
-                    prompt_tokens,
-                    cleaned_color,
-                    preprocessing) = self.load_content_as_context(user_input)
-
                 else:
                     # Grab our lovely context
                     (documents,
@@ -327,6 +318,9 @@ class Chat():
                     prompt_tokens,
                     cleaned_color,
                     preprocessing) = self.get_documents(user_input)
+
+                # add in-line content
+                documents.update(self.load_content_as_context(user_input))
 
                 # handoff to rich live
                 self.session.renderer.live_stream(documents,
