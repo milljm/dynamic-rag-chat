@@ -117,7 +117,7 @@ class RenderWindow(PromptManager):
         self.llm = ChatOpenAI(
             base_url=self.state.host,
             model=self.state.model,
-            temperature=0.3 if self.state.assistant_mode else '1.0',
+            temperature=0.4 if self.state.assistant_mode else '1.1',
             streaming=True,
             max_tokens=self.state.num_ctx,
             api_key=self.state.api_key
@@ -469,6 +469,9 @@ class RenderWindow(PromptManager):
         if self.state.assistant_mode:
             self.common.chat_history_session.append(f'\nUSER: {documents["user_query"]}\n\n'
                                                 f'AI: {current_response}')
+            if self.state.verbose:
+                self.console.print('Info: Nothing saved (assistant-mode)',
+                                style=f'color({self.state.color})',highlight=False)
             return
         # Pesky LLM forgot to close meta_tags with '>'
         if (stream.thinking and "<meta_tags:" in current_response

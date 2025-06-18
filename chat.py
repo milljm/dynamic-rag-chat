@@ -98,7 +98,7 @@ class Chat():
                                'prompt files each time[/]\n')
         if kwargs['assistant_mode']:
             self.console.print('[italic dim grey30]Assistant mode enabled. RAGs disabled, Chat '
-                               'History will persist[/]\n')
+                               'History will not persist[/]\n')
     @staticmethod
     def get_time(tzone):
         """ return the time """
