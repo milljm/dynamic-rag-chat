@@ -464,7 +464,8 @@ class RenderWindow(PromptManager):
         # llm_prompt changes, then reset it.
         current_response += stream.meta_capture
         # Pesky LLM forgot to close meta_tags with '>'
-        if "<meta_tags:" in current_response and not current_response.strip().endswith(">"):
+        if (stream.thinking and "<meta_tags:" in current_response
+            and not current_response.strip().endswith(">")):
             current_response += '>'
             stream.meta_hiding = False
             self.stop_thinking()

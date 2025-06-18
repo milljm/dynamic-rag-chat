@@ -8,6 +8,7 @@ being supplied to the LLM. It utilizing several methods:
     ParentDocument/ChildDocument retrieval (return one large response with many small one)
 """
 import os
+import re
 from difflib import SequenceMatcher
 import threading
 from langchain.schema import Document
@@ -197,25 +198,47 @@ class ContextManager(PromptManager):
                                            matches=self.matches)
         return documents
 
-    def prompt_entities(self, meta_tags: list[RAGTag])->list[str]:
+    def prompt_entities(self, meta_tags: list[RAGTag[str,str]]) -> list[str]:
         """
         Return list of strings with grounding info for each entity detected in meta_tags.
+        Handles entity content as list or delimiter-separated string.
         """
-        entities = [x.content for x in meta_tags if x.tag == 'entity']
-        if not entities:
+        # Collect raw values of all entity tags
+        raw_entities = [x.content for x in meta_tags if x.tag == 'entity']
+        if not raw_entities:
             return ['']
+
+        seen = set()
         _entity_prompt = []
-        for entity in entities:
-            entity_file = os.path.join(self.current_dir,
-                                       'prompts',
-                                       'entities',
-                                       f'{entity.lower()}.txt')
-            if self.debug:
-                print(f'DEBUG: {entity_file}')
-            if os.path.exists(entity_file):
-                with open(entity_file, 'r', encoding='utf-8') as f:
-                    _entity_prompt.append(f.read())
-        return _entity_prompt
+
+        for entry in raw_entities:
+            # Step 1: normalize to list of strings
+            if isinstance(entry, list):
+                candidates = entry
+            elif isinstance(entry, str):
+                # Remove brackets and normalize
+                entry = entry.strip().lstrip("[").rstrip("]")
+                # Split on common delimiters
+                candidates = re.split(r'[;,|\n]+|\s{2,}|(?<!\w)\s(?!\w)', entry)
+            else:
+                candidates = [str(entry)]
+
+            # Step 2: load file for each unique, non-empty candidate
+            for candidate in candidates:
+                name = candidate.strip().lower()
+                if not name or name in seen:
+                    continue
+                seen.add(name)
+                entity_file = os.path.join(
+                    self.current_dir, 'prompts', 'entities', f'{name}.txt'
+                )
+                if self.debug:
+                    print(f'DEBUG: {entity_file}')
+                if os.path.exists(entity_file):
+                    with open(entity_file, 'r', encoding='utf-8') as f:
+                        _entity_prompt.append(f.read())
+
+        return _entity_prompt or ['']
 
     def hanlde_entity(self,
                       meta_tags: list[RAGTag],
