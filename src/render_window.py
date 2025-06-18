@@ -32,6 +32,7 @@ class StreamState:
 class RenderWindowState:
     """ RenderWindow dataclass attributes """
     debug: bool
+    assistant_mode: bool
     verbose: bool
     light_mode: bool
     model: str
@@ -84,6 +85,7 @@ class RenderWindow(PromptManager):
         # Load config into dataclass
         self.state = RenderWindowState(
             debug=kwargs['debug'],
+            assistant_mode=kwargs['assistant_mode'],
             verbose=kwargs['verbose'],
             light_mode=kwargs['light_mode'],
             model=kwargs['model'],
@@ -115,7 +117,7 @@ class RenderWindow(PromptManager):
         self.llm = ChatOpenAI(
             base_url=self.state.host,
             model=self.state.model,
-            temperature=0.9,
+            temperature=0.3 if self.state.assistant_mode else '1.0',
             streaming=True,
             max_tokens=self.state.num_ctx,
             api_key=self.state.api_key
@@ -175,20 +177,20 @@ class RenderWindow(PromptManager):
         stream = self.state.stream  # shorthand
 
         # === CASE 1: Chunk has '<' – buffer it
-        #print(f'DEBUG START>{content}<END')
+        # print(f'DEBUG START>{content}<END')
         if '<' in content and not stream.meta_hiding:
-            #print(f'DEBUG: < found {content}')
+            # print(f'DEBUG: < found {content}')
             stream.partial_chunk = content
             chunk.content = ''
 
         # === CASE 2: We're continuing from a previous partial '<'
         elif stream.partial_chunk and not stream.meta_hiding:
-            #print('DEBUG: partial_chunk true')
+            # print('DEBUG: partial_chunk true')
             combined = stream.partial_chunk + content
             stream.partial_chunk = ''
 
             if self.common.meta_start_re.search(combined):
-                #print(f'DEBUG: partial_chunk match {combined}')
+                # print(f'DEBUG: partial_chunk match {combined}')
                 stream.meta_capture = combined
                 stream.meta_hiding = True
                 self.start_thinking()
@@ -199,7 +201,7 @@ class RenderWindow(PromptManager):
 
         # === CASE 3: Normal hiding mode
         elif stream.meta_hiding:
-            #print(f'DEBUG HIDING: waiting for ">" curently:{content}:{">" in content}')
+            # print(f'DEBUG HIDING: waiting for ">" curently:{content}:{">" in content}')
             stream.meta_capture += content
             if '>' in content:
                 stream.meta_hiding = False
@@ -208,7 +210,7 @@ class RenderWindow(PromptManager):
 
         # === CASE 4: Tag started cleanly with no split '<'
         elif self.common.meta_start_re.search(content):
-            #print(f'DEBUG NOT HIDING: waiting for "reason to hide" curently:{content}')
+            # print(f'DEBUG NOT HIDING: waiting for "reason to hide" curently:{content}')
             stream.meta_capture = content
             stream.meta_hiding = True
             self.start_thinking()
@@ -416,8 +418,9 @@ class RenderWindow(PromptManager):
 
         start_time = 0
         color = self.state.color-5 if self.state.light_mode else self.state.color
-        header = Text(f'Submitting relevant RAG+History tokens: {footer_meta["prompt_tokens"]} '
-                      f'(took {preprocessing})...', style=f'color({color})')
+        _rag = 'RAG+' if not self.state.assistant_mode else ''
+        header = Text(f'Submitting relevant {_rag}History tokens: {footer_meta["prompt_tokens"]} '
+                        f'(took {preprocessing})...', style=f'color({color})')
         seperator = Markdown('---')
         query = Markdown(f'**You:** {documents["user_query"]}')
         with Live(refresh_per_second=20, console=self.console) as live:
@@ -463,6 +466,10 @@ class RenderWindow(PromptManager):
         # Finish by saving chat history, finding and storing new RAG/Tags or
         # llm_prompt changes, then reset it.
         current_response += stream.meta_capture
+        if self.state.assistant_mode:
+            self.common.chat_history_session.append(f'\nUSER: {documents["user_query"]}\n\n'
+                                                f'AI: {current_response}')
+            return
         # Pesky LLM forgot to close meta_tags with '>'
         if (stream.thinking and "<meta_tags:" in current_response
             and not current_response.strip().endswith(">")):

@@ -29,6 +29,7 @@ class ContextManager(PromptManager):
         self.rag_tagger = rag_tag
         self.matches = kwargs['matches']
         self.debug = kwargs['debug']
+        self.assistant_mode = kwargs['assistant_mode']
         self.chat_sessions = kwargs['chat_sessions']
         self.color = 245 if kwargs['light_mode'] else 233
         self.prompts = PromptManager(self.console,
@@ -297,6 +298,8 @@ class ContextManager(PromptManager):
             collection_list = ['ai_documents', 'user_documents']
             documents = {key: [] for key in collection_list}
             documents['chat_history'] = self.get_chat_history()
+            if self.assistant_mode:
+                return (documents, pre_tokens, post_tokens)
             if data_set:
                 query = self.common.stringify_lists(data_set[0])
                 # Try to tagify the users query

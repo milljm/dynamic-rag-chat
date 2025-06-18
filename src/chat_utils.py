@@ -28,6 +28,7 @@ class CommonUtils():
         self.chat_max = kwargs['chat_max']
         self.light_mode = kwargs['light_mode']
         self.debug = kwargs['debug']
+        self.assistant_mode = kwargs['assistant_mode']
         self.color = 245 if self.light_mode else 233
 
         # Heat Map
@@ -378,6 +379,8 @@ class CommonUtils():
 
     def save_chat(self)->None:
         """ Persist chat history (save) """
+        if self.assistant_mode:
+            return
         history_file = os.path.join(self.history_dir, 'chat_history.pkl')
         try:
             with open(history_file, "wb") as f:
@@ -388,6 +391,8 @@ class CommonUtils():
     def load_chat(self, history_path: str)->list:
         """ Persist chat history (load) """
         loaded_list = []
+        if self.assistant_mode:
+            return []
         history_file = os.path.join(history_path, 'chat_history.pkl')
         try:
             with open(history_file, "rb") as f:

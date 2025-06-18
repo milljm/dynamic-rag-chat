@@ -96,7 +96,9 @@ class Chat():
         if self.debug:
             self.console.print('[italic dim grey30]Debug mode enabled. I will re-read the '
                                'prompt files each time[/]\n')
-
+        if kwargs['assistant_mode']:
+            self.console.print('[italic dim grey30]Assistant mode enabled. RAGs disabled, Chat '
+                               'History will persist[/]\n')
     @staticmethod
     def get_time(tzone):
         """ return the time """
@@ -431,7 +433,8 @@ See .chat.yaml.example for details.
     parser.add_argument('--light-mode', action='store_true', default=light,
                         help='Use a color scheme suitible for light background terminals')
     parser.add_argument('--assistant-mode', action='store_true', default=assistant_mode,
-                        help='Do not utilize story-telling mode prompts')
+                        help='Do not utilize story-telling mode prompts or the RAGs. Do not save'
+                        'chat history to disk')
     parser.add_argument('-d', '--debug', action='store_true', default=debug,
                         help='Print preconditioning message, prompt, etc')
     parser.add_argument('-v','--verbose', action='store_true', default=debug,
