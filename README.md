@@ -25,7 +25,7 @@ Perfect for storytelling, world-building, AI role-play, and narrative design —
 - 🔁 **Streaming responses**: Token-level generation, async-ready
 - 🧾 **Persistent chat history**: Your context survives between runs
 - 🧠 **Dynamic RAGs**: Retrieval is triggered by user input or LLM output
-- ♻️ **Assistant Swap**: Switch between story-teller and assistant mode with an argument
+- ♻️ **Assistant Swap**: Switch between story-teller and assistant mode with an argument (while in assistant mode, chat acts more like a tool)
 - ✍️ **Preconditioning layer**: Lightweight LLM summarizes RAG output before the larger model (saves tokens while retaining depth)
     *(Note: in active development)*
 - 🧩 **Recursive RAG import**:
