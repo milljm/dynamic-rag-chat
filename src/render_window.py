@@ -33,6 +33,7 @@ class RenderWindowState:
     """ RenderWindow dataclass attributes """
     debug: bool
     assistant_mode: bool
+    no_rags: bool
     verbose: bool
     light_mode: bool
     model: str
@@ -86,6 +87,7 @@ class RenderWindow(PromptManager):
         self.state = RenderWindowState(
             debug=kwargs['debug'],
             assistant_mode=kwargs['assistant_mode'],
+            no_rags=kwargs['use_rags'],
             verbose=kwargs['verbose'],
             light_mode=kwargs['light_mode'],
             model=kwargs['model'],
@@ -399,7 +401,6 @@ class RenderWindow(PromptManager):
             chat_content = Text(current_stream, style=f'color({self.state.color})')
         else:
             chat_content = Markdown(current_stream)
-
         return chat_content
 
     def live_stream(self, documents: dict,
@@ -418,7 +419,7 @@ class RenderWindow(PromptManager):
 
         start_time = 0
         color = self.state.color-5 if self.state.light_mode else self.state.color
-        _rag = 'RAG+' if not self.state.assistant_mode else ''
+        _rag = '' if not self.state.no_rags and self.state.assistant_mode else 'RAG+'
         header = Text(f'Submitting relevant {_rag}History tokens: {footer_meta["prompt_tokens"]} '
                         f'(took {preprocessing})...', style=f'color({color})')
         seperator = Markdown('---')
@@ -466,7 +467,7 @@ class RenderWindow(PromptManager):
         # Finish by saving chat history, finding and storing new RAG/Tags or
         # llm_prompt changes, then reset it.
         current_response += stream.meta_capture
-        if self.state.assistant_mode:
+        if self.state.assistant_mode and not self.state.no_rags:
             self.common.chat_history_session.append(f'\nUSER: {documents["user_query"]}\n\n'
                                                 f'AI: {current_response}')
             if self.state.verbose:

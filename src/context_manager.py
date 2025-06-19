@@ -30,6 +30,7 @@ class ContextManager(PromptManager):
         self.matches = kwargs['matches']
         self.debug = kwargs['debug']
         self.assistant_mode = kwargs['assistant_mode']
+        self.no_rags = kwargs['use_rags']
         self.chat_sessions = kwargs['chat_sessions']
         self.color = 245 if kwargs['light_mode'] else 233
         self.prompts = PromptManager(self.console,
@@ -192,6 +193,7 @@ class ContextManager(PromptManager):
         Perform metadata field filtering matching
         """
         filter_dict = self.filter_builder.build(tags, field)
+        print(filter_dict)
         # Combined filter retrieval (highly relevant information)
         documents = self.rag.retrieve_data(query,
                                            collection,
@@ -298,7 +300,7 @@ class ContextManager(PromptManager):
             collection_list = ['ai_documents', 'user_documents']
             documents = {key: [] for key in collection_list}
             documents['chat_history'] = self.get_chat_history()
-            if self.assistant_mode:
+            if self.assistant_mode and not self.no_rags:
                 return (documents, pre_tokens, post_tokens)
             if data_set:
                 query = self.common.stringify_lists(data_set[0])

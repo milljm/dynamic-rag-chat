@@ -29,6 +29,7 @@ class CommonUtils():
         self.light_mode = kwargs['light_mode']
         self.debug = kwargs['debug']
         self.assistant_mode = kwargs['assistant_mode']
+        self.no_rag = kwargs['use_rags']
         self.color = 245 if self.light_mode else 233
 
         # Heat Map
@@ -97,7 +98,8 @@ class CommonUtils():
             "items": "items",
             "narrative_arcs": "narrative_arcs",
             "completed_narrative_arcs": "completed_narrative_arcs",
-            "entity_locations": "entity_location"
+            "entity_locations": "entity_location",
+            "keywords_entities": "entity",
         }
         # Load from file. If file does not exist then self.scene_meta == self._scene_meta above
         self.scene_meta = self.load_scene(self.history_dir)
@@ -379,7 +381,7 @@ class CommonUtils():
 
     def save_chat(self)->None:
         """ Persist chat history (save) """
-        if self.assistant_mode:
+        if self.assistant_mode and not self.no_rag:
             return
         history_file = os.path.join(self.history_dir, 'chat_history.pkl')
         try:
@@ -391,7 +393,7 @@ class CommonUtils():
     def load_chat(self, history_path: str)->list:
         """ Persist chat history (load) """
         loaded_list = []
-        if self.assistant_mode:
+        if self.assistant_mode and not self.no_rag:
             return []
         history_file = os.path.join(history_path, 'chat_history.pkl')
         try:
