@@ -14,6 +14,7 @@ import threading
 from langchain.schema import Document
 from langchain.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
+from openai import APITimeoutError
 from .ragtag_manager import RAGTagManager, RAG, RAGTag
 from .chat_utils import CommonUtils, ChatOptions # For type hinting
 from .prompt_manager import PromptManager
@@ -44,7 +45,8 @@ class ContextManager(PromptManager):
                                   temperature=0.3,
                                   streaming=False,
                                   max_tokens=4096,
-                                  api_key=args.api_key)
+                                  api_key=args.api_key,
+                                  request_timeout=15)
         self.filter_builder = FilterBuilder()
         self.prompts.build_prompts()
 
@@ -111,7 +113,11 @@ class ContextManager(PromptManager):
             with open(os.path.join(self.opts.vector_dir, 'debug.log'),
                       'w', encoding='utf-8') as f:
                 f.write(f'PRE-PROCESSOR PROMPT: {prompt}')
-        content = self.pre_llm.invoke(prompt).content
+        try:
+            content = self.pre_llm.invoke(prompt).content
+        except APITimeoutError:
+            content = ''
+            self.console.print('PRE-PROCESSOR RESPONSE TIMEOUT')
         if self.debug:
             self.console.print(f'PRE-PROCESSOR RESPONSE:\n{content}\n\n',
                                 style=f'color({self.opts.color})', highlight=False)
@@ -120,7 +126,7 @@ class ContextManager(PromptManager):
                       'w', encoding='utf-8') as f:
                 f.write(f'PRE-PROCESSOR RESPONSE: {content}')
         tags = self.common.get_tags(content)
-        if self.no_entity(tags) and previous:
+        if self.no_entity(tags) and previous and not self.common.if_importing:
             try:
                 last_contents = self.common.chat_history_session[-1:]
             except IndexError:

@@ -32,6 +32,10 @@ import pytz
 import requests
 from rich.console import Console
 from rich.theme import Theme
+from rich.console import Group
+from rich.live import Live
+from rich.panel import Panel
+from rich.table import Table
 from bs4 import BeautifulSoup
 from PIL import Image
 from prompt_toolkit import PromptSession
@@ -442,12 +446,124 @@ See .chat.yaml.example for details.
 
     return verify_args(parser.parse_args(argv))
 
+def make_full_status(progress_state):
+    """ Use Rich Live to update the user on processing """
+    file_table = Table.grid(padding=(0, 1))
+    for file_path in progress_state['processed_files']:
+        file_table.add_row(f'[dim]File:[/] {file_path}')
+    file_table.add_row('')  # Spacer
+    file_table.add_row((f'[bold green]File Progress:[/] {progress_state["file_idx"]+1} '
+                        f'/ {progress_state["file_total"]}'))
+
+    file_panel = Panel.fit(
+        file_table,
+        title='📂 File Import Status',
+        border_style='green'
+    )
+    chunk_panel = progress_state.get('chunk_panel') or Panel(
+        'Awaiting chunk processing...',
+        border_style='blue',
+        title='🔄 Processing RAG Input'
+    )
+    return Group(file_panel, chunk_panel)
+
 def store_data(d_session: SessionContext,
-               data: str)->None:
-    """ iterate over list, tagging content before storing to RAG """
-    _, meta_tags, _  = d_session.context.pre_processor(data, do_scene=False)
-    _normal = d_session.common.normalize_for_dedup(data)
-    d_session.rag.store_data(_normal, tags_metadata=meta_tags)
+               data: str,
+               data_file: str = '',
+               parent_size: int = 0,
+               child_size: int = 0,
+               live=None,
+               progress_state=None) -> None:
+    """ Tag and Process incoming document into the RAG """
+    def make_status_table(current: int,
+                          total: int,
+                          child_cnt: int,
+                          current_child: int,
+                          processing=False) -> Panel:
+        table = Table.grid()
+        proc = f'{" LLM pre-processor/tagging" if processing else ""}'
+        table.add_row(f'[bold]Current File:[/] {os.path.basename(data_file)}')
+        table.add_row(f'[bold green]Parent Chunk:[/] {current+1} / {total}{proc}')
+        table.add_row(f'[cyan]Child Chunks:[/] {child_cnt}/{current_child}')
+        table.add_row(f'[yellow]Chunk Sizes:[/] Parent={parent_size} / Child={child_size}')
+        return Panel(table, title="🔄 Processing RAG Input", border_style="blue")
+
+    split_docs = d_session.rag.parent_splitter.split_text(data)
+
+    for cnt, split_doc in enumerate(split_docs):
+        child_docs = d_session.rag.child_splitter.split_text(split_doc)
+        if live and progress_state is not None:
+            progress_state['chunk_panel'] = make_status_table(cnt,
+                                                              len(split_docs),
+                                                              len(child_docs),
+                                                              0,
+                                                              processing=True)
+            live.update(make_full_status(progress_state))
+
+        _, meta_tags, _ = d_session.context.pre_processor(split_doc, do_scene=False)
+        _normal = d_session.common.normalize_for_dedup(split_doc)
+        d_session.rag.store_data(_normal, tags_metadata=meta_tags)
+
+        for c_cnt, child_doc in enumerate(child_docs):
+            d_session.rag.store_data(child_doc, tags_metadata=meta_tags)
+            if live and progress_state is not None:
+                progress_state['chunk_panel'] = make_status_table(cnt,
+                                                                  len(split_docs),
+                                                                  len(child_docs),
+                                                                  c_cnt + 1)
+                live.update(make_full_status(progress_state))
+
+def extract_text_from_dir(d_session: SessionContext, v_args: argparse.ArgumentParser) -> None:
+    """ Walk through supplied directory recursively and beginning storing data """
+    try:
+        # pylint: disable=protected-access  # protected by try
+        parent_size = d_session.rag.parent_splitter._chunk_size
+        child_size = d_session.rag.child_splitter._chunk_size
+        # pylint: enable=protected-access
+    except AttributeError:
+        parent_size = 0
+        child_size = 0
+    files_to_process = []
+    for fdir, _, files in os.walk(v_args.import_dir):
+        for file in files:
+            if file.endswith(('.md', '.html', '.txt', '.pdf')):
+                files_to_process.append((fdir, file))
+    progress_state = {
+        'file_idx': 0,
+        'file_total': len(files_to_process),
+        'file_name': '',
+        'processed_files': [],
+        'chunk_panel': None
+    }
+    with Live(make_full_status(progress_state), refresh_per_second=20) as live:
+        for idx, (fdir, file) in enumerate(files_to_process):
+            _file = os.path.join(fdir, file)
+            progress_state['file_idx'] = idx
+            progress_state['file_name'] = _file
+            progress_state['processed_files'].append(_file)
+            max_history = 10
+            if len(progress_state['processed_files']) > max_history:
+                progress_state['processed_files'] = progress_state['processed_files'][-max_history:]
+            live.update(make_full_status(progress_state))
+            if file.endswith('.pdf'):
+                v_args.import_pdf = file
+                extract_text_from_pdf(d_session, v_args, do_exit=False)
+                continue
+            with open(_file, 'r', encoding='utf-8') as file_handle:
+                document_content = file_handle.read()
+            if _file.endswith('.html'):
+                soup = BeautifulSoup(document_content, 'html.parser')
+                document_content = soup.get_text()
+            store_data(
+                d_session,
+                document_content,
+                data_file=_file,
+                parent_size=parent_size,
+                child_size=child_size,
+                live=live,
+                progress_state=progress_state
+            )
+    sys.exit()
 
 def extract_text_from_pdf(d_session: SessionContext,
                           v_args: argparse.ArgumentParser,
@@ -478,29 +594,10 @@ def store_text(d_session: SessionContext,
     print(f'Importing document: {v_args.import_txt}')
     with open(v_args.import_txt, 'r', encoding='utf-8') as file:
         document_content = file.read()
+        if v_args.import_txt.endswith('.html'):
+            soup = BeautifulSoup(document_content, 'html.parser')
+            document_content = soup.get_text()
         store_data(d_session, document_content)
-    sys.exit()
-
-def extract_text_from_markdown(d_session: SessionContext,
-                               v_args: argparse.ArgumentParser)->None:
-    """
-    walk recursively through provided directory and import *.md, *.html, *.txt
-    file directly into the RAG
-    """
-    for fdir, _, files in os.walk(v_args.import_dir):
-        for file in files:
-            if file.endswith('.md') or file.endswith('.html') or file.endswith('.txt'):
-                _file = os.path.join(fdir, file)
-                with open(_file, 'r', encoding='utf-8') as file:
-                    document_content = file.read()
-                if _file.endswith('.html'):
-                    soup = BeautifulSoup(document_content, 'html.parser')
-                    document_content = soup.get_text()
-                print(f'Importing document: {_file}')
-                store_data(d_session, document_content)
-            elif file.endswith('.pdf'):
-                v_args.import_pdf = file
-                extract_text_from_pdf(d_session, v_args, do_exit=False)
     sys.exit()
 
 def extract_text_from_web(d_session: SessionContext,
@@ -543,7 +640,7 @@ if __name__ == '__main__':
             sys.exit(0)
         if args.import_dir:
             if os.path.exists(args.import_dir):
-                extract_text_from_markdown(session, _opts)
+                extract_text_from_dir(session, _opts)
                 sys.exit(0)
         chat = Chat(session, _opts)
         chat.chat()

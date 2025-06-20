@@ -121,15 +121,16 @@ class ChatOptions:
 @dataclass
 class RegExp:
     """ regular expression in use throughout the project """
+    model_re = re.compile(r'(\w+)\W+')
     find_prompt  = re.compile(r'(?<=[<m]eta_prompt: ).*?(?=[>)])', re.DOTALL)
     meta_data = re.compile(r'[<]?meta_tags:(.*?);?\s*>', re.DOTALL)
     meta_block = re.compile(r'[<]?meta_tags:.*?\s*>', re.DOTALL)
     meta_start_re = re.compile(r'[\(<\[]\s*meta[_\-:]?', re.IGNORECASE)
     meta_iter = re.compile(r'(\w+):\s*(.+?)(?=[;\n>]|$)')
-    json_style = re.compile(r'```json(.*)```', re.DOTALL)
-    curly_match = re.compile(r'\{\{\s*(.*?)\s*\}\}', re.DOTALL)
     json_template = re.compile(r'\{+\s*((?:".+?":.+?)+)\s*\}+', re.DOTALL)
-    model_re = re.compile(r'(\w+)\W+')
+    json_style = re.compile(r'\{\s*(.*?)\s*\}', re.DOTALL)
+    json_malformed = re.compile(r'{+(.*)}', re.DOTALL)
+    curly_match = re.compile(r'\{\{\s*(.*?)\s*\}\}', re.DOTALL)
 
 class CommonUtils():
     """ method holder for command methods used throughout the project """
@@ -154,6 +155,13 @@ class CommonUtils():
         self.heat_map = 0
         self.prompt_map = self.create_heatmap(8000)
         self.cleaned_map = self.create_heatmap(1000)
+
+    def if_importing(self):
+        """ return bool if we are importing documents """
+        return (self.opts.import_dir or
+                self.opts.import_web or
+                self.opts.import_pdf or
+                self.opts.import_txt)
 
     @staticmethod
     def get_aliases():
@@ -389,16 +397,34 @@ class CommonUtils():
             tags.append(RAGTag(canonical_key, values))
         return tags
 
+    @staticmethod
+    def sanitize_json_string(json_string):
+        r"""
+        Remove any characters with ASCII values less than 32, except for \n, \r, and \t
+        """
+        json_string = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', json_string)
+        json_string = re.sub(r'\n', '', json_string)
+        return json_string
+
     def get_tags(self, response: str)->list[RAGTag[str, str]]:
         """ Extract tags in JSON and meta_tag format from the LLM's response """
         _tags = []
         try:
-            # JSON-style block
-            json_match = self.regex.json_template.search(response)
-            if json_match:
-                json_str = '{' + json_match.group(1).strip() + '}'
-                data = json.loads(json_str)
-                _tags.extend(self.parse_tags(data))
+            # JSON-style block. Attempt several kinds of matching, break on the first
+            # successful json.loads()
+            for match in [self.regex.json_template.search(response),
+                          self.regex.json_style.search(response),
+                          self.regex.json_malformed.search(response),
+                          self.regex.curly_match.search(response)]:
+                if match:
+                    json_str = match.group(1)
+                    json_str = self.sanatize_response(json_str)
+                    try:
+                        data = json.loads(f'{{{json_str}}}')
+                    except json.decoder.JSONDecodeError:
+                        continue
+                    _tags.extend(self.parse_tags(data))
+                    break
 
             # meta_tag format
             meta_matches = self.regex.meta_data.findall(response)
