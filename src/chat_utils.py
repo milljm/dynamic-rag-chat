@@ -58,7 +58,7 @@ class ChatOptions:
         if os.path.exists(chat_yaml):
             with open(chat_yaml, 'r', encoding='utf-8') as f:
                 _dict = yaml.safe_load(f) or {}
-        arg_dict = _dict['chat']  # short hand
+        arg_dict = _dict.get('chat', {})  # short hand
         # Create the ChatOptions instance with all required arguments
         return cls(host = arg_dict.get('llm_server', 'http://localhost:11434/v1'),
             light_mode=arg_dict.get('light_mode', False),
