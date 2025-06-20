@@ -1,7 +1,6 @@
 """ module responsible for rendering output to the screen """
 import os
 from dataclasses import dataclass, field
-from typing import Any
 import time
 from threading import Thread
 from rich.live import Live
@@ -12,9 +11,11 @@ from rich.align import Align
 from rich.console import Group
 from langchain.prompts import ChatPromptTemplate
 from langchain.schema.messages import HumanMessage
-from langchain.schema import BaseMessage   # for Type Hinting
+from langchain.schema import BaseMessage   # For Type Hinting
 from langchain_openai import ChatOpenAI
 from .prompt_manager import PromptManager
+from .context_manager import ContextManager # For Type Hinting
+from .chat_utils import CommonUtils, ChatOptions # For Type Hinting
 
 # pylint: disable=too-many-instance-attributes  # this is what a dataclass is for
 @dataclass
@@ -33,6 +34,7 @@ class RenderWindowState:
     """ RenderWindow dataclass attributes """
     debug: bool
     assistant_mode: bool
+    no_rags: bool
     verbose: bool
     light_mode: bool
     model: str
@@ -40,9 +42,7 @@ class RenderWindowState:
     api_key: str
     num_ctx: int
     syntax_theme: str
-    console: Any
-    common: Any
-    context: Any
+    context: ContextManager
     current_dir: str
     color: int = field(init=False)
     pulse_colors: list[int] = field(default_factory=lambda: list(
@@ -79,22 +79,28 @@ class NamepulseThread(Thread):
 
 class RenderWindow(PromptManager):
     """ Responsible for printing Rich Text/Markdown Live to the screen """
-    def __init__(self, console, common, context, current_dir, **kwargs):
-        super().__init__(console, current_dir, **kwargs)
+    def __init__(self, console,
+                 common: CommonUtils,
+                 context: ContextManager,
+                 current_dir,
+                 args: ChatOptions):
+        super().__init__(console, current_dir, args)
+        self.console = console
+        self.common = common
+        self.opts = args
 
         # Load config into dataclass
         self.state = RenderWindowState(
-            debug=kwargs['debug'],
-            assistant_mode=kwargs['assistant_mode'],
-            verbose=kwargs['verbose'],
-            light_mode=kwargs['light_mode'],
-            model=kwargs['model'],
-            host=kwargs['host'],
-            api_key=kwargs['api_key'],
-            num_ctx=kwargs['num_ctx'],
-            syntax_theme=kwargs['syntax_theme'],
-            console=console,
-            common=common,
+            debug=args.debug,
+            assistant_mode=args.assistant_mode,
+            no_rags=args.no_rags,
+            verbose=args.verbose,
+            light_mode=args.light_mode,
+            model=args.model,
+            host=args.host,
+            api_key=args.api_key,
+            num_ctx=args.num_ctx,
+            syntax_theme=args.syntax_theme,
             context=context,
             current_dir=current_dir
         )
@@ -104,14 +110,11 @@ class RenderWindow(PromptManager):
         self.namepulse_active: bool = False
         self.namepulse_thread = Thread(target=self.animate_namepulse)
 
-        self.console = self.state.console
-        self.common = self.state.common
-
         self.prompts = PromptManager(
             console,
             current_dir,
-            prompt_model=self.state.model,
-            **kwargs
+            args,
+            prompt_model=self.state.model
         )
 
         self.llm = ChatOpenAI(
@@ -124,6 +127,9 @@ class RenderWindow(PromptManager):
         )
 
         self.prompts.build_prompts()
+
+        # Use SimpleCodeBlock instead of CodeBlock (CodeBlock fencing will strip trailing
+        # character from a word if that word fits perfectly within fenced window)
         class SimpleCodeBlock(CodeBlock):
             """ Code Block Syntax injection """
             state = self.state
@@ -139,7 +145,7 @@ class RenderWindow(PromptManager):
 
     def _format_model_name(self) -> str:
         """Extracts a cleaned model identifier from full model name."""
-        return '-'.join(self.common.model_re.findall(self.state.model)[:2])
+        return '-'.join(self.common.regex.model_re.findall(self.state.model)[:2])
 
     def _pulse_emoji(self) -> str:
         stream = self.state.stream
@@ -189,7 +195,7 @@ class RenderWindow(PromptManager):
             combined = stream.partial_chunk + content
             stream.partial_chunk = ''
 
-            if self.common.meta_start_re.search(combined):
+            if self.common.regex.meta_start_re.search(combined):
                 # print(f'DEBUG: partial_chunk match {combined}')
                 stream.meta_capture = combined
                 stream.meta_hiding = True
@@ -209,7 +215,7 @@ class RenderWindow(PromptManager):
             chunk.content = ''
 
         # === CASE 4: Tag started cleanly with no split '<'
-        elif self.common.meta_start_re.search(content):
+        elif self.common.regex.meta_start_re.search(content):
             # print(f'DEBUG NOT HIDING: waiting for "reason to hide" curently:{content}')
             stream.meta_capture = content
             stream.meta_hiding = True
@@ -341,7 +347,7 @@ class RenderWindow(PromptManager):
                                style=f'color({self.state.color})',
                                highlight=False)
         else:
-            with open(os.path.join(self.common.history_dir, 'debug.log'),
+            with open(os.path.join(self.opts.vector_dir, 'debug.log'),
                       'w', encoding='utf-8') as f:
                 f.write(f'LLM DOCUMENTS: {documents.keys()}')
 
@@ -358,7 +364,7 @@ class RenderWindow(PromptManager):
                           style=f'color({self.state.color})',
                           highlight=False)
         else:
-            with open(os.path.join(self.common.history_dir, 'debug.log'),
+            with open(os.path.join(self.opts.vector_dir, 'debug.log'),
                       'w', encoding='utf-8') as f:
                 f.write(f'HEAVY LLM PROMPT (llm.stream()): {formatted_messages}')
         for chunk in self.llm.stream(messages):
@@ -399,7 +405,6 @@ class RenderWindow(PromptManager):
             chat_content = Text(current_stream, style=f'color({self.state.color})')
         else:
             chat_content = Markdown(current_stream)
-
         return chat_content
 
     def live_stream(self, documents: dict,
@@ -418,7 +423,7 @@ class RenderWindow(PromptManager):
 
         start_time = 0
         color = self.state.color-5 if self.state.light_mode else self.state.color
-        _rag = 'RAG+' if not self.state.assistant_mode else ''
+        _rag = '' if not self.state.no_rags and self.state.assistant_mode else 'RAG+'
         header = Text(f'Submitting relevant {_rag}History tokens: {footer_meta["prompt_tokens"]} '
                         f'(took {preprocessing})...', style=f'color({color})')
         seperator = Markdown('---')
@@ -466,7 +471,7 @@ class RenderWindow(PromptManager):
         # Finish by saving chat history, finding and storing new RAG/Tags or
         # llm_prompt changes, then reset it.
         current_response += stream.meta_capture
-        if self.state.assistant_mode:
+        if self.state.assistant_mode and not self.state.no_rags:
             self.common.chat_history_session.append(f'\nUSER: {documents["user_query"]}\n\n'
                                                 f'AI: {current_response}')
             if self.state.verbose:

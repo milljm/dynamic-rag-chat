@@ -14,37 +14,39 @@ import threading
 from langchain.schema import Document
 from langchain.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
-from .ragtag_manager import RAGTag # For type hinting
+from .ragtag_manager import RAGTagManager, RAG, RAGTag
+from .chat_utils import CommonUtils, ChatOptions # For type hinting
 from .prompt_manager import PromptManager
 from .filter_builder import FilterBuilder
 
 class ContextManager(PromptManager):
     """ A collection of methods aimed at producing/reducing the context """
     # pylint: disable=too-many-positional-arguments, too-many-arguments
-    def __init__(self, console, common, rag, rag_tag, current_dir, **kwargs):
-        super().__init__(console, current_dir, **kwargs)
+    def __init__(self,
+                 console,
+                 common: CommonUtils,
+                 rag: RAG,
+                 rag_tag: RAGTagManager,
+                 current_dir,
+                 args: ChatOptions):
+        super().__init__(console, current_dir, args)
         self.console = console
         self.common = common
         self.rag = rag
         self.rag_tagger = rag_tag
-        self.matches = kwargs['matches']
-        self.debug = kwargs['debug']
-        self.assistant_mode = kwargs['assistant_mode']
-        self.chat_sessions = kwargs['chat_sessions']
-        self.color = 245 if kwargs['light_mode'] else 233
+        self.opts = args
         self.prompts = PromptManager(self.console,
                                      current_dir,
-                                     prompt_model=kwargs['preconditioner'],
-                                     **kwargs)
-        self.pre_llm = ChatOpenAI(base_url=kwargs['pre_host'],
-                                  model=kwargs['preconditioner'],
+                                     args,
+                                     prompt_model=args.preconditioner)
+        self.pre_llm = ChatOpenAI(base_url=args.pre_host,
+                                  model=args.preconditioner,
                                   temperature=0.3,
                                   streaming=False,
                                   max_tokens=4096,
-                                  api_key=kwargs['api_key'])
+                                  api_key=args.api_key)
         self.filter_builder = FilterBuilder()
         self.prompts.build_prompts()
-        self.warn = True
 
     # pylint: enable=too-many-positional-arguments,too-many-arguments
     def deduplication(self, base_reference: list[str],
@@ -104,17 +106,17 @@ class ContextManager(PromptManager):
         prompt = prompt_template.format_messages(context=query, previous=previous)
         if self.debug:
             self.console.print(f'PRE-PROCESSOR PROMPT:\n{prompt}\n\n',
-                                style=f'color({self.color})', highlight=False)
+                                style=f'color({self.opts.color})', highlight=False)
         else:
-            with open(os.path.join(self.common.history_dir, 'debug.log'),
+            with open(os.path.join(self.opts.vector_dir, 'debug.log'),
                       'w', encoding='utf-8') as f:
                 f.write(f'PRE-PROCESSOR PROMPT: {prompt}')
         content = self.pre_llm.invoke(prompt).content
         if self.debug:
             self.console.print(f'PRE-PROCESSOR RESPONSE:\n{content}\n\n',
-                                style=f'color({self.color})', highlight=False)
+                                style=f'color({self.opts.color})', highlight=False)
         else:
-            with open(os.path.join(self.common.history_dir, 'debug.log'),
+            with open(os.path.join(self.opts.vector_dir, 'debug.log'),
                       'w', encoding='utf-8') as f:
                 f.write(f'PRE-PROCESSOR RESPONSE: {content}')
         tags = self.common.get_tags(content)
@@ -161,23 +163,23 @@ class ContextManager(PromptManager):
 
     def get_chat_history(self)->list:
         """
-        Limit Chat History to 550 * int(chat_sessions) tokens (defaults = 2750 tokens)
+        Limit Chat History to 550 * int(history_sessions) tokens (defaults = 2750 tokens)
         """
         splice_list = self.stagger_history(len(self.common.chat_history_session),
-                                           self.chat_sessions)
+                                           self.opts.history_sessions)
         spliced = [self.common.chat_history_session[x] for x in splice_list]
         abridged = []
         _tk_cnt = 0
-        max_tokens = 550 * max(1, int(self.chat_sessions)) # Defaults = 2750 tokens
+        max_tokens = 550 * max(1, int(self.opts.history_sessions)) # Defaults = 2750 tokens
         for response in spliced:
             _tk_cnt += self.token_retreiver(response)
             if _tk_cnt > max_tokens:
                 if self.debug:
                     self.console.print(f'MAX CHAT TOKENS: {_tk_cnt}',
-                                       style=f'color({self.color})',
+                                       style=f'color({self.opts.color})',
                                        highlight=False)
                 else:
-                    with open(os.path.join(self.common.history_dir, 'debug.log'),
+                    with open(os.path.join(self.opts.vector_dir, 'debug.log'),
                               'w', encoding='utf-8') as f:
                         f.write(f'MAX CHAT TOKENS: {_tk_cnt}')
                 return abridged
@@ -196,7 +198,7 @@ class ContextManager(PromptManager):
         documents = self.rag.retrieve_data(query,
                                            collection,
                                            meta_data=filter_dict,
-                                           matches=self.matches)
+                                           matches=self.opts.matches)
         return documents
 
     def prompt_entities(self, meta_tags: list[RAGTag[str,str]]) -> list[str]:
@@ -249,7 +251,7 @@ class ContextManager(PromptManager):
         """ perform entity context matching routines """
         flat_entities = []
         storage = []
-        entity_weights = max(1, int(self.matches * .75))
+        entity_weights = max(1, int(self.opts.matches * .75))
         # Obtain the entities tag, and it's contents
         entities = [x.content for x in meta_tags if x.tag == 'entity']
 
@@ -298,7 +300,7 @@ class ContextManager(PromptManager):
             collection_list = ['ai_documents', 'user_documents']
             documents = {key: [] for key in collection_list}
             documents['chat_history'] = self.get_chat_history()
-            if self.assistant_mode:
+            if self.opts.assistant_mode and not self.opts.no_rags:
                 return (documents, pre_tokens, post_tokens)
             if data_set:
                 query = self.common.stringify_lists(data_set[0])
@@ -311,10 +313,10 @@ class ContextManager(PromptManager):
 
                 if self.debug:
                     self.console.print(f'TAG RETREIVAL:\n{meta_tags}\n\n',
-                                       style=f'color({self.color})',
+                                       style=f'color({self.opts.color})',
                                        highlight=False)
                 else:
-                    with open(os.path.join(self.common.history_dir, 'debug.log'),
+                    with open(os.path.join(self.opts.vector_dir, 'debug.log'),
                               'w', encoding='utf-8') as f:
                         f.write(f'TAG RETREIVAL: {meta_tags}')
                 for collection in collection_list:
@@ -337,15 +339,15 @@ class ContextManager(PromptManager):
                                                            meta_tags,
                                                            field))
 
-                        balance = max(0, self.matches - len(storage))
-                        if balance == 0 or len(storage) >= self.matches:
+                        balance = max(0, self.opts.matches - len(storage))
+                        if balance == 0 or len(storage) >= self.opts.matches:
                             break
 
                     if self.debug:
                         self.console.print(f'BALANCE: {balance}',
-                                           style=f'color({self.color})')
+                                           style=f'color({self.opts.color})')
                     else:
-                        with open(os.path.join(self.common.history_dir, 'debug.log'),
+                        with open(os.path.join(self.opts.vector_dir, 'debug.log'),
                                   'w', encoding='utf-8') as f:
                             f.write(f'BALANCE: {balance}')
                     # Fallback to simularity search based on the difference. Always allow one.
@@ -368,10 +370,10 @@ class ContextManager(PromptManager):
 
                 if self.debug:
                     self.console.print(f'CONTEXT RETRIEVAL:\n{documents}\n\n',
-                                       style=f'color({self.color})',
+                                       style=f'color({self.opts.color})',
                                        highlight=False)
                 else:
-                    with open(os.path.join(self.common.history_dir, 'debug.log'),
+                    with open(os.path.join(self.opts.vector_dir, 'debug.log'),
                               'w', encoding='utf-8') as f:
                         f.write(f'CONTEXT RETRIEVAL: {documents}')
 

@@ -28,7 +28,6 @@ import argparse
 import datetime
 import mimetypes
 from dataclasses import dataclass
-import yaml
 import pytz
 import requests
 from rich.console import Console
@@ -42,7 +41,7 @@ from langchain_community.document_loaders import PyPDFLoader
 from src import ContextManager
 from src import RAG, RAGTagManager
 from src import RenderWindow
-from src import CommonUtils
+from src import CommonUtils, ChatOptions
 console = Console(highlight=True)
 current_dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -64,14 +63,13 @@ class SessionContext:
     renderer: RenderWindow
 
     @classmethod
-    def from_args(cls, c_console, vargs)->'SessionContext':
+    def from_args(cls, c_console, c_args)->'SessionContext':
         """ instance and return session dataclass """
-        args_dict = vars(vargs)
-        _common = CommonUtils(c_console, **args_dict)
-        _rag = RAG(c_console, _common, **args_dict)
-        _rag_tag = RAGTagManager(console, _common, **args_dict)
-        _context = ContextManager(console, _common, _rag, _rag_tag, current_dir, **args_dict)
-        _renderer = RenderWindow(console, _common, _context, current_dir, **args_dict)
+        _common = CommonUtils(c_console, c_args)
+        _rag = RAG(c_console, _common, c_args)
+        _rag_tag = RAGTagManager(console, _common, c_args)
+        _context = ContextManager(console, _common, _rag, _rag_tag, current_dir, c_args)
+        _renderer = RenderWindow(console, _common, _context, current_dir, c_args)
         return cls(common=_common,
                    rag=_rag,
                    rag_tag=_rag_tag,
@@ -80,25 +78,23 @@ class SessionContext:
 
 class Chat():
     """ Begin initializing variables classes. Call .chat() to begin """
-    # pylint: disable=too-many-instance-attributes
-    def __init__(self, o_session, **kwargs):
-        self.session = o_session
-        self.console = console
-        self.debug = kwargs['debug']
-        self.host = kwargs['host']
-        self.model = kwargs['model']
-        self.num_ctx = kwargs['num_ctx']
-        self.time_zone = kwargs['time_zone']
-        self.light_mode = kwargs['light_mode']
-        self.name = kwargs['name']
-        self.verbose = kwargs['verbose']
-        self.chat_sessions = kwargs['chat_sessions']
-        if self.debug:
-            self.console.print('[italic dim grey30]Debug mode enabled. I will re-read the '
-                               'prompt files each time[/]\n')
-        if kwargs['assistant_mode']:
-            self.console.print('[italic dim grey30]Assistant mode enabled. RAGs disabled, Chat '
-                               'History will not persist[/]\n')
+    def __init__(self, o_session, _args):
+        self.opts: ChatOptions = _args
+        self.session: SessionContext = o_session
+        self._initialize_startup_tasks()
+
+    def _initialize_startup_tasks(self):
+        """ run starup routines """
+        opts = self.opts # shorthand
+        if opts.debug:
+            console.print('[italic dim grey30]Debug mode enabled. I will re-read the '
+                               'prompt files each time.[/]')
+        if opts.assistant_mode and not opts.no_rags:
+            console.print('[italic dim grey30]Assistant mode enabled. RAGs disabled, Chat '
+                               'History will not persist.[/]')
+        elif opts.no_rags and opts.assistant_mode:
+            console.print('[italic dim grey30]Assistant mode enabled.[/]')
+
     @staticmethod
     def get_time(tzone):
         """ return the time """
@@ -154,16 +150,16 @@ class Chat():
 
         token_savings = max(0, pre_t - post_t)
         documents.update(
-            {'llm_prompt'      : self.session.common.llm_prompt,
-             'user_query'      : user_input,
-             'dynamic_files'   : '',
-             'dynamic_images'  : [],
-             'chat_sessions'   : self.chat_sessions,
-             'name'            : self.name,
-             'date_time'       : self.get_time(self.time_zone),
-             'num_ctx'         : self.num_ctx,
-             'pre_process_time': pre_process_time,
-             'light_mode'      : self.set_lightmode_aware(self.light_mode)}
+            {'llm_prompt'       : self.session.common.load_prompt(),
+             'user_query'       : user_input,
+             'dynamic_files'    : '',
+             'dynamic_images'   : [],
+             'history_sessions' : self.opts.history_sessions,
+             'name'             : self.opts.name,
+             'date_time'        : self.get_time(self.opts.time_zone),
+             'num_ctx'          : self.opts.num_ctx,
+             'pre_process_time' : pre_process_time,
+             'light_mode'       : self.set_lightmode_aware(self.opts.light_mode)}
         )
         # Stringify everything (except images)
         for k, v in documents.items():
@@ -181,95 +177,118 @@ class Chat():
         # Supply the LLM with its own performances
         documents['performance'] = (f'Total Tokens: {prompt_tokens}\n'
                                     f'Duplicate Tokens removed: {max(0, pre_t - post_t)}\n'
-                                    f'My maximum Context Window size: {self.num_ctx}')
+                                    f'My maximum Context Window size: {self.opts.num_ctx}')
         return (documents, token_savings, prompt_tokens, cleaned_color, pre_process_time)
 
-    # pylint: disable=too-many-locals,too-many-branches  # Handling a lot of different formats
-    def load_content_as_context(self, user_input:str)->dict:
-        """ parse user_input for all occurrences of {{ /path/to/file }} """
+    def load_content_as_context(self, user_input: str) -> dict:
+        """Parse user_input for all occurrences of {{ /path/to/file }}"""
         documents = {'dynamic_images': [], 'dynamic_files': '', 'user_query': user_input}
-        included_files = self.session.common.curly_match.findall(user_input)
+        included_files = self.session.common.regex.curly_match.findall(user_input)
+
+        def read_file(file_path: str) -> str:
+            """Helper to read file contents or fetch from URL."""
+            if os.path.exists(file_path):  # Local file
+                return self._process_local_file(file_path)
+            elif file_path.startswith('http'):  # URL
+                return self._process_url(file_path)
+            else:
+                return None
+
         for included_file in included_files:
-            if os.path.exists(included_file):
-                mime_format = mimetypes.guess_type(included_file)[0]
-                data = ''
-                if mime_format:
-                    mime, _format = mime_format.split('/')
-                    if 'image' == mime:
-                        icon = "🖼️"
-                        with Image.open(included_file) as img:
-                            img = img.convert("RGB")
-                            buffered = io.BytesIO()
-                            img.save(buffered, format=_format)
-                            data = base64.b64encode(buffered.getvalue()).decode("utf-8")
-                    elif 'pdf' == _format:
-                        icon = "📕"
-                        loader = PyPDFLoader(included_file)
-                        pages = []
-                        for page in loader.lazy_load():
-                            pages.append(page)
-                            page_texts = list(map(lambda doc: doc.page_content, pages))
-                        for page_text in page_texts:
-                            data += page_text
-                    elif 'html' == _format:
-                        icon = "🌍"
-                    elif 'text' == mime:
-                        icon = "📄"
-                    else:
-                        icon = "📁"
-                    if not data:
-                        with open(included_file, 'r', encoding='utf-8') as f:
-                            data = f.read()
-                    _file = os.path.basename(included_file)
-                    if 'image' == mime:
-                        documents['dynamic_images'].append(data)
-                    else:
-                        documents['dynamic_files'] = f'{documents.get("dynamic_files",
-                                                                      "")}{data}\n\n'
-                    documents['user_query'] = documents['user_query'].replace(included_file,
-                                                                    f'{_file} {icon} ✅')
-            elif included_file.startswith('http'):
-                headers = {'User-Agent': ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
-                                          'AppleWebKit/537.36 (KHTML, like Gecko) '
-                                          'Chrome/120.0.0.0 Safari/537.36')}
-                try:
-                    response = requests.get(included_file, headers=headers, timeout=10)
-                    if response.status_code == 200:
-                        soup = BeautifulSoup(response.content, 'html.parser')
-                        documents['dynamic_files'] = (f'{documents.get("dynamic_files", "")}'
-                                                      f'{soup.get_text()}\n')
-                        documents['user_query'] = documents['user_query'].replace(included_file,
-                                                                        f'{included_file} 🌍 ✅')
-                    else:
-                        documents['user_query'] = documents['user_query'].replace(included_file,
-                                                  f'{included_file} {response.status_code} ❌')
-                # pylint: disable=bare-except
-                except:
-                    pass
-                # pylint: enable=bare-except
+            file_data = read_file(included_file)
+            if file_data:
+                data, icon = file_data
+                _file = os.path.basename(included_file)
+                documents['user_query'] = documents['user_query'].replace(included_file,
+                                                                          f'{_file} {icon} ✅')
+                if icon == "🖼️":  # Image
+                    documents['dynamic_images'].append(data)
+                else:
+                    documents['dynamic_files'] += f'{data}\n\n'
+
             else:
                 documents['user_query'] = documents['user_query'].replace(included_file,
-                                                                     f'{included_file} ❌')
+                                                                           f'{included_file} ❌')
+
         return documents
+
+    def _process_local_file(self, included_file: str) -> tuple:
+        """Process local files based on their mime type."""
+        mime_format = mimetypes.guess_type(included_file)[0]
+        data = ''
+        icon = '📁'  # Default icon
+
+        if mime_format:
+            mime, _format = mime_format.split('/')
+            if mime == 'image':
+                icon, data = self._process_image(included_file, _format)
+            elif _format == 'pdf':
+                icon, data = self._process_pdf(included_file)
+            elif _format == 'html':
+                icon = "🌍"
+            elif mime == 'text':
+                icon = "📄"
+            else:
+                with open(included_file, 'r', encoding='utf-8') as f:
+                    data = f.read()
+        return data, icon
+
+    def _process_image(self, included_file: str, _format: str) -> tuple:
+        """Process image files."""
+        icon = "🖼️"
+        with Image.open(included_file) as img:
+            img = img.convert("RGB")
+            buffered = io.BytesIO()
+            img.save(buffered, format=_format)
+            data = base64.b64encode(buffered.getvalue()).decode("utf-8")
+        return icon, data
+
+    def _process_pdf(self, included_file: str) -> tuple:
+        """Process PDF files."""
+        icon = "📕"
+        data = ""
+        loader = PyPDFLoader(included_file)
+        pages = []
+        for page in loader.lazy_load():
+            pages.append(page)
+        page_texts = list(map(lambda doc: doc.page_content, pages))
+        for page_text in page_texts:
+            data += page_text
+        return icon, data
+
+    def _process_url(self, url: str) -> tuple:
+        """Process URL links."""
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+                   'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
+        try:
+            response = requests.get(url, headers=headers, timeout=10)
+            if response.status_code == 200:
+                soup = BeautifulSoup(response.content, 'html.parser')
+                return soup.get_text(), "🌍"
+            return f"Error {response.status_code}", "❌"
+        # pylint: disable=bare-except  # too many ways this can go wrong
+        except:
+            return None, None
+        # pylint: enable=bare-except  # too many ways this can go wrong
 
     def no_context(self, user_input)->tuple:
         """ perform search without any context involved """
         # pylint: disable=consider-using-f-string  # no, this is how it is done
-        documents = {'user_query'      : user_input,
-                     'name'            : self.name,
-                     'chat_history'    : '',
-                     'dynamic_files'   : '',
-                     'dynamic_images'  : [],
-                     'chat_sessions'   : self.chat_sessions,
-                     'ai_documents'    : '',
-                     'user_documents'  : '',
-                     'context'         : '',
-                     'date_time'       : self.get_time(self.time_zone),
-                     'num_ctx'         : self.num_ctx,
-                     'pre_process_time': '{:.1f}s'.format(0),
-                     'performance'     : '',
-                     'light_mode'      : self.set_lightmode_aware(self.light_mode),
-                     'llm_prompt'      : ''}
+        documents = {'user_query'       : user_input,
+                     'name'             : self.opts.name,
+                     'chat_history'     : '',
+                     'dynamic_files'    : '',
+                     'dynamic_images'   : [],
+                     'history_sessions' : self.opts.history_sessions,
+                     'ai_documents'     : '',
+                     'user_documents'   : '',
+                     'context'          : '',
+                     'date_time'        : self.get_time(self.opts.time_zone),
+                     'num_ctx'          : self.opts.num_ctx,
+                     'pre_process_time' : '{:.1f}s'.format(0),
+                     'performance'      : '',
+                     'light_mode'       : self.set_lightmode_aware(self.opts.light_mode),
+                     'llm_prompt'       : ''}
         preprocessing = 0
         token_savings = 0
         cleaned_color = 0
@@ -290,7 +309,7 @@ class Chat():
         def _(event):
             buffer = event.current_buffer
             buffer.insert_text('\n')
-        self.console.print('💬 Press [italic red]Esc+Enter[/italic red] to send (multi-line), '
+        console.print('💬 Press [italic red]Esc+Enter[/italic red] to send (multi-line), '
                       r'[red]\? Esc+Enter[/red] for help, '
                       '[italic red]Ctrl+C[/italic red] to quit.\n')
         try:
@@ -299,14 +318,14 @@ class Chat():
                 if not user_input:
                     continue
                 if user_input == r'\?':
-                    self.console.print('in-command switches you can use:\n\n\t\\no-context '
+                    console.print('in-command switches you can use:\n\n\t\\no-context '
                                   '[italic]msg[/italic] (perform a query with no context)\n'
                                   '\t{{/absolute/path/to/file}}   - Include a file as context\n'
                                   '\t{{https://somewebsite.com/}} - Include URL as context')
                     continue
 
                 if user_input.find(r'\no-context') >=0:
-                    user_input = user_input.replace('\no-context ', '')
+                    user_input = user_input.replace(r'\no-context ', '')
                     (documents,
                      token_savings,
                      prompt_tokens,
@@ -340,7 +359,7 @@ def verify_args(p_args):
     return p_args
 
 # pylint: disable=too-many-locals  # would force the user to use unfriendly names
-def parse_args(argv):
+def parse_args(argv, opts):
     """ parse arguments """
     about = """
 A tool capable of dynamically creating/instancing RAG
@@ -358,70 +377,46 @@ example:
 Chat can read a .chat.yaml file to import your arguments.
 See .chat.yaml.example for details.
     """
-    # Allow loading a users options pre-set in a .chat.yaml file
-    rc_file = os.path.join(current_dir, '.chat.yaml')
-    options = {}
-    if os.path.exists(rc_file):
-        with open(rc_file, 'r', encoding='utf-8') as f:
-            options = yaml.safe_load(f) or {}
-    arg_dict = options.get('chat', {})
-    model = arg_dict.get('model', 'gemma3:27b')
-    preconditioner = arg_dict.get('pre_llm', 'gemma3:1b')
-    embeddings = arg_dict.get('embedding_llm', 'nomic-embed-text')
-    vector_dir = arg_dict.get('history_dir', None)
-    matches = int(arg_dict.get('history_matches', 5)) # 5 from each RAG (User & AI)
-    host = arg_dict.get('llm_server', 'http://localhost:11434/v1')
-    pre_host = arg_dict.get('pre_server', host)
-    emb_host = arg_dict.get('embedding_server', host)
-    api_key = arg_dict.get('api_key', 'none')
-    num_ctx = arg_dict.get('context_window', 4192)
-    chat_history = arg_dict.get('history_max', 1000)
-    history_sessions = arg_dict.get('history_sessions', 5)
-    name = arg_dict.get('name', 'assistant')
-    time_zone = arg_dict.get('time_zone', 'GMT')
-    debug = arg_dict.get('debug', False)
-    light = arg_dict.get('light_mode', False)
-    assistant_mode = arg_dict.get('assistant_mode', False)
-    syntax_theme = arg_dict.get('syntax_theme', 'fruity')
-    if vector_dir is None:
-        vector_dir = os.path.join(current_dir, 'vector_data')
     parser = argparse.ArgumentParser(description=f'{about}',
                                      epilog=f'{epilog}',
                                      formatter_class=argparse.RawTextHelpFormatter)
-    parser.add_argument('--model', default=model, metavar='',
+    parser.add_argument('--model', default=opts.model, metavar='',
                         help='LLM Model (default: %(default)s)')
-    parser.add_argument('--pre-llm', metavar='', dest='preconditioner', default=preconditioner,
+    parser.add_argument('--pre-llm', metavar='', dest='preconditioner',
+                        default=opts.preconditioner,
                         type=str, help='pre-processor LLM (default: %(default)s)')
-    parser.add_argument('--embedding-llm', metavar='', dest='embeddings', default=embeddings,
+    parser.add_argument('--embedding-llm', metavar='', dest='embeddings',
+                        default=opts.embeddings,
                         type=str, help='LM embedding model (default: %(default)s)')
-    parser.add_argument('--history-dir', metavar='', dest='vector_dir', default=vector_dir,
+    parser.add_argument('--history-dir', metavar='', dest='vector_dir', default=opts.vector_dir,
                         type=str, help='History directory (default: %(default)s)')
-    parser.add_argument('--llm-server', metavar='', dest='host', default=host, type=str,
+    parser.add_argument('--llm-server', metavar='', dest='host', default=opts.host, type=str,
                         help='OpenAI API server address (default: %(default)s)')
-    parser.add_argument('--pre-server', metavar='', dest='pre_host', default=pre_host, type=str,
-                        help='OpenAI API server address (default: %(default)s)')
-    parser.add_argument('--embedding-server', metavar='', dest='emb_host', default=emb_host,
+    parser.add_argument('--pre-server', metavar='', dest='pre_host', default=opts.pre_host,
                         type=str, help='OpenAI API server address (default: %(default)s)')
-    parser.add_argument('--api-key', metavar='', default=api_key, type=str,
-                        help='You API Key (default: %(default)s)')
-    parser.add_argument('--name', metavar='', dest='name', default=name, type=str,
+    parser.add_argument('--embedding-server', metavar='', dest='emb_host', default=opts.emb_host,
+                        type=str, help='OpenAI API server address (default: %(default)s)')
+    parser.add_argument('--api-key', metavar='', default=opts.api_key, type=str,
+                        help='You API Key (default: REDACTED)')
+    parser.add_argument('--name', metavar='', default=opts.name, type=str,
                         help='Your assistants name (default: %(default)s)')
-    parser.add_argument('--time-zone', metavar='', dest='time_zone', default=time_zone, type=str,
-                        help='your assistants name (default: %(default)s)')
-    parser.add_argument('--history-matches', metavar='', dest='matches', default=matches, type=int,
+    parser.add_argument('--time-zone', metavar='', default=opts.time_zone,
+                        type=str, help='your assistants name (default: %(default)s)')
+    parser.add_argument('--history-matches', metavar='', dest='matches', default=opts.matches,
+                        type=int,
                         help='Number of results to pull from each RAG (default: %(default)s)')
-    parser.add_argument('--history-sessions', metavar='', dest='chat_sessions',
-                        default=history_sessions, type=int,
+    parser.add_argument('--history-sessions', metavar='', default=opts.history_sessions, type=int,
                         help='Chat history responses availble in context (default: %(default)s)')
-    parser.add_argument('--history-max', metavar='', dest='chat_max', default=chat_history,
+    parser.add_argument('--history-max', metavar='', dest='chat_max', default=opts.chat_history,
                         type=int,
                         help='Chat history responses to save to disk (default: %(default)s)')
-    parser.add_argument('--context-window', metavar='', dest='num_ctx', default=num_ctx, type=int,
+    parser.add_argument('--context-window', metavar='', dest='num_ctx', default=opts.num_ctx,
+                        type=int,
                         help='The maximum context window size (default: %(default)s)')
-    parser.add_argument('--syntax-style', metavar='', dest='syntax_theme', default=syntax_theme,
-                        type=str,
+    parser.add_argument('--syntax-style', metavar='', dest='syntax_theme',
+                        default=opts.syntax_theme, type=str,
                         help=('Your desired syntax-highlight theme (default: %(default)s).'
-                              'See https://pygments.org/styles/ for available themes'))
+                              ' See https://pygments.org/styles/ for available themes'))
     parser.add_argument('--import-pdf', metavar='', type=str,
                         help='Path to pdf to pre-populate main RAG')
     parser.add_argument('--import-txt', metavar='', type=str,
@@ -429,15 +424,19 @@ See .chat.yaml.example for details.
     parser.add_argument('--import-web', metavar='', type=str,
                         help='URL to pre-populate main RAG')
     parser.add_argument('--import-dir', metavar='', type=str,
-                        help='Path to recursively find and import assorted files (*.md *.html)')
-    parser.add_argument('--light-mode', action='store_true', default=light,
+                        help=('Path to recursively find and import assorted files (*.md *.html, '
+                        '*.txt, *.pdf)'))
+    parser.add_argument('--light-mode', action='store_true', default=opts.light_mode,
                         help='Use a color scheme suitible for light background terminals')
-    parser.add_argument('--assistant-mode', action='store_true', default=assistant_mode,
+    parser.add_argument('--assistant-mode', action='store_true', default=opts.assistant_mode,
                         help='Do not utilize story-telling mode prompts or the RAGs. Do not save'
-                        'chat history to disk')
-    parser.add_argument('-d', '--debug', action='store_true', default=debug,
+                        ' chat history to disk')
+    parser.add_argument('--use-rags', action='store_true', default=opts.no_rags,
+                        help='Use RAGs regardless of assistant-mode (no effect when not also using'
+                        ' assistent-mode)')
+    parser.add_argument('-d', '--debug', action='store_true', default=opts.debug,
                         help='Print preconditioning message, prompt, etc')
-    parser.add_argument('-v','--verbose', action='store_true', default=debug,
+    parser.add_argument('-v','--verbose', action='store_true', default=opts.verbose,
                         help='Do not hide what the model is thinking (if the model supports'
                         ' thinking)')
 
@@ -450,7 +449,6 @@ def store_data(d_session: SessionContext,
     _normal = d_session.common.normalize_for_dedup(data)
     d_session.rag.store_data(_normal, tags_metadata=meta_tags)
 
-# pylint: disable=redefined-outer-name #  we exit immediately
 def extract_text_from_pdf(d_session: SessionContext,
                           v_args: argparse.ArgumentParser,
                           do_exit=True)->None:
@@ -518,36 +516,36 @@ def extract_text_from_web(d_session: SessionContext,
         print(f'Error obtaining webpage: {response.status_code}\n{response.raw}')
         sys.exit(1)
 
-# pylint: enable=redefined-outer-name
 if __name__ == '__main__':
-    args = parse_args(sys.argv[1:])
+    args = parse_args(sys.argv[1:], ChatOptions.from_yaml(current_dir))
+    _opts = ChatOptions.set_from_args(current_dir, args)
     light_mode_theme = Theme({
             "markdown.code": "black on #e6e6e6",
     })
-    if args.light_mode:
+    if _opts.light_mode:
         console = Console(theme=light_mode_theme)
-    session = SessionContext.from_args(console, args)
+    session = SessionContext.from_args(console, _opts)
     try:
         if args.import_txt:
             if os.path.exists(args.import_txt):
-                store_text(session, args)
+                store_text(session, _opts)
             else:
                 print(f'Error: The file at {args.import_txt} does not exist.')
                 sys.exit(1)
         if args.import_pdf:
             if os.path.exists(args.import_pdf):
-                extract_text_from_pdf(session, args)
+                extract_text_from_pdf(session, _opts)
             else:
                 print(f"Error: The file at {args.import_pdf} does not exist.")
                 sys.exit(1)
         if args.import_web:
-            extract_text_from_web(session, args)
+            extract_text_from_web(session, _opts)
             sys.exit(0)
         if args.import_dir:
             if os.path.exists(args.import_dir):
-                extract_text_from_markdown(session, args)
+                extract_text_from_markdown(session, _opts)
                 sys.exit(0)
-        chat = Chat(session, **vars(args))
+        chat = Chat(session, _opts)
         chat.chat()
     except KeyboardInterrupt:
         sys.exit()

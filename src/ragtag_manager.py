@@ -13,6 +13,7 @@ from langchain.schema import Document
 from langchain_openai import OpenAIEmbeddings
 from langchain_ollama import OllamaEmbeddings
 from langchain_chroma import Chroma
+from .chat_utils import CommonUtils, ChatOptions  # for Type Hinting
 # Silence initial RAG database being empty
 logging.getLogger("chromadb").setLevel(logging.ERROR)
 
@@ -30,13 +31,12 @@ class RAGTagManager():
     capture incomming tags the LLM is producing and convert them into usable
     key:value pairs.
     """
-    def __init__(self, console, common, **kwargs):
+    def __init__(self, console, common: CommonUtils, args: ChatOptions):
         self.console = console
-        self.common = common
-        self.kwargs = kwargs
-        self.debug = kwargs['debug']
-        self.light_mode = kwargs['light_mode']
-        self.color = 245 if self.light_mode else 233
+        self.common  = common
+        self.debug = args.debug
+        self.light_mode = args.light_mode
+        self.opts = args
 
     def update_rag(self, response: str, collection: str='ai_documents')->None:
         """ regular expression through message and attempt to create key:value tuples """
@@ -45,37 +45,34 @@ class RAGTagManager():
         self.common.scene_tracker_from_tags(list_rag_tags)
         if self.debug:
             self.console.print(f'META TAGS PARSED: {list_rag_tags}',
-                               style=f'color({self.color})',
+                               style=f'color({self.opts.color})',
                                highlight=False)
         else:
-            with open(os.path.join(self.common.history_dir, 'debug.log'),
+            with open(os.path.join(self.opts.vector_dir, 'debug.log'),
                       'w', encoding='utf-8') as f:
                 f.write(f'META TAGS PARSED: {list_rag_tags}')
-        rag = RAG(self.console, self.common, **self.kwargs)
+        rag = RAG(self.console, self.common, self.opts)
         # New way: Of course its practically built in. Note to self: Never pretend
         # to think you are planting a flag somewhere when it comes to coding.
         rag.store_data(response, tags_metadata=list_rag_tags, collection=collection)
 
 class RAG():
     """ Responsible for RAG operations """
-    def __init__(self, console, common, **kwargs):
+    def __init__(self, console, common: CommonUtils, args: ChatOptions):
         self.console = console
         self.common = common
-        self.vector_dir = kwargs['vector_dir']
-        self.debug = kwargs['debug']
-        self.light_mode = kwargs['light_mode']
-        self.color = 250 if self.light_mode else 233
+        self.opts = args
 
         # hack for now, until Ollama supports v1/embeddings?
-        if kwargs['emb_host'].find(':11434') != -1:
+        if self.opts.emb_host.find(':11434') != -1:
             # https://someaddress.com/v1 --> someaddress:11434
-            ugh = re.findall(r'([\w+\.-]+:[0-9]+)', kwargs['emb_host'])[0]
+            ugh = re.findall(r'([\w+\.-]+:[0-9]+)', self.opts.emb_host)[0]
             self.embeddings = OllamaEmbeddings(base_url=ugh,
-                                               model=kwargs['embeddings'])
+                                               model=self.opts.embeddings)
         else:
-            self.embeddings = OpenAIEmbeddings(base_url=kwargs['emb_host'],
-                                               model=kwargs['embeddings'],
-                                               api_key=kwargs['api_key'])
+            self.embeddings = OpenAIEmbeddings(base_url=self.opts.emb_host,
+                                               model=self.opts.embeddings,
+                                               api_key=self.opts.api_key)
 
         self.parent_splitter = RecursiveCharacterTextSplitter(chunk_size=2000,
                                                               chunk_overlap=1000,
@@ -110,7 +107,7 @@ class RAG():
     def parent_retriever(self, collection: str)->ParentDocumentRetriever:
         """ Return ParentDocumentRetriever for provided collection """
         collection = self._normalize_collection_name(collection)
-        fs = LocalFileStore(os.path.join(self.vector_dir, collection))
+        fs = LocalFileStore(os.path.join(self.opts.vector_dir, collection))
         store = create_kv_docstore(fs)
         return ParentDocumentRetriever(
                     vectorstore=self.vector_store(collection),
@@ -121,7 +118,7 @@ class RAG():
     def vector_store(self, collection: str)->Chroma:
         """ Return our Chroma Collections Database """
         collection = self._normalize_collection_name(collection)
-        chroma = Chroma(persist_directory=self.vector_dir,
+        chroma = Chroma(persist_directory=self.opts.vector_dir,
                         embedding_function=self.embeddings,
                         collection_name=collection)
         return chroma
@@ -137,18 +134,26 @@ class RAG():
         vector_store = self.vector_store(collection)
 
         results = []
-        results: list[Document] = vector_store.similarity_search(query,
-                                                                 matches,
-                                                                 filter=meta_data)
+        try:
+            results: list[Document] = vector_store.similarity_search(query,
+                                                                    matches,
+                                                                    filter=meta_data)
+        # pylint: disable=bare-except  # rare to fail, and trying to capture it
+        except:
+            self.console.print(f'ERROR RETRIEVING: from {collection},'
+                               f'meta: {meta_data}',
+                               style=f'color({self.opts.color})')
+        # pylint: enable=bare-except
+
         if results:
             results.extend(parent_retriever.invoke(query))
-        if self.debug:
+        if self.opts.debug:
             self.console.print(f'RETRIEVED DOCS: from {collection} '
                                f'meta: {meta_data}\n',
                                f'\n{results}\n\n',
-                               style=f'color({self.color})')
+                               style=f'color({self.opts.color})')
         else:
-            with open(os.path.join(self.common.history_dir, 'debug.log'),
+            with open(os.path.join(self.opts.vector_dir, 'debug.log'),
                       'w', encoding='utf-8') as f:
                 f.write(f'RETRIEVED FROM {collection}: {meta_data}, {results}')
         return results
@@ -163,12 +168,12 @@ class RAG():
             tags_metadata = {}
         meta_dict = dict(tags_metadata)
         meta_dict = self.common.normalize_metadata_for_rag(meta_dict)
-        if self.debug:
+        if self.opts.debug:
             self.console.print(f'STORE DATA:\n{data}\n\nTAGS:\n{meta_dict}',
-                               style=f'color({self.color})',
+                               style=f'color({self.opts.color})',
                                highlight=False)
         else:
-            with open(os.path.join(self.common.history_dir, 'debug.log'),
+            with open(os.path.join(self.opts.vector_dir, 'debug.log'),
                       'w', encoding='utf-8') as f:
                 f.write(f'STORE DATA: TAGS:{meta_dict}, {data}')
         doc = Document(data, metadata=meta_dict)
