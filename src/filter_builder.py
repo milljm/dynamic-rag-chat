@@ -1,3 +1,4 @@
+""" Build filter-schema for use with Chroma """
 from typing import List, Dict, Union, NamedTuple
 
 class RAGTag(NamedTuple):
@@ -12,7 +13,6 @@ class FilterBuilder:
     """
     A class to construct robust Chroma filters based on tag conditions.
     """
-
     def build_flexible_filter(self,
                               tags: List[RAGTag[str,str]],
                               field: str) -> Union[Dict, None]:
@@ -29,31 +29,25 @@ class FilterBuilder:
         """
         must_conditions = []
         soft_conditions = []
-
         for tag in tags:
             # Skip null, unspecified, and empty content
             if tag.content.lower() in {'null', 'none', '', 'unspecified', 'unknown'}:
                 continue
-
             # Handle the content, splitting it if there are multiple values
             condition_values = tag.content.split(',') if ',' in tag.content else [tag.content]
             condition = {tag.tag: {"$in": condition_values}}
-
             if tag.tag == field:
                 must_conditions.append(condition)
             else:
                 soft_conditions.append(condition)
-
         # If no conditions were added, return None
         if not must_conditions and not soft_conditions:
             return None
-
         # Build final filter object
         if not must_conditions:
             return {"$or": soft_conditions}
         if not soft_conditions:
             return {"$and": must_conditions}
-
         return {
             "$and": must_conditions + soft_conditions
         }

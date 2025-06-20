@@ -1,12 +1,14 @@
 """ An inherited class for handling prompts """
 import os
 import sys
+from .chat_utils import ChatOptions # For Type Hinting
+
 class PromptManager():
     """ Handle all the possible prompt files we may introduce with RAG/Tagging """
-    def __init__(self, console, current_dir, prompt_model: str = 'default', **kwargs):
+    def __init__(self, console, current_dir, args: ChatOptions, prompt_model: str = 'default'):
         self.console = console
-        self.assistant_prompt = kwargs['assistant_mode']
-        self.debug = kwargs['debug']
+        self.assistant_prompt = args.assistant_mode
+        self.debug = args.debug
         self.model = self._match_model(prompt_model)
         self.current_dir = current_dir
 

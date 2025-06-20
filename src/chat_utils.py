@@ -4,7 +4,9 @@ import re
 import sys
 import pickle
 import json
+from dataclasses import dataclass
 from typing import NamedTuple
+import yaml
 
 class RAGTag(NamedTuple):
     """
@@ -14,47 +16,170 @@ class RAGTag(NamedTuple):
     tag: str
     content: str
 
+# pylint: disable=too-many-instance-attributes
+@dataclass
+class ChatOptions:
+    """
+    Chat arguments dataclass, with a method to initialize using **kwargs.
+    """
+    debug: bool
+    host: str
+    model: str
+    num_ctx: int
+    time_zone: str
+    light_mode: bool
+    name: str
+    verbose: bool
+    assistant_mode: bool
+    no_rags: bool
+    model: str
+    preconditioner: str
+    embeddings: str
+    vector_dir: str
+    matches: int
+    pre_host: str
+    emb_host: str
+    api_key: str
+    num_ctx: int
+    chat_history: int
+    history_sessions: int
+    syntax_theme: str
+    color: int
+    import_dir: str
+    import_pdf: str
+    import_txt: str
+    import_web: str
+
+    @classmethod
+    def from_yaml(cls, current_dir) -> 'ChatOptions':
+        """ read options from yaml file, or set defaults """
+        chat_yaml = os.path.join(current_dir, '.chat.yaml')
+        _dict = {}
+        if os.path.exists(chat_yaml):
+            with open(chat_yaml, 'r', encoding='utf-8') as f:
+                _dict = yaml.safe_load(f) or {}
+        arg_dict = _dict['chat']  # short hand
+        # Create the ChatOptions instance with all required arguments
+        return cls(host = arg_dict.get('llm_server', 'http://localhost:11434/v1'),
+            light_mode=arg_dict.get('light_mode', False),
+            name=arg_dict.get('name', 'assistant'),
+            verbose=arg_dict.get('verbose', False),
+            assistant_mode=arg_dict.get('assistant_mode', False),
+            no_rags=arg_dict.get('use_rags', False),
+            model = arg_dict.get('model', 'gemma3:27b'),
+            preconditioner = arg_dict.get('pre_llm', 'gemma3:1b'),
+            embeddings = arg_dict.get('embedding_llm', 'nomic-embed-text'),
+            vector_dir = arg_dict.get('history_dir', os.path.join(current_dir, 'vector_data')),
+            matches = int(arg_dict.get('history_matches', 5)), # 5 from each RAG (User & AI)
+            pre_host = arg_dict.get('pre_server', 'http://localhost:11434/v1'),
+            emb_host = arg_dict.get('embedding_server', 'http://localhost:11434/v1'),
+            api_key = arg_dict.get('api_key', 'none'),
+            num_ctx = int(arg_dict.get('context_window', 4192)),
+            chat_history = int(arg_dict.get('history_max', 1000)),
+            history_sessions = int(arg_dict.get('history_sessions', 5)),
+            time_zone = arg_dict.get('time_zone', 'GMT'),
+            debug = arg_dict.get('debug', False),
+            syntax_theme = arg_dict.get('syntax_theme', 'fruity'),
+            color = 245 if arg_dict.get('light_mode', False) else 233,
+            import_dir = arg_dict.get('import_dir', False),
+            import_pdf = arg_dict.get('import_pdf', False),
+            import_txt = arg_dict.get('import_txt', False),
+            import_web = arg_dict.get('import_web', False),
+        )
+    @classmethod
+    def set_from_args(cls, current_dir, vargs) -> 'ChatOptions':
+        """ populate args from ArgumentParser """
+        arg_dict = vars(vargs)
+        return cls(host = arg_dict.get('host', 'http://localhost:11434/v1'),
+            light_mode=arg_dict.get('light_mode', False),
+            name=arg_dict.get('name', 'assistant'),
+            verbose=arg_dict.get('verbose', False),
+            assistant_mode=arg_dict.get('assistant_mode', False),
+            no_rags=arg_dict.get('use_rags', False),
+            model = arg_dict.get('model', 'gemma3:27b'),
+            preconditioner = arg_dict.get('preconditioner', 'gemma3:1b'),
+            embeddings = arg_dict.get('embeddings', 'nomic-embed-text'),
+            vector_dir = arg_dict.get('history_dir', os.path.join(current_dir, 'vector_data')),
+            matches = int(arg_dict.get('matches', 5)), # 5 from each RAG (User & AI)
+            pre_host = arg_dict.get('pre_host', 'http://localhost:11434/v1'),
+            emb_host = arg_dict.get('emb_host', 'http://localhost:11434/v1'),
+            api_key = arg_dict.get('api_key', 'none'),
+            num_ctx = int(arg_dict.get('context_window', 4192)),
+            chat_history = int(arg_dict.get('chat_max', 1000)),
+            history_sessions = int(arg_dict.get('history_sessions', 5)),
+            time_zone = arg_dict.get('time_zone', 'GMT'),
+            debug = arg_dict.get('debug', False),
+            syntax_theme = arg_dict.get('syntax_theme', 'fruity'),
+            color = 245 if arg_dict.get('light_mode', False) else 233,
+            import_dir = arg_dict.get('import_dir', False),
+            import_pdf = arg_dict.get('import_pdf', False),
+            import_txt = arg_dict.get('import_txt', False),
+            import_web = arg_dict.get('import_web', False),
+        )
+# pylint: enable=too-many-instance-attributes
+
+@dataclass
+class RegExp:
+    """ regular expression in use throughout the project """
+    find_prompt  = re.compile(r'(?<=[<m]eta_prompt: ).*?(?=[>)])', re.DOTALL)
+    meta_data = re.compile(r'[<]?meta_tags:(.*?);?\s*>', re.DOTALL)
+    meta_block = re.compile(r'[<]?meta_tags:.*?\s*>', re.DOTALL)
+    meta_start_re = re.compile(r'[\(<\[]\s*meta[_\-:]?', re.IGNORECASE)
+    meta_iter = re.compile(r'(\w+):\s*(.+?)(?=[;\n>]|$)')
+    json_style = re.compile(r'```json(.*)```', re.DOTALL)
+    curly_match = re.compile(r'\{\{\s*(.*?)\s*\}\}', re.DOTALL)
+    json_template = re.compile(r'\{+\s*((?:".+?":.+?)+)\s*\}+', re.DOTALL)
+    model_re = re.compile(r'(\w+)\W+')
+
 class CommonUtils():
     """ method holder for command methods used throughout the project """
-    def __init__(self, console, **kwargs):
-        self.history_dir = kwargs['vector_dir']
-        if not os.path.exists(self.history_dir):
+    def __init__(self, console, args):
+        self.console = console
+        self.opts = args
+        self.regex = RegExp()
+        if not os.path.exists(args.vector_dir):
             try:
-                os.makedirs(self.history_dir)
+                os.makedirs(args.vector_dir)
             except OSError:
-                print(f'Unable to create directory: {self.history_dir}')
+                print(f'Unable to create directory: {args.vector_dir}')
                 sys.exit(1)
 
-        self.chat_max = kwargs['chat_max']
-        self.light_mode = kwargs['light_mode']
-        self.debug = kwargs['debug']
-        self.assistant_mode = kwargs['assistant_mode']
-        self.no_rag = kwargs['use_rags']
-        self.color = 245 if self.light_mode else 233
+        # Load from file. If file does not exist then self.scene_meta == self._scene_meta above
+        self.scene_meta = self.load_scene()
+
+        # Session's Chat History list
+        self.chat_history_session = self.load_chat()
 
         # Heat Map
-        self.console = console
         self.heat_map = 0
         self.prompt_map = self.create_heatmap(8000)
         self.cleaned_map = self.create_heatmap(1000)
 
-        # Class variables
-        self.chat_history_session = self.load_chat(self.history_dir)
-        self.llm_prompt = self.load_prompt(self.history_dir)
+    @staticmethod
+    def get_aliases():
+        """
+        Return a dictionary of aliases to be used as aliases when performing field-filtering
+        matches in RAG collection.\n
+        Exp: `{ 'entities' : 'entity' }`\n,
+        will treat metadata tags such as:\n
+          \tRAGTag('entities','[john, jane]')\n
+        to be considered as:\n
+          \tRAGTag('entity', '[john, jane]')
+        """
+        return {
+            "locations": "location",
+            "audiences": "audience",
+            "items": "items",
+            "narrative_arcs": "narrative_arcs",
+            "completed_narrative_arcs": "completed_narrative_arcs",
+            "entity_locations": "entity_location",
+            "keywords_entities": "entity",
+        }
 
-        # Regular expression in use throughout the project
-        self.find_prompt  = re.compile(r'(?<=[<m]eta_prompt: ).*?(?=[>)])', re.DOTALL)
-        self.meta_data = re.compile(r'[<]?meta_tags:(.*?);?\s*>', re.DOTALL)
-        self.meta_block = re.compile(r'[<]?meta_tags:.*?\s*>', re.DOTALL)
-        self.meta_start_re = re.compile(r'[\(<\[]\s*meta[_\-:]?', re.IGNORECASE)
-        self.meta_iter = re.compile(r'(\w+):\s*(.+?)(?=[;\n>]|$)')
-        self.json_style = re.compile(r'```json(.*)```', re.DOTALL)
-        self.curly_match = re.compile(r'\{\{\s*(.*?)\s*\}\}', re.DOTALL)
-        self.json_template = re.compile(r'\{+\s*((?:".+?":.+?)+)\s*\}+', re.DOTALL)
-        self.model_re = re.compile(r'(\w+)\W+')
-
-        # Ephemeral scene tracking
-        self._scene_meta = {
+    @staticmethod
+    def no_scene()->dict:
+        """ return an empty scene """
+        return {
             # Core Spatial-Temporal Anchors
             'location': 'unknown',                  # e.g., 'Beast cockpit'
             'time': 'unknown',                      # 'day', 'night', 'dusk', 'morning'
@@ -87,22 +212,15 @@ class CommonUtils():
             'scene_locked': False,                  # Prevents new characters from entering scene
             'narrator_mode': False,                 # If True, LLM may use omniscient 3rd-person
         }
-        # Determine which keys support multiple values
-        self.multi_keys = {
-            k.strip().lower() for k, v in self._scene_meta.items()
-            if isinstance(v, (list, set))
-        }
-        self.alias_map = {
-            "locations": "location",
-            "audiences": "audience",
-            "items": "items",
-            "narrative_arcs": "narrative_arcs",
-            "completed_narrative_arcs": "completed_narrative_arcs",
-            "entity_locations": "entity_location",
-            "keywords_entities": "entity",
-        }
-        # Load from file. If file does not exist then self.scene_meta == self._scene_meta above
-        self.scene_meta = self.load_scene(self.history_dir)
+
+    def get_multikeys(self):
+        """
+        Return non-flat keys from self.no_scene()\n
+        e.g., Return what items may contain a list or set
+        """
+        return {k.strip().lower() for k, v in self.no_scene().items()
+                if isinstance(v, (list, set))
+                }
 
     @staticmethod
     def validate_entity_presence(scene: dict)->list[str]:
@@ -140,24 +258,20 @@ class CommonUtils():
         phantoms = [e for e in entities if e not in grounded]
         return phantoms
 
-    def no_scene(self)->dict:
-        """ return an empty scene """
-        return self._scene_meta
-
-    def clear_scene(self)->dict:
+    def _clear_scene(self)->dict:
         """ clear the scene """
-        self.scene_meta = self._scene_meta
+        self.scene_meta = self.no_scene()
 
     def scene_tracker_from_tags(self, tags: list[RAGTag])->str:
         """ Build a formatted scene state string based on incoming RAGTags and internal memory """
         tag_dict = {tag.tag: tag.content for tag in tags}
-        # Allow for an update to self._scene_meta
-        for key, value in self._scene_meta.items():
+        # Allow for an update to self.no_scene schema
+        for key, value in self.no_scene().items():
             if key not in self.scene_meta:
                 self.scene_meta[key] = value
         scene = self.scene_meta.copy()
         for key, value in scene.items():
-            if key not in self._scene_meta:
+            if key not in self.no_scene():
                 self.scene_meta.pop(key)
 
         scene = self.scene_meta.copy()
@@ -216,7 +330,7 @@ class CommonUtils():
     'Scene location is LOCKED. Character list is FINAL.\n'
     'Any attempt to use these characters as if present is a violation of story continuity.\n'
     '### 🔐 Scene Presence Rules (Active)')
-        self.save_scene(self.history_dir, self.scene_meta)
+        self.save_scene(self.scene_meta)
         return scene_str
 
     def sanatize_response(self, response: str, strip: bool = False)->str:
@@ -249,7 +363,7 @@ class CommonUtils():
     def remove_tags(self, response: str)->str:
         """ remove meta_tags from response """
         _response = str(response)
-        for match in self.meta_block.findall(_response):
+        for match in self.regex.meta_block.findall(_response):
             _response = _response.replace(f'{match}', '')
         return _response
 
@@ -260,9 +374,9 @@ class CommonUtils():
         if isinstance(flat_pairs, dict):
             flat_pairs = flat_pairs.items()
         for k, v in flat_pairs:
-            canonical_key = self.alias_map.get(k.strip().lower(), k.strip().lower())
+            canonical_key = self.get_aliases().get(k.strip().lower(), k.strip().lower())
             # Normalize to comma-separated string if multi_key
-            if canonical_key in self.multi_keys:
+            if canonical_key in self.get_multikeys():
                 if isinstance(v, list):
                     values = ', '.join(str(i).strip() for i in v if str(i).strip())
                 elif isinstance(v, str):
@@ -280,18 +394,18 @@ class CommonUtils():
         _tags = []
         try:
             # JSON-style block
-            json_match = self.json_template.search(response)
+            json_match = self.regex.json_template.search(response)
             if json_match:
                 json_str = '{' + json_match.group(1).strip() + '}'
                 data = json.loads(json_str)
                 _tags.extend(self.parse_tags(data))
 
             # meta_tag format
-            meta_matches = self.meta_data.findall(response)
+            meta_matches = self.regex.meta_data.findall(response)
             if meta_matches:
                 flat_pairs = []
                 for match in meta_matches:
-                    flat_pairs.extend(self.meta_iter.findall(match))
+                    flat_pairs.extend(self.regex.meta_iter.findall(match))
                 _tags.extend(self.parse_tags(flat_pairs))
 
             seen = set()
@@ -306,7 +420,7 @@ class CommonUtils():
 
         # pylint: disable=broad-exception-caught  # too many ways for this to go wrong
         except Exception as e:
-            if self.debug:
+            if self.opts.debug:
                 print(f'[get_tags error] {e}')
             return []
 
@@ -340,7 +454,7 @@ class CommonUtils():
         """
         heat = {0: 123} # declare a zero
         colors = [51, 46, 42, 82, 154, 178, 208, 166, 203, 196]
-        if self.light_mode:
+        if self.opts.light_mode:
             heat = {0: 21} # declare a zero
             colors = [19, 26, 30, 28, 65, 58, 94, 130, 124, 196]
         if reverse:
@@ -351,26 +465,25 @@ class CommonUtils():
             heat[x] = colors[i]
         return heat
 
-    @staticmethod
-    def save_scene(history_path, scene)->None:
+    def save_scene(self, scene)->None:
         """ persist scenes """
-        scene_file = os.path.join(history_path, 'ephemeral_scene.pkl')
+        scene_file = os.path.join(self.opts.vector_dir, 'ephemeral_scene.pkl')
         try:
             with open(scene_file, "wb") as f:
                 pickle.dump(scene, f)
         except FileNotFoundError as e:
             print(f'Error saving chat. Check --history-dir\n{e}')
 
-    def load_scene(self, history_path: str)->dict:
+    def load_scene(self)->dict:
         """ Persist chat history (load) """
-        scene_file = os.path.join(history_path, 'ephemeral_scene.pkl')
+        scene_file = os.path.join(self.opts.vector_dir, 'ephemeral_scene.pkl')
         try:
             with open(scene_file, "rb") as f:
                 loaded_scene = pickle.load(f)
         except FileNotFoundError:
             with open(scene_file, "wb") as f:
-                pickle.dump(self._scene_meta, f)
-            return self._scene_meta
+                pickle.dump(self.no_scene(), f)
+            return self.no_scene()
         except pickle.UnpicklingError as e:
             print(f'Scene file {scene_file} not a pickle file:\n{e}')
             sys.exit(1)
@@ -381,26 +494,26 @@ class CommonUtils():
 
     def save_chat(self)->None:
         """ Persist chat history (save) """
-        if self.assistant_mode and not self.no_rag:
+        if self.opts.assistant_mode and not self.opts.no_rags:
             return
-        history_file = os.path.join(self.history_dir, 'chat_history.pkl')
+        history_file = os.path.join(self.opts.vector_dir, 'chat_history.pkl')
         try:
             with open(history_file, "wb") as f:
                 pickle.dump(self.chat_history_session, f)
         except FileNotFoundError as e:
             print(f'Error saving chat. Check --history-dir\n{e}')
 
-    def load_chat(self, history_path: str)->list:
+    def load_chat(self)->list:
         """ Persist chat history (load) """
         loaded_list = []
-        if self.assistant_mode and not self.no_rag:
+        if self.opts.assistant_mode and not self.opts.no_rags:
             return []
-        history_file = os.path.join(history_path, 'chat_history.pkl')
+        history_file = os.path.join(self.opts.vector_dir, 'chat_history.pkl')
         try:
             with open(history_file, "rb") as f:
                 loaded_list = pickle.load(f)
                 # trunacate to max ammount
-                loaded_list = loaded_list[-self.chat_max:]
+                loaded_list = loaded_list[-self.opts.chat_history:]
         except FileNotFoundError:
             pass
         except pickle.UnpicklingError as e:
@@ -413,7 +526,7 @@ class CommonUtils():
 
     def save_prompt(self, prompt)->str:
         """ Save the LLMs prompt, overwriting the previous one """
-        prompt_file = os.path.join(self.history_dir, 'llm_prompt.pkl')
+        prompt_file = os.path.join(self.opts.vector_dir, 'llm_prompt.pkl')
         try:
             with open(prompt_file, "wb") as f:
                 pickle.dump(prompt, f)
@@ -421,10 +534,9 @@ class CommonUtils():
             print(f'Error saving LLM prompt. Check --history-dir\n{e}')
         return prompt
 
-    @staticmethod
-    def load_prompt(history_path)->str:
+    def load_prompt(self)->str:
         """ Persist LLM dynamic prompt (load) """
-        prompt_file = os.path.join(history_path, 'llm_prompt.pkl')
+        prompt_file = os.path.join(self.opts.vector_dir, 'llm_prompt.pkl')
         try:
             with open(prompt_file, "rb") as f:
                 prompt_str = pickle.load(f)
@@ -438,17 +550,17 @@ class CommonUtils():
             print(f'Warning: Error loading chat: {e}')
         return prompt_str
 
-    def check_prompt(self, last_message)->None:
+    def check_prompt(self, last_message)->str:
         """ allow the LLM to add to its own system prompt """
-        prompt = self.find_prompt.findall(last_message)[-1:]
+        prompt = self.regex.find_prompt.findall(last_message)[-1:]
         if prompt:
             prompt = self.stringify_lists(prompt)
-            self.llm_prompt = self.save_prompt(prompt)
-            if self.debug:
-                self.console.print(f'PROMPT CHANGE: {self.llm_prompt}',
-                                   style=f'color({self.color})', highlight=True)
+            llm_prompt = self.save_prompt(prompt)
+            if self.opts.debug:
+                self.console.print(f'PROMPT CHANGE: {llm_prompt}',
+                                   style=f'color({self.opts.color})', highlight=True)
             else:
-                with open(os.path.join(self.history_dir, 'debug.log'),
+                with open(os.path.join(self.opts.vector_dir, 'debug.log'),
                           'w', encoding='utf-8') as f:
-                    f.write(f'PROMPT CHANGE: {self.llm_prompt}')
-
+                    f.write(f'PROMPT CHANGE: {llm_prompt}')
+        return self.load_prompt()

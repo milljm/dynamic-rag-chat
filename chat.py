@@ -28,8 +28,6 @@ import argparse
 import datetime
 import mimetypes
 from dataclasses import dataclass
-from typing import List
-import yaml
 import pytz
 import requests
 from rich.console import Console
@@ -43,7 +41,7 @@ from langchain_community.document_loaders import PyPDFLoader
 from src import ContextManager
 from src import RAG, RAGTagManager
 from src import RenderWindow
-from src import CommonUtils
+from src import CommonUtils, ChatOptions
 console = Console(highlight=True)
 current_dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -65,62 +63,24 @@ class SessionContext:
     renderer: RenderWindow
 
     @classmethod
-    def from_args(cls, c_console, vargs)->'SessionContext':
+    def from_args(cls, c_console, c_args)->'SessionContext':
         """ instance and return session dataclass """
-        args_dict = vars(vargs)
-        _common = CommonUtils(c_console, **args_dict)
-        _rag = RAG(c_console, _common, **args_dict)
-        _rag_tag = RAGTagManager(console, _common, **args_dict)
-        _context = ContextManager(console, _common, _rag, _rag_tag, current_dir, **args_dict)
-        _renderer = RenderWindow(console, _common, _context, current_dir, **args_dict)
+        _common = CommonUtils(c_console, c_args)
+        _rag = RAG(c_console, _common, c_args)
+        _rag_tag = RAGTagManager(console, _common, c_args)
+        _context = ContextManager(console, _common, _rag, _rag_tag, current_dir, c_args)
+        _renderer = RenderWindow(console, _common, _context, current_dir, c_args)
         return cls(common=_common,
                    rag=_rag,
                    rag_tag=_rag_tag,
                    context=_context,
                    renderer=_renderer)
-# pylint: disable=too-many-instance-attributes
-@dataclass
-class ChatOptions:
-    """
-    Chat arguments dataclass, with a method to initialize using **kwargs.
-    """
-    debug: bool
-    host: str
-    model: str
-    num_ctx: int
-    time_zone: str
-    light_mode: bool
-    name: str
-    verbose: bool
-    assistant_mode: bool
-    no_rags: bool
-    chat_sessions: List[object]
-
-    @classmethod
-    def from_args(cls, vargs) -> 'ChatOptions':
-        """Instance and return ChatOptions dataclass."""
-        args_dict = vars(vargs)
-        # Create the ChatOptions instance with all required arguments
-        return cls(
-            debug=args_dict.get('debug', False),
-            host=args_dict.get('host', 'localhost'),
-            model=args_dict.get('model', 'default_model'),
-            num_ctx=args_dict.get('num_ctx', 512),
-            time_zone=args_dict.get('time_zone', 'UTC'),
-            light_mode=args_dict.get('light_mode', False),
-            name=args_dict.get('name', 'ChatSession1'),
-            verbose=args_dict.get('verbose', True),
-            assistant_mode=args_dict.get('assistant_mode', False),
-            no_rags=args_dict.get('use_rags', False),
-            chat_sessions=args_dict.get('chat_sessions', []),
-        )
-# pylint: enable=too-many-instance-attributes
 
 class Chat():
     """ Begin initializing variables classes. Call .chat() to begin """
     def __init__(self, o_session, _args):
-        self.opts = ChatOptions.from_args(_args)
-        self.session = o_session
+        self.opts: ChatOptions = _args
+        self.session: SessionContext = o_session
         self._initialize_startup_tasks()
 
     def _initialize_startup_tasks(self):
@@ -157,7 +117,7 @@ class Chat():
     def token_counter(self, documents: dict):
         """ report each document token counts """
         for key, value in documents.items():
-            yield (key, self.session.session.context.token_retreiver(value))
+            yield (key, self.session.context.token_retreiver(value))
 
     def token_manager(self, documents: dict,
                             token_reduction: int)->tuple[int,int]:
@@ -190,16 +150,16 @@ class Chat():
 
         token_savings = max(0, pre_t - post_t)
         documents.update(
-            {'llm_prompt'      : self.session.common.llm_prompt,
-             'user_query'      : user_input,
-             'dynamic_files'   : '',
-             'dynamic_images'  : [],
-             'chat_sessions'   : self.opts.chat_sessions,
-             'name'            : self.opts.name,
-             'date_time'       : self.get_time(self.opts.time_zone),
-             'num_ctx'         : self.opts.num_ctx,
-             'pre_process_time': pre_process_time,
-             'light_mode'      : self.set_lightmode_aware(self.opts.light_mode)}
+            {'llm_prompt'       : self.session.common.load_prompt(),
+             'user_query'       : user_input,
+             'dynamic_files'    : '',
+             'dynamic_images'   : [],
+             'history_sessions' : self.opts.history_sessions,
+             'name'             : self.opts.name,
+             'date_time'        : self.get_time(self.opts.time_zone),
+             'num_ctx'          : self.opts.num_ctx,
+             'pre_process_time' : pre_process_time,
+             'light_mode'       : self.set_lightmode_aware(self.opts.light_mode)}
         )
         # Stringify everything (except images)
         for k, v in documents.items():
@@ -223,7 +183,7 @@ class Chat():
     def load_content_as_context(self, user_input: str) -> dict:
         """Parse user_input for all occurrences of {{ /path/to/file }}"""
         documents = {'dynamic_images': [], 'dynamic_files': '', 'user_query': user_input}
-        included_files = self.session.common.curly_match.findall(user_input)
+        included_files = self.session.common.regex.curly_match.findall(user_input)
 
         def read_file(file_path: str) -> str:
             """Helper to read file contents or fetch from URL."""
@@ -314,21 +274,21 @@ class Chat():
     def no_context(self, user_input)->tuple:
         """ perform search without any context involved """
         # pylint: disable=consider-using-f-string  # no, this is how it is done
-        documents = {'user_query'      : user_input,
-                     'name'            : self.opts.name,
-                     'chat_history'    : '',
-                     'dynamic_files'   : '',
-                     'dynamic_images'  : [],
-                     'chat_sessions'   : self.opts.chat_sessions,
-                     'ai_documents'    : '',
-                     'user_documents'  : '',
-                     'context'         : '',
-                     'date_time'       : self.get_time(self.opts.time_zone),
-                     'num_ctx'         : self.opts.num_ctx,
-                     'pre_process_time': '{:.1f}s'.format(0),
-                     'performance'     : '',
-                     'light_mode'      : self.set_lightmode_aware(self.opts.light_mode),
-                     'llm_prompt'      : ''}
+        documents = {'user_query'       : user_input,
+                     'name'             : self.opts.name,
+                     'chat_history'     : '',
+                     'dynamic_files'    : '',
+                     'dynamic_images'   : [],
+                     'history_sessions' : self.opts.history_sessions,
+                     'ai_documents'     : '',
+                     'user_documents'   : '',
+                     'context'          : '',
+                     'date_time'        : self.get_time(self.opts.time_zone),
+                     'num_ctx'          : self.opts.num_ctx,
+                     'pre_process_time' : '{:.1f}s'.format(0),
+                     'performance'      : '',
+                     'light_mode'       : self.set_lightmode_aware(self.opts.light_mode),
+                     'llm_prompt'       : ''}
         preprocessing = 0
         token_savings = 0
         cleaned_color = 0
@@ -365,7 +325,7 @@ class Chat():
                     continue
 
                 if user_input.find(r'\no-context') >=0:
-                    user_input = user_input.replace('\no-context ', '')
+                    user_input = user_input.replace(r'\no-context ', '')
                     (documents,
                      token_savings,
                      prompt_tokens,
@@ -399,7 +359,7 @@ def verify_args(p_args):
     return p_args
 
 # pylint: disable=too-many-locals  # would force the user to use unfriendly names
-def parse_args(argv):
+def parse_args(argv, opts):
     """ parse arguments """
     about = """
 A tool capable of dynamically creating/instancing RAG
@@ -417,71 +377,46 @@ example:
 Chat can read a .chat.yaml file to import your arguments.
 See .chat.yaml.example for details.
     """
-    # Allow loading a users options pre-set in a .chat.yaml file
-    rc_file = os.path.join(current_dir, '.chat.yaml')
-    options = {}
-    if os.path.exists(rc_file):
-        with open(rc_file, 'r', encoding='utf-8') as f:
-            options = yaml.safe_load(f) or {}
-    arg_dict = options.get('chat', {})
-    model = arg_dict.get('model', 'gemma3:27b')
-    preconditioner = arg_dict.get('pre_llm', 'gemma3:1b')
-    embeddings = arg_dict.get('embedding_llm', 'nomic-embed-text')
-    vector_dir = arg_dict.get('history_dir', None)
-    matches = int(arg_dict.get('history_matches', 5)) # 5 from each RAG (User & AI)
-    host = arg_dict.get('llm_server', 'http://localhost:11434/v1')
-    pre_host = arg_dict.get('pre_server', host)
-    emb_host = arg_dict.get('embedding_server', host)
-    api_key = arg_dict.get('api_key', 'none')
-    num_ctx = arg_dict.get('context_window', 4192)
-    chat_history = arg_dict.get('history_max', 1000)
-    history_sessions = arg_dict.get('history_sessions', 5)
-    name = arg_dict.get('name', 'assistant')
-    time_zone = arg_dict.get('time_zone', 'GMT')
-    debug = arg_dict.get('debug', False)
-    light = arg_dict.get('light_mode', False)
-    assistant_mode = arg_dict.get('assistant_mode', False)
-    no_rags = arg_dict.get('use_rags', False)
-    syntax_theme = arg_dict.get('syntax_theme', 'fruity')
-    if vector_dir is None:
-        vector_dir = os.path.join(current_dir, 'vector_data')
     parser = argparse.ArgumentParser(description=f'{about}',
                                      epilog=f'{epilog}',
                                      formatter_class=argparse.RawTextHelpFormatter)
-    parser.add_argument('--model', default=model, metavar='',
+    parser.add_argument('--model', default=opts.model, metavar='',
                         help='LLM Model (default: %(default)s)')
-    parser.add_argument('--pre-llm', metavar='', dest='preconditioner', default=preconditioner,
+    parser.add_argument('--pre-llm', metavar='', dest='preconditioner',
+                        default=opts.preconditioner,
                         type=str, help='pre-processor LLM (default: %(default)s)')
-    parser.add_argument('--embedding-llm', metavar='', dest='embeddings', default=embeddings,
+    parser.add_argument('--embedding-llm', metavar='', dest='embeddings',
+                        default=opts.embeddings,
                         type=str, help='LM embedding model (default: %(default)s)')
-    parser.add_argument('--history-dir', metavar='', dest='vector_dir', default=vector_dir,
+    parser.add_argument('--history-dir', metavar='', dest='vector_dir', default=opts.vector_dir,
                         type=str, help='History directory (default: %(default)s)')
-    parser.add_argument('--llm-server', metavar='', dest='host', default=host, type=str,
+    parser.add_argument('--llm-server', metavar='', dest='host', default=opts.host, type=str,
                         help='OpenAI API server address (default: %(default)s)')
-    parser.add_argument('--pre-server', metavar='', dest='pre_host', default=pre_host, type=str,
-                        help='OpenAI API server address (default: %(default)s)')
-    parser.add_argument('--embedding-server', metavar='', dest='emb_host', default=emb_host,
+    parser.add_argument('--pre-server', metavar='', dest='pre_host', default=opts.pre_host,
                         type=str, help='OpenAI API server address (default: %(default)s)')
-    parser.add_argument('--api-key', metavar='', default=api_key, type=str,
-                        help='You API Key (default: %(default)s)')
-    parser.add_argument('--name', metavar='', dest='name', default=name, type=str,
+    parser.add_argument('--embedding-server', metavar='', dest='emb_host', default=opts.emb_host,
+                        type=str, help='OpenAI API server address (default: %(default)s)')
+    parser.add_argument('--api-key', metavar='', default=opts.api_key, type=str,
+                        help='You API Key (default: REDACTED)')
+    parser.add_argument('--name', metavar='', default=opts.name, type=str,
                         help='Your assistants name (default: %(default)s)')
-    parser.add_argument('--time-zone', metavar='', dest='time_zone', default=time_zone, type=str,
-                        help='your assistants name (default: %(default)s)')
-    parser.add_argument('--history-matches', metavar='', dest='matches', default=matches, type=int,
+    parser.add_argument('--time-zone', metavar='', default=opts.time_zone,
+                        type=str, help='your assistants name (default: %(default)s)')
+    parser.add_argument('--history-matches', metavar='', dest='matches', default=opts.matches,
+                        type=int,
                         help='Number of results to pull from each RAG (default: %(default)s)')
-    parser.add_argument('--history-sessions', metavar='', dest='chat_sessions',
-                        default=history_sessions, type=int,
+    parser.add_argument('--history-sessions', metavar='', default=opts.history_sessions, type=int,
                         help='Chat history responses availble in context (default: %(default)s)')
-    parser.add_argument('--history-max', metavar='', dest='chat_max', default=chat_history,
+    parser.add_argument('--history-max', metavar='', dest='chat_max', default=opts.chat_history,
                         type=int,
                         help='Chat history responses to save to disk (default: %(default)s)')
-    parser.add_argument('--context-window', metavar='', dest='num_ctx', default=num_ctx, type=int,
+    parser.add_argument('--context-window', metavar='', dest='num_ctx', default=opts.num_ctx,
+                        type=int,
                         help='The maximum context window size (default: %(default)s)')
-    parser.add_argument('--syntax-style', metavar='', dest='syntax_theme', default=syntax_theme,
-                        type=str,
+    parser.add_argument('--syntax-style', metavar='', dest='syntax_theme',
+                        default=opts.syntax_theme, type=str,
                         help=('Your desired syntax-highlight theme (default: %(default)s).'
-                              'See https://pygments.org/styles/ for available themes'))
+                              ' See https://pygments.org/styles/ for available themes'))
     parser.add_argument('--import-pdf', metavar='', type=str,
                         help='Path to pdf to pre-populate main RAG')
     parser.add_argument('--import-txt', metavar='', type=str,
@@ -489,18 +424,19 @@ See .chat.yaml.example for details.
     parser.add_argument('--import-web', metavar='', type=str,
                         help='URL to pre-populate main RAG')
     parser.add_argument('--import-dir', metavar='', type=str,
-                        help='Path to recursively find and import assorted files (*.md *.html)')
-    parser.add_argument('--light-mode', action='store_true', default=light,
+                        help=('Path to recursively find and import assorted files (*.md *.html, '
+                        '*.txt, *.pdf)'))
+    parser.add_argument('--light-mode', action='store_true', default=opts.light_mode,
                         help='Use a color scheme suitible for light background terminals')
-    parser.add_argument('--assistant-mode', action='store_true', default=assistant_mode,
+    parser.add_argument('--assistant-mode', action='store_true', default=opts.assistant_mode,
                         help='Do not utilize story-telling mode prompts or the RAGs. Do not save'
                         ' chat history to disk')
-    parser.add_argument('--use-rags', action='store_true', default=no_rags,
+    parser.add_argument('--use-rags', action='store_true', default=opts.no_rags,
                         help='Use RAGs regardless of assistant-mode (no effect when not also using'
                         ' assistent-mode)')
-    parser.add_argument('-d', '--debug', action='store_true', default=debug,
+    parser.add_argument('-d', '--debug', action='store_true', default=opts.debug,
                         help='Print preconditioning message, prompt, etc')
-    parser.add_argument('-v','--verbose', action='store_true', default=debug,
+    parser.add_argument('-v','--verbose', action='store_true', default=opts.verbose,
                         help='Do not hide what the model is thinking (if the model supports'
                         ' thinking)')
 
@@ -513,7 +449,6 @@ def store_data(d_session: SessionContext,
     _normal = d_session.common.normalize_for_dedup(data)
     d_session.rag.store_data(_normal, tags_metadata=meta_tags)
 
-# pylint: disable=redefined-outer-name #  we exit immediately
 def extract_text_from_pdf(d_session: SessionContext,
                           v_args: argparse.ArgumentParser,
                           do_exit=True)->None:
@@ -581,36 +516,36 @@ def extract_text_from_web(d_session: SessionContext,
         print(f'Error obtaining webpage: {response.status_code}\n{response.raw}')
         sys.exit(1)
 
-# pylint: enable=redefined-outer-name
 if __name__ == '__main__':
-    args = parse_args(sys.argv[1:])
+    args = parse_args(sys.argv[1:], ChatOptions.from_yaml(current_dir))
+    _opts = ChatOptions.set_from_args(current_dir, args)
     light_mode_theme = Theme({
             "markdown.code": "black on #e6e6e6",
     })
-    if args.light_mode:
+    if _opts.light_mode:
         console = Console(theme=light_mode_theme)
-    session = SessionContext.from_args(console, args)
+    session = SessionContext.from_args(console, _opts)
     try:
         if args.import_txt:
             if os.path.exists(args.import_txt):
-                store_text(session, args)
+                store_text(session, _opts)
             else:
                 print(f'Error: The file at {args.import_txt} does not exist.')
                 sys.exit(1)
         if args.import_pdf:
             if os.path.exists(args.import_pdf):
-                extract_text_from_pdf(session, args)
+                extract_text_from_pdf(session, _opts)
             else:
                 print(f"Error: The file at {args.import_pdf} does not exist.")
                 sys.exit(1)
         if args.import_web:
-            extract_text_from_web(session, args)
+            extract_text_from_web(session, _opts)
             sys.exit(0)
         if args.import_dir:
             if os.path.exists(args.import_dir):
-                extract_text_from_markdown(session, args)
+                extract_text_from_markdown(session, _opts)
                 sys.exit(0)
-        chat = Chat(session, args)
+        chat = Chat(session, _opts)
         chat.chat()
     except KeyboardInterrupt:
         sys.exit()
