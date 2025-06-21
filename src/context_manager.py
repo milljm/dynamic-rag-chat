@@ -92,9 +92,10 @@ class ContextManager(PromptManager):
 
     def pre_processor(self, query: str,
                       previous: str='',
-                      do_scene: bool=True)->tuple[str,list[RAGTag]]:
+                      do_scene: bool=True)->tuple[str,list[RAGTag],bool]:
         """
         lightweight LLM as a tagging pre-processor
+        Returns LLM's response, meta_tags, bool (general failure or not)
         """
         prompts = self.prompts
         query = self.common.normalize_for_dedup(query)
@@ -116,8 +117,7 @@ class ContextManager(PromptManager):
         try:
             content = self.pre_llm.invoke(prompt).content
         except APITimeoutError:
-            content = ''
-            self.console.print('PRE-PROCESSOR RESPONSE TIMEOUT')
+            return ('APITimeoutError', [], self.common.no_scene(), False)
         if self.debug:
             self.console.print(f'PRE-PROCESSOR RESPONSE:\n{content}\n\n',
                                 style=f'color({self.opts.color})', highlight=False)
@@ -136,7 +136,7 @@ class ContextManager(PromptManager):
         scene_consistency = self.common.no_scene()
         if do_scene:
             scene_consistency = self.common.scene_tracker_from_tags(tags)
-        return (content, tags, scene_consistency)
+        return (content, tags, scene_consistency, True)
 
     def post_process(self, response)->None:
         """ Start a thread to process LLMs response """
@@ -311,7 +311,7 @@ class ContextManager(PromptManager):
             if data_set:
                 query = self.common.stringify_lists(data_set[0])
                 # Try to tagify the users query
-                (_, meta_tags, documents['scene_meta']) = self.pre_processor(query)
+                (_, meta_tags, documents['scene_meta'], _) = self.pre_processor(query)
 
                 # set entities. We will use this to load a grounded character sheet
                 # if it exists in promts/entities/entity.txt
