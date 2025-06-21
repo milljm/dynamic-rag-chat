@@ -23,13 +23,12 @@ import os
 import io
 import sys
 import time
-import threading
 from datetime import timedelta
 import base64
 import argparse
 import datetime
 import mimetypes
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 import pytz
 import requests
 from rich.console import Console
@@ -50,49 +49,6 @@ from src import RenderWindow
 from src import CommonUtils, ChatOptions
 console = Console(highlight=True)
 current_dir = os.path.dirname(os.path.abspath(__file__))
-
-@dataclass
-class StreamState:
-    """ RenderWindow animation (thinking) """
-    pulse_index: int = 0
-    pulsing_chars: list[str] = field(default_factory=lambda: ["⠇", "⠋", "⠙", "⠸", "⠴", "⠦"])
-
-class PulseSpinner:
-    """ PulseSpinner Animation """
-    def __init__(self, live, progress_state, interval=0.2):
-        self.live = live
-        self.progress_state = progress_state
-        self.interval = interval
-        self._stop_event = threading.Event()
-        self.stream = StreamState()
-
-    def start(self):
-        """ start animation """
-        # pylint: disable=attribute-defined-outside-init  # Threaded start after class instance
-        self.thread = threading.Thread(target=self.run, daemon=True)
-        # pylint: enable=attribute-defined-outside-init
-        self.thread.start()
-
-    def stop(self):
-        """ stop animation """
-        self._stop_event.set()
-        self.thread.join()
-
-    def run(self):
-        """ while running the animation """
-        while not self._stop_event.is_set():
-            pulse = self.stream.pulsing_chars[self.stream.pulse_index]
-            self.stream.pulse_index = (self.stream.pulse_index + 1) % len(self.stream.pulsing_chars)
-
-            if ("chunk_panel" not in self.progress_state
-                or self.progress_state["chunk_panel"] is None):
-                self.progress_state["chunk_panel"] = Panel(
-                    f"[dim cyan]Waiting {pulse}[/]",
-                    title="⏳ Idle",
-                    border_style="dim",
-                )
-                self.live.update(make_full_status(self.progress_state))
-            time.sleep(self.interval)
 
 @dataclass
 class SessionContext:
@@ -407,7 +363,6 @@ def verify_args(p_args):
     # The issue added to the feature tracker: nothing to verify yet
     return p_args
 
-# pylint: disable=too-many-locals  # would force the user to use unfriendly names
 def parse_args(argv, opts):
     """ parse arguments """
     about = """
@@ -501,18 +456,18 @@ def estimate_eta(start_time, processed, total):
     eta_seconds = int(rate * remaining)
     return str(timedelta(seconds=eta_seconds))
 
-def make_full_status(progress_state: dict)->Group:
+def make_full_status(_state: dict)->Group:
     """Use Rich Live to update the user on processing, including error reporting."""
-    eta = estimate_eta(progress_state['start_time'],
-                   progress_state['file_idx'] + 1,
-                   progress_state['file_total'])
+    eta = estimate_eta(_state['start_time'],
+                   _state['file_idx'] + 1,
+                   _state['file_total'])
 
     file_table = Table.grid(padding=(0, 1))
-    for file_path in progress_state['processed_files']:
+    for file_path in _state['processed_files']:
         file_table.add_row(f'[dim]File:[/] {file_path}')
     file_table.add_row('')  # Spacer
-    file_table.add_row((f'[bold green]File Progress:[/] {progress_state["file_idx"]+1} '
-                        f'/ {progress_state["file_total"]}'
+    file_table.add_row((f'[bold green]File Progress:[/] {_state["file_idx"]+1} '
+                        f'/ {_state["file_total"]}'
                         f' [bold green]Estimated Time Remaining:[/] {eta}'))
     file_panel = Panel.fit(
         file_table,
@@ -520,13 +475,7 @@ def make_full_status(progress_state: dict)->Group:
         border_style='green'
     )
 
-    #chunk_panel = progress_state.get('chunk_panel') or Panel(
-    #    'Awaiting chunk processing...',
-    #    border_style='blue',
-    #    title='🔄 Processing RAG Input'
-    #)
-
-    chunk_panel = progress_state.get('chunk_panel')
+    chunk_panel = _state.get('chunk_panel')
     if not isinstance(chunk_panel, Panel):
         chunk_panel = Panel(chunk_panel or 'Awaiting chunk processing...',
                             border_style='blue',
@@ -534,7 +483,7 @@ def make_full_status(progress_state: dict)->Group:
 
     # 🛑 Error Panel
     error_lines = []
-    for file, err in progress_state.get('failed', set([])):
+    for file, err in _state.get('failed', set([])):
         short_error = str(err).split('\n', maxsplit=1)[0][:100]
         error_lines.append(f'[red]❌ {file}[/]: {short_error}')
 
@@ -551,7 +500,7 @@ def store_data(d_session: SessionContext,
                data: str,
                data_file: str = '',
                live=None,
-               progress_state=None) -> tuple[bool,str]:
+               _state=None) -> tuple[bool,str]:
     """
     Tag and Process incoming document into the RAG
     Returns tuple(sucess, error string)
@@ -588,26 +537,28 @@ def store_data(d_session: SessionContext,
             table.add_row(f'{meta}')
         elif not parent[2] and storing:
             table.add_row('[dim]Warning: No Meta Data[/]')
-            progress_state['failed'].add((data_file, 'No Meta Data gathered'))
+            _state['failed'].add((data_file, 'No Meta Data gathered'))
         return Panel(table, title="🔄 Processing RAG Input", border_style="blue")
 
     split_docs = d_session.rag.parent_splitter.split_text(data)
     meta_tags = []
     for cnt, split_doc in enumerate(split_docs):
         child_docs = d_session.rag.child_splitter.split_text(split_doc)
-        if live and progress_state is not None:
-            progress_state['chunk_panel'] = make_status_table((cnt,
-                                                               len(split_docs),
-                                                               meta_tags),
-                                                              (0, len(child_docs)),
-                                                              processing=True)
-            live.update(make_full_status(progress_state))
+        if live and _state is not None:
+            _state['chunk_panel'] = make_status_table((cnt,
+                                                       len(split_docs),
+                                                       meta_tags),
+                                                       (0, len(child_docs)),
+                                                       processing=True)
+            live.update(make_full_status(_state))
 
             # Some times the LLM/RAG Tagging does gibe well. And a simple 'try again' works
             for attempt in range(2):
                 try:
-                    message, meta_tags, _ , status= d_session.context.pre_processor(split_doc,
-                                                                              do_scene=False)
+                    (message,
+                     meta_tags,
+                     _,
+                     status) = d_session.context.pre_processor(split_doc, do_scene=False)
                     if not status:
                         raise RuntimeError(message)
                     _normal = d_session.common.normalize_for_dedup(split_doc)
@@ -616,39 +567,40 @@ def store_data(d_session: SessionContext,
                 # pylint: disable=broad-exception-caught  # handling lots of possibilities here
                 except Exception as e:
                     if attempt == 1:
-                        progress_state['chunk_panel'] = make_status_table((cnt,
-                                                                           len(split_docs),
-                                                                           meta_tags),
-                                                                          (0, len(child_docs)))
-                        progress_state['failed'].add((data_file, e))
-                        live.update(make_full_status(progress_state))
+                        _state['chunk_panel'] = make_status_table((cnt,
+                                                                   len(split_docs),
+                                                                   meta_tags),
+                                                                   (0, len(child_docs)))
+                        _state['failed'].add((data_file, e))
+                        live.update(make_full_status(_state))
                         return (False, f'Preprocessor/Tagging error: {e}')
-                    progress_state['chunk_panel'] = make_status_table((cnt,
-                                                                       len(split_docs),
-                                                                       meta_tags),
-                                                                      (0, len(child_docs)),
-                                                                      processing=True,
-                                                                      retry=True,
-                                                                      message=e)
-                    live.update(make_full_status(progress_state))
+                    _state['chunk_panel'] = make_status_table((cnt,
+                                                               len(split_docs),
+                                                               meta_tags),
+                                                               (0, len(child_docs)),
+                                                               processing=True,
+                                                               retry=True,
+                                                               message=e)
+                    live.update(make_full_status(_state))
                     time.sleep(0.5)
                 # pylint enable=broad-exception-caught
 
         c_cnt = 0
         for c_cnt, child_doc in enumerate(child_docs):
             d_session.rag.store_data(child_doc, tags_metadata=meta_tags)
-            if live and progress_state is not None:
-                progress_state['chunk_panel'] = make_status_table((cnt,
-                                                                   len(split_docs),
-                                                                   meta_tags),
-                                                                  (c_cnt+1, len(child_docs)),
-                                                                  storing=True)
-                live.update(make_full_status(progress_state))
-        progress_state['chunk_panel'] = make_status_table((cnt,
+            if live and _state is not None:
+                _state['chunk_panel'] = make_status_table((cnt,
                                                            len(split_docs),
-                                                           []),
-                                                          (c_cnt+1, len(child_docs)))
-        live.update(make_full_status(progress_state))
+                                                           meta_tags),
+                                                           (c_cnt+1, len(child_docs)),
+                                                           storing=True)
+                live.update(make_full_status(_state))
+        _state['chunk_panel'] = make_status_table((cnt,
+                                                   len(split_docs),
+                                                   []),
+                                                   (c_cnt+1, len(child_docs)))
+        if live and _state is not None:
+            live.update(make_full_status(_state))
 
 def extract_text_from_dir(d_session: SessionContext, v_args: argparse.ArgumentParser) -> None:
     """ Walk through supplied directory recursively and beginning storing data """
@@ -657,7 +609,7 @@ def extract_text_from_dir(d_session: SessionContext, v_args: argparse.ArgumentPa
         for file in files:
             if file.endswith(('.md', '.html', '.txt', '.pdf')):
                 files_to_process.append((fdir, file))
-    progress_state = {
+    _state = {
         'file_idx': 0,
         'file_total': len(files_to_process),
         'file_name': '',
@@ -666,37 +618,26 @@ def extract_text_from_dir(d_session: SessionContext, v_args: argparse.ArgumentPa
         'failed': set([]),
         'start_time': time.time(),
     }
-    with Live(make_full_status(progress_state), refresh_per_second=20) as live:
-        spinner = PulseSpinner(live, progress_state)
-        spinner.start()
-        try:
-            for idx, (fdir, file) in enumerate(files_to_process):
-                _file = os.path.join(fdir, file)
-                progress_state['file_idx'] = idx
-                progress_state['file_name'] = _file
-                progress_state['processed_files'].append(_file)
-                max_history = 10
-                if len(progress_state['processed_files']) > max_history:
-                    progress_state['processed_files'] = progress_state['processed_files'][-max_history:]
-                live.update(make_full_status(progress_state))
-                if file.endswith('.pdf'):
-                    v_args.import_pdf = file
-                    extract_text_from_pdf(d_session, v_args, do_exit=False)
-                    continue
-                with open(_file, 'r', encoding='utf-8') as file_handle:
-                    document_content = file_handle.read()
-                if _file.endswith('.html'):
-                    soup = BeautifulSoup(document_content, 'html.parser')
-                    document_content = soup.get_text()
-                store_data(
-                    d_session,
-                    document_content,
-                    data_file=_file,
-                    live=live,
-                    progress_state=progress_state
-                )
-        finally:
-            spinner.stop()
+    with Live(make_full_status(_state), refresh_per_second=20) as live:
+        for idx, (fdir, file) in enumerate(files_to_process):
+            _file = os.path.join(fdir, file)
+            _state['file_idx'] = idx
+            _state['file_name'] = _file
+            _state['processed_files'].append(_file)
+            max_history = 10
+            if len(_state['processed_files']) > max_history:
+                _state['processed_files'] = _state['processed_files'][-max_history:]
+            live.update(make_full_status(_state))
+            if file.endswith('.pdf'):
+                v_args.import_pdf = file
+                extract_text_from_pdf(d_session, v_args, do_exit=False)
+                continue
+            with open(_file, 'r', encoding='utf-8') as file_handle:
+                document_content = file_handle.read()
+            if _file.endswith('.html'):
+                soup = BeautifulSoup(document_content, 'html.parser')
+                document_content = soup.get_text()
+            store_data(d_session,document_content,data_file=_file,live=live,_state=_state)
     sys.exit()
 
 def extract_text_from_pdf(d_session: SessionContext,
