@@ -343,7 +343,9 @@ class Chat():
                 # handoff to rich live
                 self.session.renderer.live_stream(documents)
 
-        except KeyboardInterrupt:
+        except KeyboardInterrupt:  # ctl-c
+            sys.exit()
+        except EOFError:  # ctl-d
             sys.exit()
 
 def verify_args(p_args):

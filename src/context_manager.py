@@ -72,7 +72,7 @@ class ContextManager(PromptManager):
     def token_retreiver(context: str|list[str])->int:
         """ iterate over string or list of strings and do a word count (token) """
         _token_cnt = 0
-        if not context:
+        if not context or isinstance(context, bool):
             return _token_cnt
         if isinstance(context, list|tuple):
             for sentence in context:
