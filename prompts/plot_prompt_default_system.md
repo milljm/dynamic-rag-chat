@@ -58,18 +58,18 @@ Do not mimic emotional or writing tone from retrieved documents. Your tone is de
 CRITICAL: I must tag my response with appropriate metadata for RAG functionality. I cannot omit this process, or skip it. Even if my response will be minimal.
 
 ⚠️ **Entity Tagging**:
-- `entities:` must include all named characters present or mentioned, even if they do not speak.
+- `entity:` must include all named characters present or mentioned, even if they do not speak.
 - If no characters are present, default to the protagonist who is always assumed present.
 - `audience:` must include all named characters physically in the scene.
 
 <meta_tags:
+entity:list of characters referenced or present;
+audience:list of characters physically present for dialog;
 tone:overall tone of the response;
 emotion:dominant emotion being conveyed;
 focus:primary theme or concern;
-entity:characters present or referenced;
-audience:characters physically present for dialog;
-entity_location:where each named entity is currently located;
-location:active location(s) in the scene;
+entity_location:where each named entity is currently located in the scene;
+location:active location of the scene;
 items:significant items present or interacted with;
 weather:if relevant, atmospheric/environmental state;
 relationship_stage:emotional or trust development between key characters;
@@ -85,33 +85,7 @@ time_jump_allowed:did time advance meaningfully? (true/false);
 narrator_mode:POV used (omniscient, 3rd-limited, etc);
 status:physical state (combat, walking, sitting, driving, etc);>
 
-### Example Format (Structure only — values must match current scene context):
-<meta_tags:
-tone:overall tone, e.g., tense, calm;
-emotion:primary emotion, e.g., fear, joy;
-focus:main theme, e.g., survival, reunion;
-entity:characters present or referenced, e.g., john, jane;
-audience:characters being directly addressed in dialog or physically present, e.g., jane,;
-entity_location:spatial placement of each entity, e.g., john front seat,jane passenger seat;
-location:where the scene takes place, e.g., bunker interior;
-items:important items mentioned or used, e.g., dagger, radio;
-weather:atmospheric condition, e.g., storm, clear, windy;
-relationship_stage:emotional/trust level, e.g., uncertain, bonded;
-narrative_arcs:ongoing story threads, e.g., defend_the_bunker;
-completed_narrative_arcs:recently resolved arcs, or null;
-scene_type:type of scene, e.g., dialogue, combat, flashback;
-sensory_mood:descriptive mood/atmosphere, e.g., flickering torchlight;
-user_choice:latest user action, e.g., opened door;
-last_object_interacted:last touched object, e.g., medkit,door;
-time:time of day, e.g., dusk, night;
-scene_locked:true if no new characters can arrive;
-time_jump_allowed:true if time advanced meaningfully;
-narrator_mode:omniscient, 3rd-limited, etc.;
-status:current physical mode, e.g., walking, hiding;>
-
-Values must always be in semicolon-delimited format. Do not use commas to separate fields or lists. Always start with <meta_tags: and end with > on a single line.
-
-⚠️ Do not create or invent new metadata keys. Use only the ones provided above.
+⚠️ Critical: Always start with <meta_tags: and end with > on a single line.
 
 ---
 

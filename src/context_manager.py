@@ -8,15 +8,14 @@ being supplied to the LLM. It utilizing several methods:
     ParentDocument/ChildDocument retrieval (return one large response with many small one)
 """
 import os
-import re
 from difflib import SequenceMatcher
 import threading
 from langchain.schema import Document
 from langchain.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
 from openai import APITimeoutError
-from .ragtag_manager import RAGTagManager, RAG, RAGTag
-from .chat_utils import CommonUtils, ChatOptions # For type hinting
+from .rag_manager import RAG, RAGTag
+from .chat_utils import CommonUtils, ChatOptions
 from .prompt_manager import PromptManager
 from .filter_builder import FilterBuilder
 
@@ -27,14 +26,12 @@ class ContextManager(PromptManager):
                  console,
                  common: CommonUtils,
                  rag: RAG,
-                 rag_tag: RAGTagManager,
                  current_dir,
                  args: ChatOptions):
         super().__init__(console, current_dir, args)
         self.console = console
         self.common = common
         self.rag = rag
-        self.rag_tagger = rag_tag
         self.opts = args
         self.prompts = PromptManager(self.console,
                                      current_dir,
@@ -75,7 +72,9 @@ class ContextManager(PromptManager):
     def token_retreiver(context: str|list[str])->int:
         """ iterate over string or list of strings and do a word count (token) """
         _token_cnt = 0
-        if isinstance(context, list):
+        if not context:
+            return _token_cnt
+        if isinstance(context, list|tuple):
             for sentence in context:
                 _token_cnt += len(sentence.split())
         else:
@@ -85,14 +84,18 @@ class ContextManager(PromptManager):
     @staticmethod
     def no_entity(tags: list[RAGTag])->bool:
         """ Bool check for entity == None """
-        entity = ''.join([x.content for x in tags if x.tag == 'entity'])
-        if not entity:
+        entity_tag = next((item for item in tags if item.tag == 'entity'), None)
+        if not entity_tag:
             return True
-        return entity.lower().find('none') != -1
+        entities = ''.join(entity_tag.content)
+        if entities.lower() in ['none', 'no ent', 'null']:
+            return True
+        return False
 
-    def pre_processor(self, query: str,
+    def pre_processor(self,
+                      query: str,
                       previous: str='',
-                      do_scene: bool=True)->tuple[str,list[RAGTag],bool]:
+                      do_scene: bool=True)->tuple[str,list[RAGTag]]:
         """
         lightweight LLM as a tagging pre-processor
         Returns LLM's response, meta_tags, bool (general failure or not)
@@ -117,7 +120,7 @@ class ContextManager(PromptManager):
         try:
             content = self.pre_llm.invoke(prompt).content
         except APITimeoutError:
-            return ('APITimeoutError', [], self.common.no_scene(), False)
+            return ('APITimeoutError', [], False)
         if self.debug:
             self.console.print(f'PRE-PROCESSOR RESPONSE:\n{content}\n\n',
                                 style=f'color({self.opts.color})', highlight=False)
@@ -140,8 +143,43 @@ class ContextManager(PromptManager):
 
     def post_process(self, response)->None:
         """ Start a thread to process LLMs response """
-        threading.Thread(target=self.rag_tagger.update_rag, args=(response,),
+        threading.Thread(target=self.save_response, args=(response,),
                          daemon=True).start()
+
+    def save_response(self, response: str, collection: str='')->None:
+        """
+        ### Save Response
+
+        Attempt to parse any metadata in LLM's `response`, and then store this
+        information along with the response itself to the RAG's `collection`. If
+        collection is not specified, the default will be used. There is also a
+        hard-coded protection if an attempt to write to the gold collection is
+        made.
+
+        *Key init args:*
+            .. code-block:: python
+                response: str         # LLM's raw resonse
+                collection: str = ''  # Defaults to AI Document collection
+        *Returns None:*
+            .. code-block:: python
+                return None
+        """
+        collections = self.common.attributes.collections  # short hand
+        # protect against empty or gold RAG (read-only) collections
+        if not collection or collection == collections['gold']:
+            collection = collections['ai']
+
+        list_rag_tags: list[RAGTag] = self.common.get_tags(response)
+        if self.debug:
+            self.console.print(f'META TAGS PARSED: {list_rag_tags}',
+                               style=f'color({self.opts.color})',
+                               highlight=False)
+        else:
+            with open(os.path.join(self.opts.vector_dir, 'debug.log'),
+                      'w', encoding='utf-8') as f:
+                f.write(f'META TAGS PARSED: {list_rag_tags}')
+        rag = RAG(self.console, self.common, self.opts)
+        rag.store_data(response, tags_metadata=list_rag_tags, collection=collection)
 
     @staticmethod
     def stagger_history(history_size: int,
@@ -192,20 +230,56 @@ class ContextManager(PromptManager):
             abridged.append(response)
         return abridged
 
-    def gather_context(self, query: str,
-                             collection: str,
-                             tags: list[RAGTag[str,str]],
-                             field: str)->list[Document]:
+    def hanlde_topics(self,
+                      meta_tags: list[RAGTag],
+                      query: str,
+                      collection: str,
+                      field: str)->list[Document]:
         """
-        Perform metadata field filtering matching
+        ### Main Topic Retrieval
+
+        Perform topic context matching routines focused on RAGTag key: `field`. Each content
+        value in RAGTag(key=`field`, content=[]) will be searched individually in Chroma. The
+        method will split the amount of returned matches evenly based on `--history-matches`.
+
+        *Key init args:*
+            .. code-block:: python
+                meta_tags: list[RAGTag]
+                query: str
+                collection: str
+                field: str
+        *Returns:*
+            .. code-block:: python
+                return list[Document]
         """
-        filter_dict = self.filter_builder.build(tags, field)
-        # Combined filter retrieval (highly relevant information)
-        documents = self.rag.retrieve_data(query,
-                                           collection,
-                                           meta_data=filter_dict,
-                                           matches=self.opts.matches)
-        return documents
+        storage = []
+        # Return immediately if we somehow have no topic field available
+        topic_field = [x for x in meta_tags if x.tag == field]
+        if not topic_field:
+            return storage
+
+        _meta = list(meta_tags)
+        entity_weights = max(1, int(self.opts.matches * .75))
+
+        # Grab the list of topics, then remove the RAGTag from the list, as Chroma does not
+        # support searching a metadata tag with a list of values in it
+        entities = topic_field[0].content
+        _meta.remove(topic_field[0])
+
+        # In case the pre-processor supplied a string of space seperated items or one item
+        if isinstance(entities, str):
+            entities = entities.split(',')
+
+        # Perform a balanced search for each entity
+        for a_entity in entities:
+            for _ in range(max(1, int(entity_weights / len(entities)))):
+                storage.extend(self.gather_context(
+                                            query,
+                                            collection,
+                                            [RAGTag(tag=field, content=a_entity.lower()), *_meta],
+                                            field)
+                                            )
+        return storage
 
     def prompt_entities(self, meta_tags: list[RAGTag[str,str]]) -> list[str]:
         """
@@ -228,7 +302,7 @@ class ContextManager(PromptManager):
                 # Remove brackets and normalize
                 entry = entry.strip().lstrip("[").rstrip("]")
                 # Split on common delimiters
-                candidates = re.split(r'[;,|\n]+|\s{2,}|(?<!\w)\s(?!\w)', entry)
+                candidates = self.common.regex.entities.split(entry)
             else:
                 candidates = [str(entry)]
 
@@ -249,52 +323,19 @@ class ContextManager(PromptManager):
 
         return _entity_prompt or ['']
 
-    def hanlde_entity(self,
-                      meta_tags: list[RAGTag],
-                      query: str,
-                      collection: str,
-                      field: str)->list:
-        """ perform entity context matching routines """
-        flat_entities = []
-        storage = []
-        entity_weights = max(1, int(self.opts.matches * .75))
-        # Obtain the entities tag, and it's contents
-        entities = [x.content for x in meta_tags if x.tag == 'entity']
-
-        # Clean the entities tag and store its contents
-        past_multi_entity = []
-        for key, tag in enumerate(meta_tags):
-            if entities and tag.tag == 'entity':
-                past_multi_entity = meta_tags.pop(key)
-
-        # Generate a list of entities
-        for entity in entities:
-            if isinstance(entity, list):
-                flat_entities.extend(entity)
-            elif isinstance(entity, str):
-                flat_entities.extend([e.strip() for e in entity.split(',')
-                                                if e.strip()])
-        # Perform a balanced search for each entity
-        for a_entity in flat_entities:
-            meta_tags.append(RAGTag(tag='entity', content=a_entity.lower()))
-            for _ in range(max(1, int(entity_weights / len(flat_entities)))):
-                storage.extend(self.gather_context(query,
-                                                   collection,
-                                                   meta_tags,
-                                                   field))
-            # Remove the entities RAGTag from the list each time
-            for key, tag in enumerate(meta_tags):
-                if entities and tag.tag == 'entity':
-                    meta_tags.pop(key)
-
-        # add the pruned entity tag back in (allow a search for combination)
-        if past_multi_entity:
-            meta_tags.append(past_multi_entity)
-            storage.extend(self.gather_context(query,
-                                               collection,
-                                               meta_tags,
-                                               field))
-        return storage
+    def gather_context(self, query: str,
+                             collection: str,
+                             tags: list[RAGTag],
+                             field: str)->list[Document]:
+        """
+        Perform metadata field filtering matching
+        """
+        filter_dict = self.filter_builder.build(tags, field)
+        # Combined filter retrieval (highly relevant information)
+        documents = self.rag.retrieve(query,
+                                      collection,
+                                      metadatas=filter_dict)
+        return documents
 
     def handle_context(self, data_set: list,
                              direction='query')->tuple[dict[str,list], int]:
@@ -303,63 +344,46 @@ class ContextManager(PromptManager):
         if direction == 'query':
             pre_tokens = 0
             post_tokens = 0
-            collection_list = ['ai_documents', 'user_documents']
+            collection_list = [self.common.attributes.collections[x] for
+                                x in self.common.attributes.collections]
             documents = {key: [] for key in collection_list}
             documents['chat_history'] = self.get_chat_history()
             if self.opts.assistant_mode and not self.opts.no_rags:
                 return (documents, pre_tokens, post_tokens)
             if data_set:
                 query = self.common.stringify_lists(data_set[0])
-                # Try to tagify the users query
+                # tagify the users query
                 (_, meta_tags, documents['scene_meta'], _) = self.pre_processor(query)
 
                 # set entities. We will use this to load a grounded character sheet
                 # if it exists in promts/entities/entity.txt
                 documents['entities'] = '\n\n'.join(self.prompt_entities(meta_tags))
 
+                # Make all meta_tags available for prompt templating operations
+                # Note: This *might* have the side-effect of breaking necessary keys, though rare.
+                documents.update(meta_tags)
+
+                # If content_type is populated, instruct the LLM to respond in kind
+                if documents.get('content_type', False):
+                    documents['content_type'] = ('- Respond in the following format: ',
+                                                 f'{documents["content_type"]}')
+
                 if self.debug:
                     self.console.print(f'TAG RETREIVAL:\n{meta_tags}\n\n',
                                        style=f'color({self.opts.color})',
                                        highlight=False)
-                else:
-                    with open(os.path.join(self.opts.vector_dir, 'debug.log'),
-                              'w', encoding='utf-8') as f:
-                        f.write(f'TAG RETREIVAL: {meta_tags}')
+
                 for collection in collection_list:
                     storage = []
-                    # Extensive RAG retreival: field filter dictionary, highly relevant
-                    # Loop until we've exhausted fields or collected maximum
-                    for field in ['entity', 'focus', 'tone', 'emotion', 'other']:
-                        # Entity is very important, as it represents an NPC/Character. We
-                        # will therefor spend 75% of our allotted context window budget
-                        # on Entity field-filtering matches. We will also include a full
-                        # file dedicated to said character, if the file exists.
-                        if field == 'entity':
-                            storage.extend(self.hanlde_entity(meta_tags,
-                                                              query,
-                                                              collection,
-                                                              field))
-                        # 25% other field-filters
-                        storage.extend(self.gather_context(query,
-                                                           collection,
-                                                           meta_tags,
-                                                           field))
 
-                        balance = max(0, self.opts.matches - len(storage))
-                        if balance == 0 or len(storage) >= self.opts.matches:
-                            break
+                    # field-filtering RAG retrieval specific for document_topics
+                    storage.extend(self.hanlde_topics(meta_tags,
+                                                      query,
+                                                      collection,
+                                                      'entity'))
 
-                    if self.debug:
-                        self.console.print(f'BALANCE: {balance}',
-                                           style=f'color({self.opts.color})')
-                    else:
-                        with open(os.path.join(self.opts.vector_dir, 'debug.log'),
-                                  'w', encoding='utf-8') as f:
-                            f.write(f'BALANCE: {balance}')
-                    # Fallback to simularity search based on the difference. Always allow one.
-                    storage.extend(self.rag.retrieve_data(query,
-                                                          collection,
-                                                          matches=int(max(1, balance))))
+                    # general retrieval
+                    storage.extend(self.rag.retrieve(query, collection))
 
                     # Record pre-token counts
                     pages = list(map(lambda doc: doc.page_content, storage))
@@ -378,17 +402,13 @@ class ContextManager(PromptManager):
                     self.console.print(f'CONTEXT RETRIEVAL:\n{documents}\n\n',
                                        style=f'color({self.opts.color})',
                                        highlight=False)
-                else:
-                    with open(os.path.join(self.opts.vector_dir, 'debug.log'),
-                              'w', encoding='utf-8') as f:
-                        f.write(f'CONTEXT RETRIEVAL: {documents}')
 
             # Store the users query to their RAG, now that we are done pre-processing
             # (so as not to bring back identical information in their query)
             # A little unorthodox, but the first item in the list is ther user's query
             self.rag.store_data(self.common.stringify_lists(data_set[0]),
                                 tags_metadata=meta_tags,
-                                collection='user_documents')
+                                collection=self.common.attributes.collections['user'])
             # Return data collected
             return (documents, pre_tokens, post_tokens)
         # Store data (non-blocking)

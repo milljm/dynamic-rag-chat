@@ -16,6 +16,19 @@ class RAGTag(NamedTuple):
     tag: str
     content: str
 
+@dataclass
+class StandardAttributes:
+    """ Data class to hold imutable project attributes """
+    collections: dict   # RAG Collection name to collection id
+
+    @classmethod
+    def attributes(cls)->'StandardAttributes':
+        """ return project attributes shared throught project """
+        return cls(collections={'user' : 'user_documents',
+                                'ai'   : 'ai_documents',
+                                'gold' : 'gold_documents'}
+                   )
+
 # pylint: disable=too-many-instance-attributes
 @dataclass
 class ChatOptions:
@@ -25,14 +38,13 @@ class ChatOptions:
     debug: bool
     host: str
     model: str
-    num_ctx: int
+    completion_tokens: int
     time_zone: str
     light_mode: bool
     name: str
     verbose: bool
     assistant_mode: bool
     no_rags: bool
-    model: str
     preconditioner: str
     embeddings: str
     vector_dir: str
@@ -40,7 +52,6 @@ class ChatOptions:
     pre_host: str
     emb_host: str
     api_key: str
-    num_ctx: int
     chat_history: int
     history_sessions: int
     syntax_theme: str
@@ -66,15 +77,15 @@ class ChatOptions:
             verbose=arg_dict.get('verbose', False),
             assistant_mode=arg_dict.get('assistant_mode', False),
             no_rags=arg_dict.get('use_rags', False),
-            model = arg_dict.get('model', 'gemma3:27b'),
+            model = arg_dict.get('model', 'gemma3:12b'),
             preconditioner = arg_dict.get('pre_llm', 'gemma3:1b'),
             embeddings = arg_dict.get('embedding_llm', 'nomic-embed-text'),
             vector_dir = arg_dict.get('history_dir', os.path.join(current_dir, 'vector_data')),
-            matches = int(arg_dict.get('history_matches', 5)), # 5 from each RAG (User & AI)
+            matches = int(arg_dict.get('history_matches', 20)), # 20 from each RAG (User & AI)
             pre_host = arg_dict.get('pre_server', 'http://localhost:11434/v1'),
             emb_host = arg_dict.get('embedding_server', 'http://localhost:11434/v1'),
             api_key = arg_dict.get('api_key', 'none'),
-            num_ctx = int(arg_dict.get('context_window', 4192)),
+            completion_tokens = int(arg_dict.get('completion_tokens', 2048)),
             chat_history = int(arg_dict.get('history_max', 1000)),
             history_sessions = int(arg_dict.get('history_sessions', 5)),
             time_zone = arg_dict.get('time_zone', 'GMT'),
@@ -96,15 +107,15 @@ class ChatOptions:
             verbose=arg_dict.get('verbose', False),
             assistant_mode=arg_dict.get('assistant_mode', False),
             no_rags=arg_dict.get('use_rags', False),
-            model = arg_dict.get('model', 'gemma3:27b'),
+            model = arg_dict.get('model', 'gemma3:12b'),
             preconditioner = arg_dict.get('preconditioner', 'gemma3:1b'),
             embeddings = arg_dict.get('embeddings', 'nomic-embed-text'),
             vector_dir = arg_dict.get('history_dir', os.path.join(current_dir, 'vector_data')),
-            matches = int(arg_dict.get('matches', 5)), # 5 from each RAG (User & AI)
+            matches = int(arg_dict.get('matches', 20)), # 20 from each RAG (User & AI)
             pre_host = arg_dict.get('pre_host', 'http://localhost:11434/v1'),
             emb_host = arg_dict.get('emb_host', 'http://localhost:11434/v1'),
             api_key = arg_dict.get('api_key', 'none'),
-            num_ctx = int(arg_dict.get('context_window', 4192)),
+            completion_tokens = int(arg_dict.get('completion_tokens', 2048)),
             chat_history = int(arg_dict.get('chat_max', 1000)),
             history_sessions = int(arg_dict.get('history_sessions', 5)),
             time_zone = arg_dict.get('time_zone', 'GMT'),
@@ -131,11 +142,13 @@ class RegExp:
     json_style = re.compile(r'\{\s*(.*?)\s*\}', re.DOTALL)
     json_malformed = re.compile(r'{+(.*)}', re.DOTALL)
     curly_match = re.compile(r'\{\{\s*(.*?)\s*\}\}', re.DOTALL)
+    entities = re.compile(r'[;,|\n]+|\s{2,}|(?<!\w)\s(?!\w)', re.DOTALL)
 
 class CommonUtils():
     """ method holder for command methods used throughout the project """
     def __init__(self, console, args):
         self.console = console
+        self.__set_project_attributes()
         self.opts = args
         self.regex = RegExp()
         if not os.path.exists(args.vector_dir):
@@ -155,6 +168,10 @@ class CommonUtils():
         self.heat_map = 0
         self.prompt_map = self.create_heatmap(8000)
         self.cleaned_map = self.create_heatmap(1000)
+
+    def __set_project_attributes(self):
+        """ create dataclass with project attributes """
+        self.attributes = StandardAttributes.attributes()
 
     def if_importing(self):
         """ return bool if we are importing documents """
@@ -368,35 +385,6 @@ class CommonUtils():
                 result[key] = str(val)
         return result
 
-    def remove_tags(self, response: str)->str:
-        """ remove meta_tags from response """
-        _response = str(response)
-        for match in self.regex.meta_block.findall(_response):
-            _response = _response.replace(f'{match}', '')
-        return _response
-
-    def parse_tags(self, flat_pairs: dict | list[tuple[str, str]])->list[RAGTag[str, str]]:
-        """Normalize any kind of tag input into RAGTag list of (str, str)"""
-        tags = []
-        # Normalize input to iterable of (k, v) pairs
-        if isinstance(flat_pairs, dict):
-            flat_pairs = flat_pairs.items()
-        for k, v in flat_pairs:
-            canonical_key = self.get_aliases().get(k.strip().lower(), k.strip().lower())
-            # Normalize to comma-separated string if multi_key
-            if canonical_key in self.get_multikeys():
-                if isinstance(v, list):
-                    values = ', '.join(str(i).strip() for i in v if str(i).strip())
-                elif isinstance(v, str):
-                    # If it’s already a string, assume it's comma-separated
-                    values = ', '.join(i.strip() for i in v.split(',') if i.strip())
-                else:
-                    values = str(v).strip() if v is not None else ''
-            else:
-                values = str(v).strip() if v is not None else ''
-            tags.append(RAGTag(canonical_key, values))
-        return tags
-
     @staticmethod
     def sanitize_json_string(json_string):
         r"""
@@ -406,7 +394,31 @@ class CommonUtils():
         json_string = re.sub(r'\n', '', json_string)
         return json_string
 
-    def get_tags(self, response: str)->list[RAGTag[str, str]]:
+    def remove_tags(self, response: str)->str:
+        """ remove meta_tags from response """
+        _response = str(response)
+        for match in self.regex.meta_block.findall(_response):
+            _response = _response.replace(f'{match}', '')
+        return _response
+
+    @staticmethod
+    def parse_tags(meta_tags: dict|list[list[str,str]])->list[RAGTag[str,str]]:
+        """ Parse supplied dictionary or list of lists into RAGTags """
+        _rag_tags = []
+        if isinstance(meta_tags, dict):
+            items = meta_tags.items()
+        else:
+            items = meta_tags  # Assume it's list[list[str, str]]
+        for key, value in items:
+            if isinstance(value, str):
+                # Try to split if it's a multi-item string (comma, semicolon, pipe, etc.)
+                split_values = re.split(r'[;,|]\s*', value.strip())
+                # Use list if it split into multiple values, else keep as string
+                value = split_values if len(split_values) > 1 else split_values[0]
+            _rag_tags.append(RAGTag(key, value))
+        return _rag_tags
+
+    def get_tags(self, response: str)->list[RAGTag]:
         """ Extract tags in JSON and meta_tag format from the LLM's response """
         _tags = []
         try:
@@ -438,7 +450,8 @@ class CommonUtils():
             deduped = []
             for tag in _tags:
                 key = (tag.tag,
-                       tuple(tag.content) if isinstance(tag.content, (list, set)) else tag.content)
+                       tuple(tag.content)
+                       if isinstance(tag.content, (list, set)) else tag.content)
                 if key not in seen:
                     seen.add(key)
                     deduped.append(tag)

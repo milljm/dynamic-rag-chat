@@ -33,14 +33,14 @@ class StreamState:
 class RenderWindowState:
     """ RenderWindow dataclass attributes """
     debug: bool
+    verbose: bool
     assistant_mode: bool
     no_rags: bool
-    verbose: bool
     light_mode: bool
     model: str
     host: str
     api_key: str
-    num_ctx: int
+    completion_tokens: int
     syntax_theme: str
     context: ContextManager
     current_dir: str
@@ -53,6 +53,27 @@ class RenderWindowState:
 
     def __post_init__(self):
         self.color = 245 if self.light_mode else 233
+
+@dataclass
+class Renderables:
+    """ Rich Live renderables dataclass object """
+    header: Text
+    query: Markdown
+    seperater: Markdown
+    assistant: Text
+    response: Text|Markdown
+    footer: Text
+
+    @property
+    def full_window(self) -> Group:
+        """ return Live Group """
+        return Group(self.header,
+                     self.query,
+                     self.seperater,
+                     Align.right(self.assistant),
+                     self.response,
+                     self.footer
+                     )
 # pylint: enable=too-many-instance-attributes
 
 class ThinkingThread(Thread):
@@ -89,44 +110,57 @@ class RenderWindow(PromptManager):
         self.common = common
         self.opts = args
 
-        # Load config into dataclass
-        self.state = RenderWindowState(
-            debug=args.debug,
-            assistant_mode=args.assistant_mode,
-            no_rags=args.no_rags,
-            verbose=args.verbose,
-            light_mode=args.light_mode,
-            model=args.model,
-            host=args.host,
-            api_key=args.api_key,
-            num_ctx=args.num_ctx,
-            syntax_theme=args.syntax_theme,
-            context=context,
-            current_dir=current_dir
+        # populate dataclasses, setup
+        self._load_states(current_dir, context, args)
+
+        # Our heavy-weight LLM
+        self.llm = ChatOpenAI(
+            base_url=self.state.host,
+            model=self.state.model,
+            temperature=0.4 if self.state.assistant_mode else '1.1',
+            streaming=True,
+            max_completion_tokens=self.state.completion_tokens,
+            api_key=self.state.api_key
         )
 
-        self.thinking_active: bool = False
-        self.thinking_thread = Thread(target=self.animate_thinking)
-        self.namepulse_active: bool = False
-        self.namepulse_thread = Thread(target=self.animate_namepulse)
-
+        # Prompts
         self.prompts = PromptManager(
             console,
             current_dir,
             args,
             prompt_model=self.state.model
         )
-
-        self.llm = ChatOpenAI(
-            base_url=self.state.host,
-            model=self.state.model,
-            temperature=0.4 if self.state.assistant_mode else '1.1',
-            streaming=True,
-            max_tokens=self.state.num_ctx,
-            api_key=self.state.api_key
-        )
-
         self.prompts.build_prompts()
+
+        self.thinking_active: bool = False
+        self.thinking_thread = Thread(target=self.animate_thinking)
+        self.namepulse_active: bool = False
+        self.namepulse_thread = Thread(target=self.animate_namepulse)
+
+    def _load_states(self, current_dir, context, args):
+        """ Load the assorted dataclass objects in use throughout this module """
+        self.state = RenderWindowState(
+            debug = args.debug,
+            verbose = args.verbose,
+            assistant_mode = args.assistant_mode,
+            no_rags=args.no_rags,
+            light_mode = args.light_mode,
+            model = args.model,
+            host = args.host,
+            api_key = args.api_key,
+            completion_tokens = args.completion_tokens,
+            syntax_theme = args.syntax_theme,
+            context = context,
+            current_dir = current_dir
+        )
+        self.renderable = Renderables(
+            header = Text(''),
+            query = Markdown(''),
+            seperater = Markdown('---'),
+            assistant = Text('', style='bold color(208)'),
+            response = Markdown(''),
+            footer = Text('')
+        )
 
         # Use SimpleCodeBlock instead of CodeBlock (CodeBlock fencing will strip trailing
         # character from a word if that word fits perfectly within fenced window)
@@ -288,7 +322,7 @@ class RenderWindow(PromptManager):
         while self.namepulse_active:
             time.sleep(0.1)
             state.pulse_color_index = (state.pulse_color_index  + 1) % len(state.pulse_colors)
-            self.render_chat()  # Re-render chat with updated pulse
+            self.build_content()  # Re-render chat with updated pulse
 
     def animate_thinking(self):
         """ a threaded method to run the thinking animation """
@@ -296,7 +330,7 @@ class RenderWindow(PromptManager):
         while self.thinking_active:
             time.sleep(0.1)  # Adjust speed (0.1 seconds per frame)
             stream.pulse_index = (stream.pulse_index + 1) % len(stream.pulsing_chars)
-            self.render_chat()
+            self.build_content()
 
     @staticmethod
     def add_image_block(messages: list[BaseMessage], images: list)->list[BaseMessage]:
@@ -398,75 +432,73 @@ class RenderWindow(PromptManager):
 
         return footer
 
+    def render_chat(self, live: Live)->None:
+        """ update the screen using Rich Live with all Rich renderables """
+        live.update(self.renderable.full_window)
+
     # Compose the full chat display with footer (model name, time taken, token count)
-    def render_chat(self, current_stream: str = "")->Text|Markdown:
+    def build_content(self, current_stream: str = '')->Text|Markdown:
         """ render and return markdown/syntax """
-        if self.state.stream.thinking and self.state.verbose:
+        stream = self.state.stream # shortand
+        if stream.thinking and self.state.verbose:
             chat_content = Text(current_stream, style=f'color({self.state.color})')
+        elif stream.do_once and (stream.thinking or stream.meta_hiding):
+            color = self.state.color-5 if self.state.light_mode else self.state.color
+            chat_content = Text('Thinking...', style=f'color({color}')
         else:
             chat_content = Markdown(current_stream)
         return chat_content
 
-    def live_stream(self, documents: dict,
-                          token_savings: int,
-                          prompt_tokens: int,
-                          cleaned_color: int,
-                          preprocessing)->None:
+    def live_stream(self, documents: dict)->None:
         """ Handle the Rich Live updating process """
         stream = self.state.stream  # shorthand
         current_response = ''
-        footer_meta = {'token_savings'   : token_savings,
-                       'prompt_tokens'   : prompt_tokens,
-                       'cleaned_color'   : cleaned_color,
+        footer_meta = {'token_savings'   : documents['token_savings'],
+                       'prompt_tokens'   : documents['prompt_tokens'],
+                       'cleaned_color'   : documents['cleaned_color'],
                        'pre_process_time': documents['pre_process_time'],
                        'token_count'     : 0}
 
         start_time = 0
         color = self.state.color-5 if self.state.light_mode else self.state.color
         _rag = '' if not self.state.no_rags and self.state.assistant_mode else 'RAG+'
-        header = Text(f'Submitting relevant {_rag}History tokens: {footer_meta["prompt_tokens"]} '
-                        f'(took {preprocessing})...', style=f'color({color})')
-        seperator = Markdown('---')
-        query = Markdown(f'**You:** {documents["user_query"]}')
+        self.renderable.header = Text(f'Submitting relevant {_rag}History tokens: '
+                                f'{footer_meta["prompt_tokens"]} '
+                                f'(took {footer_meta["pre_process_time"]})...'
+                                f'{documents.get("in_line_commands", "")}',
+                                style=f'color({color})')
+        self.renderable.query = Markdown(f'**You:** {documents["user_query"]}')
+        self.renderable.assistant = Text(documents["name"], style='bold color(208)')
+        self.renderable.response = Text('Thinking...', style=f'color({color}')
+
         with Live(refresh_per_second=20, console=self.console) as live:
             live.console.clear(home=True)
-            live.update(Group(header,
-                              query,
-                              seperator,
-                              Align.right(Text(documents["name"],
-                                               style='bold color(208)'))))
-
+            self.render_chat(live)
             self.start_namepulse()
             for piece in self.stream_response(documents):
                 if start_time == 0:
                     start_time = time.time()
                 current_response += piece.content
                 footer_meta['token_count'] += self.response_count(piece.content)
-                response = self.render_chat(current_response)
-                footer = self.render_footer(time.time()-start_time, **footer_meta)
-                # replace 'thinking' output with Mode's Markdown response
-                if isinstance(response, Markdown) and stream.do_once:
+                self.renderable.response = self.build_content(current_response)
+                self.renderable.footer = self.render_footer(time.time()-start_time, **footer_meta)
+                # replace 'thinking' output with Model's Markdown response
+                if isinstance(self.renderable.response, Markdown) and stream.do_once:
                     stream.do_once = False
                     # Reset (erase) the thinking output
                     current_response = ''
                 name_color = self.state.pulse_colors[self.state.pulse_color_index]
-                rich_content = Group(header,
-                                     query,
-                                     seperator,
-                                     Align.right(Text(documents["name"],
-                                                      style=f'bold color({name_color})')),
-                                     response,
-                                     footer)
-                live.update(rich_content)
+                self.renderable.assistant = Text(documents["name"],
+                                                 style=f'bold color({name_color})')
+                self.render_chat(live)
+
             self.stop_namepulse()
-            rich_content = Group(header,
-                                     query,
-                                     seperator,
-                                     Align.right(Text(documents["name"],
-                                                      style='bold color(208)')),
-                                     response,
-                                     footer)
-            live.update(rich_content)
+            if not current_response or current_response == ' ':
+                self.renderable.response = self.build_content('Error: recieved no response '
+                                                              'from LLM')
+
+            self.renderable.assistant = Text(documents["name"], style='bold color(208)')
+            self.render_chat(live)
 
         # Finish by saving chat history, finding and storing new RAG/Tags or
         # llm_prompt changes, then reset it.
@@ -485,12 +517,10 @@ class RenderWindow(PromptManager):
             stream.meta_hiding = False
             self.stop_thinking()
             self.console.print('Warn: I had to help the LLM close meta_tags',
-                               style=f'color({self.state.color})',highlight=False)
+                               style=f'color({self.state.color})', highlight=False)
         stream.meta_capture = ''
-        self.state.context.handle_context([str(current_response)],
-                                          direction='store')
+        self.state.context.handle_context([str(current_response)], direction='store')
         current_response = self.common.sanatize_response(current_response)
         self.common.chat_history_session.append(f'\nUSER: {documents["user_query"]}\n\n'
                                                 f'AI: {current_response}')
         self.common.save_chat()
-        self.common.check_prompt(current_response)

@@ -16,7 +16,7 @@ My task is to read the following text and extract a fixed set of metadata fields
 
 🧾 JSON Output Format:
 {{
-  "keywords_entities": [""],
+  "document_topics": [""],
   "unique_identifier": "document title",
   "topic_category_classification": "tags_like_technology_science_finance",
   "user_agent": "details_about_the_client_software_used",
