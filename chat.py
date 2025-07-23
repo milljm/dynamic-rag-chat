@@ -364,13 +364,14 @@ window for your favorite heavy-weight LLM to draw upon.
 This allows for long-term memory, and fast relevent
 content generation.
 """
+    # pylint: disable=line-too-long
     epilog = f"""
 example:
-  ./{os.path.basename(__file__)} -m gemma3-27b -p gemma3-1b -e nomic-embed-text
+  ./{os.path.basename(__file__)} --model gemma3-27b --pre-llm gemma3-1b --embedding-llm nomic-embed-text
 
-Chat can read a .chat.yaml file to import your arguments.
-See .chat.yaml.example for details.
+Chat can read a .chat.yaml file to import your arguments. See .chat.yaml.example for details.
     """
+    # pylint: enable=line-too-long
     parser = argparse.ArgumentParser(description=f'{about}',
                                      epilog=f'{epilog}',
                                      formatter_class=argparse.RawTextHelpFormatter)
@@ -439,7 +440,7 @@ See .chat.yaml.example for details.
 
 if __name__ == '__main__':
     args = parse_args(sys.argv[1:], ChatOptions.from_yaml(current_dir))
-    _opts = ChatOptions.set_from_args(current_dir, args)
+    _opts = ChatOptions.from_args(current_dir, args)
     light_mode_theme = Theme({
             "markdown.code": "black on #e6e6e6",
     })

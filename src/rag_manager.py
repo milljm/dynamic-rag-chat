@@ -215,7 +215,7 @@ class RAG():
         """ store data into the RAG with optional metadata tagged with it """
         if not collection:
             collection = self.common.attributes.collections['ai']
-        # Remove meta_data tagging information from data
+        # Remove metadata tagging information from data
         data = self.common.sanatize_response(data, strip=True)
         if tags_metadata is None:
             tags_metadata = {}

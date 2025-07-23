@@ -287,7 +287,7 @@ class ImportData:
         Walk through supplied directory recursively and store data to gold RAG
         collection.
 
-        Currently supports loading: `*.md *.html *.txt *.pdf`
+        Currently supports loading: `*.md *.html *.txt *.pdf *.template`
 
         *Key init args:*
             .. code-block:: python
@@ -299,7 +299,7 @@ class ImportData:
         files_to_process = []
         for fdir, _, files in os.walk(directory):
             for file in files:
-                if file.endswith(('.md', '.html', '.txt', '.pdf')):
+                if file.endswith(('.md', '.html', '.txt', '.pdf', '.template')):
                     files_to_process.append((fdir, file))
 
         self.state = {

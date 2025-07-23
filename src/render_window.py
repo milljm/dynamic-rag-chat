@@ -23,6 +23,8 @@ class StreamState:
     """ RenderWindow animation (thinking) dataclass attributes """
     partial_chunk: str = ''
     meta_capture: str = ''
+    meta_brace_count: int = 0
+    meta_hide_attempt_count: int = 0
     meta_hiding: bool = False
     thinking: bool = False
     do_once: bool = False
@@ -216,43 +218,62 @@ class RenderWindow(PromptManager):
         content = str(chunk.content)
         stream = self.state.stream  # shorthand
 
-        # === CASE 1: Chunk has '<' – buffer it
         # print(f'DEBUG START>{content}<END')
-        if '<' in content and not stream.meta_hiding:
-            # print(f'DEBUG: < found {content}')
-            stream.partial_chunk = content
-            chunk.content = ''
-
-        # === CASE 2: We're continuing from a previous partial '<'
-        elif stream.partial_chunk and not stream.meta_hiding:
-            # print('DEBUG: partial_chunk true')
-            combined = stream.partial_chunk + content
-            stream.partial_chunk = ''
-
-            if self.common.regex.meta_start_re.search(combined):
-                # print(f'DEBUG: partial_chunk match {combined}')
-                stream.meta_capture = combined
-                stream.meta_hiding = True
-                self.start_thinking()
+        # === CASE 1: Chunk has '{' – start buffering
+        if content in ['```', 'json', '{'] and not stream.meta_hiding:
+            # LLM trying to close json block
+            if '```' in content and stream.meta_capture:
+                stream.meta_capture += '\n```'
                 chunk.content = ''
                 return chunk
+            stream.partial_chunk += content
+            chunk.content = ''
+            return chunk
 
-            chunk.content = combined
+        # === CASE 2: Continue a partial '{' segment
+        if stream.partial_chunk and not stream.meta_hiding:
+            stream.partial_chunk += content
+            stream.meta_hide_attempt_count += 1
+            combined = str(stream.partial_chunk) # shorthand
+            chunk.content = ''
 
-        # === CASE 3: Normal hiding mode
-        elif stream.meta_hiding:
-            # print(f'DEBUG HIDING: waiting for ">" curently:{content}:{">" in content}')
+            if self.common.regex.meta_start_re.search(combined):
+                # print('DEBUG: Starting meta hiding block')
+                stream.meta_hide_attempt_count = 0
+                stream.partial_chunk = ''
+                stream.meta_capture = combined
+                stream.meta_hiding = True
+                stream.meta_brace_count = combined.count('{') - combined.count('}')
+                self.start_thinking()
+                return chunk
+
+            # To many iterations. Assume LLM is not trying to perform metadata operations
+            if stream.meta_hide_attempt_count > 5:
+                # print('DEBUG: Too many attempts, resuming normal operations')
+                stream.partial_chunk = ''
+                chunk.content = combined
+                stream.meta_hide_attempt_count = 0
+                return chunk
+
+        # === CASE 3: Already hiding, count braces
+        if stream.meta_hiding:
+            # print(f'DEBUG HIDING: still capturing metadata chunk: {content}')
             stream.meta_capture += content
-            if '>' in content:
+            stream.meta_brace_count += content.count('{') - content.count('}')
+            # print(f'DEBUG BRACE COUNT: {stream.meta_brace_count}')
+
+            if stream.meta_brace_count <= 0:
+                # print('DEBUG: Completed metadata block.')
                 stream.meta_hiding = False
                 self.stop_thinking()
             chunk.content = ''
 
-        # === CASE 4: Tag started cleanly with no split '<'
-        elif self.common.regex.meta_start_re.search(content):
-            # print(f'DEBUG NOT HIDING: waiting for "reason to hide" curently:{content}')
+        # === CASE 4: Clean match for metadata block at once
+        if self.common.regex.meta_start_re.search(content):
+            # print('DEBUG: Matched meta block directly')
             stream.meta_capture = content
             stream.meta_hiding = True
+            stream.meta_brace_count = content.count('{') - content.count('}')
             self.start_thinking()
             chunk.content = ''
 
@@ -502,7 +523,10 @@ class RenderWindow(PromptManager):
 
         # Finish by saving chat history, finding and storing new RAG/Tags or
         # llm_prompt changes, then reset it.
-        current_response += stream.meta_capture
+        if self.debug and self.state.no_rags and self.state.assistant_mode:
+            self.console.print(f'DEBUG: storing meta\n{stream.meta_capture}\n\n',
+                                style=f'color({self.state.color})',highlight=False)
+        current_response += f'\n\n{stream.meta_capture}'
         if self.state.assistant_mode and not self.state.no_rags:
             self.common.chat_history_session.append(f'\nUSER: {documents["user_query"]}\n\n'
                                                 f'AI: {current_response}')
@@ -510,17 +534,16 @@ class RenderWindow(PromptManager):
                 self.console.print('Info: Nothing saved (assistant-mode)',
                                 style=f'color({self.state.color})',highlight=False)
             return
-        # Pesky LLM forgot to close meta_tags with '>'
-        if (stream.thinking and "<meta_tags:" in current_response
-            and not current_response.strip().endswith(">")):
-            current_response += '>'
-            stream.meta_hiding = False
-            self.stop_thinking()
-            self.console.print('Warn: I had to help the LLM close meta_tags',
-                               style=f'color({self.state.color})', highlight=False)
         stream.meta_capture = ''
+        if self.debug:
+            self.console.print('DEBUG: saving to RAG...',
+                                style=f'color({self.state.color})',highlight=False)
         self.state.context.handle_context([str(current_response)], direction='store')
         current_response = self.common.sanatize_response(current_response)
         self.common.chat_history_session.append(f'\nUSER: {documents["user_query"]}\n\n'
                                                 f'AI: {current_response}')
         self.common.save_chat()
+        if self.debug:
+            self.console.print('DEBUG: live finished',
+                                style=f'color({self.state.color})',highlight=False)
+        return

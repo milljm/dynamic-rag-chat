@@ -58,34 +58,63 @@ Do not mimic emotional or writing tone from retrieved documents. Your tone is de
 CRITICAL: I must tag my response with appropriate metadata for RAG functionality. I cannot omit this process, or skip it. Even if my response will be minimal.
 
 ⚠️ **Entity Tagging**:
-- `entity:` must include all named characters present or mentioned, even if they do not speak.
+- `entity:` must include a list of all named characters present or mentioned, even if they do not speak.
 - If no characters are present, default to the protagonist who is always assumed present.
-- `audience:` must include all named characters physically in the scene.
+- `audience:` must include a list of all named characters physically present during this turn.
 
-<meta_tags:
-entity:list of characters referenced or present;
-audience:list of characters physically present for dialog;
-tone:overall tone of the response;
-emotion:dominant emotion being conveyed;
-focus:primary theme or concern;
-entity_location:where each named entity is currently located in the scene;
-location:active location of the scene;
-items:significant items present or interacted with;
-weather:if relevant, atmospheric/environmental state;
-relationship_stage:emotional or trust development between key characters;
-narrative_arcs:currently active story arcs;
-completed_narrative_arcs:story arcs resolved in this entry;
-scene_type:type of moment (dialogue, combat, travel, memory, etc);
-sensory_mood:descriptive mood or atmosphere;
-user_choice:last user-driven action or input;
-last_object_interacted:object last touched or used;
-time:time of day (morning, dusk, night, etc);
-scene_locked:has the scene physically changed? (true/false);
-time_jump_allowed:did time advance meaningfully? (true/false);
-narrator_mode:POV used (omniscient, 3rd-limited, etc);
-status:physical state (combat, walking, sitting, driving, etc);>
+{{
+  "metadata": {{
+    "entity": "List of characters referenced or present (include all named characters, even if silent)",
+    "audience": "List of characters physically present during this turn (for dialogue)",
+    "tone": "Overall tone of the response",
+    "emotion": "Dominant emotion being conveyed",
+    "focus": "Primary theme or concern",
+    "entity_location": "List of where entities are currently located in the scene"
+    "location": "Active location of the scene",
+    "items": "Significant items present or interacted with",
+    "weather": "Atmospheric/environmental state (if relevant)",
+    "relationship_stage": "Emotional or trust development between key characters",
+    "narrative_arcs": "Currently active story arcs",
+    "completed_narrative_arcs": "Story arcs resolved in this entry",
+    "scene_type": "Type of moment (dialogue, combat, travel, memory, etc)",
+    "sensory_mood": "Descriptive mood or atmosphere",
+    "user_choice": "Last user-driven action or input",
+    "last_object_interacted": "Object last touched or used",
+    "time": "Time of day (morning, dusk, night, etc)",
+    "scene_locked": "Has the scene physically changed? (true/false)",
+    "time_jump_allowed": "Did time advance meaningfully? (true/false)",
+    "narrator_mode": "POV used (omniscient, 3rd-limited, etc)",
+    "status": "Physical state (combat, walking, sitting, driving, etc)"
+  }}
+}}
 
-⚠️ Critical: Always start with <meta_tags: and end with > on a single line.
+✅ Example:
+
+{{
+  "metadata": {{
+    "entity": ["Captain Elira", "Sergeant Kael", "The Whispering Oak"],
+    "audience": ["Captain Elira", "Sergeant Kael"],
+    "tone": "tense",
+    "emotion": "distrust",
+    "focus": "uncovering the truth behind the failed ambush",
+    "entity_location": ["Captain Elira inside the command tent", "Sergeant Kael inside the command tent", "The Whispering Oak just beyond the perimeter, unseen"],
+    "location": "rebel forest bunker, Sector 9",
+    "items": ["cracked battle map", "bloodied dagger", "encrypted orders"],
+    "weather": "damp, mist clinging to the treetops outside",
+    "relationship_stage": "fragile alliance strained by suspicion",
+    "narrative_arcs": ["Betrayal Within", "Whispers of the Forest"],
+    "completed_narrative_arcs": [],
+    "scene_type": "dialogue",
+    "sensory_mood": "low lantern glow, canvas flapping in the wind, distant owl call",
+    "user_choice": "Elira accused Kael of leaking troop movements",
+    "last_object_interacted": "cracked battle map",
+    "time": "midnight",
+    "scene_locked": true,
+    "time_jump_allowed": false,
+    "narrator_mode": "3rd-limited (Elira)",
+    "status": "standing, tense posture"
+  }}
+}}
 
 ---
 

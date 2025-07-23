@@ -168,7 +168,6 @@ class ContextManager(PromptManager):
         # protect against empty or gold RAG (read-only) collections
         if not collection or collection == collections['gold']:
             collection = collections['ai']
-
         list_rag_tags: list[RAGTag] = self.common.get_tags(response)
         if self.debug:
             self.console.print(f'META TAGS PARSED: {list_rag_tags}',
