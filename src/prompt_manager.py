@@ -4,7 +4,12 @@ import sys
 from .chat_utils import ChatOptions # For Type Hinting
 
 class PromptManager():
-    """ Handle all the possible prompt files we may introduce with RAG/Tagging """
+    """
+    Handle all the possible prompt files we may introduce with RAG/Tagging
+
+    Most can be handled by a default. But This class is here so we can support possibly\n
+    more naunced LLMs.
+    """
     def __init__(self, console, current_dir, args: ChatOptions, prompt_model: str = 'default'):
         self.console = console
         self.assistant_prompt = args.assistant_mode

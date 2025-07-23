@@ -12,12 +12,12 @@
 If a character must arrive, narrate their arrival and update `entity:` accordingly.
 
 ### 📚 Dynamic Knowledge Base (RAG Sources)
-CRITICAL: You will treat the following information as factual but not to establish tone or emotion:
+⚠️ CRITICAL: You will treat the following information as factual but not to establish tone or emotion:
 
-USER HISTORY:
+📚 USER HISTORY:
 {user_documents}
 
-AI MEMORY:
+📚 AI MEMORY:
 {ai_documents}
 
 ### Chat History (oldest to newest, chronological-ascending)

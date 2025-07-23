@@ -11,6 +11,7 @@
 #     "langchain-community",
 #     "prompt_toolkit",
 #     "rich",
+#     "rank_bm25",
 #     "pypdf",
 #     "pytz",
 #     "pillow"
@@ -23,7 +24,6 @@ import os
 import io
 import sys
 import time
-from datetime import timedelta
 import base64
 import argparse
 import datetime
@@ -33,20 +33,16 @@ import pytz
 import requests
 from rich.console import Console
 from rich.theme import Theme
-from rich.console import Group
-from rich.live import Live
-from rich.panel import Panel
-from rich.table import Table
 from bs4 import BeautifulSoup
 from PIL import Image
 from prompt_toolkit import PromptSession
 from prompt_toolkit.key_binding import KeyBindings
-import pypdf # for error handling of PyPDFLoader
 from langchain_community.document_loaders import PyPDFLoader
 from src import ContextManager
-from src import RAG, RAGTagManager
+from src import RAG
 from src import RenderWindow
 from src import CommonUtils, ChatOptions
+from src import ImportData
 console = Console(highlight=True)
 current_dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -63,7 +59,6 @@ class SessionContext:
     """
     common: CommonUtils
     rag: RAG
-    rag_tag: RAGTagManager
     context: ContextManager
     renderer: RenderWindow
 
@@ -72,12 +67,10 @@ class SessionContext:
         """ instance and return session dataclass """
         _common = CommonUtils(c_console, c_args)
         _rag = RAG(c_console, _common, c_args)
-        _rag_tag = RAGTagManager(console, _common, c_args)
-        _context = ContextManager(console, _common, _rag, _rag_tag, current_dir, c_args)
+        _context = ContextManager(console, _common, _rag, current_dir, c_args)
         _renderer = RenderWindow(console, _common, _context, current_dir, c_args)
         return cls(common=_common,
                    rag=_rag,
-                   rag_tag=_rag_tag,
                    context=_context,
                    renderer=_renderer)
 
@@ -101,7 +94,7 @@ class Chat():
             console.print('[italic dim grey30]Assistant mode enabled.[/]')
 
     @staticmethod
-    def get_time(tzone):
+    def get_time(tzone: str)->str:
         """ return the time """
         mdt_timezone = pytz.timezone(tzone)
         my_time = datetime.datetime.now(mdt_timezone)
@@ -111,7 +104,7 @@ class Chat():
         return _str_fmt
 
     @staticmethod
-    def set_lightmode_aware(light):
+    def set_lightmode_aware(light: bool)->str:
         """ inject a light-mode aware prompt command """
         if light:
             return ('Reminder: The user is using a high luminance background. Therefore, try'
@@ -119,7 +112,7 @@ class Chat():
         return ('Reminder: The user is using a low luminance background. Therefore, try'
                     ' and only use bright emojis which will provide high-contrast')
 
-    def token_counter(self, documents: dict):
+    def token_counter(self, documents: dict)->any:
         """ report each document token counts """
         for key, value in documents.items():
             yield (key, self.session.context.token_retreiver(value))
@@ -150,40 +143,43 @@ class Chat():
          pre_t,
          post_t) = self.session.context.handle_context([user_input])
 
-        # pylint: disable=consider-using-f-string  # no, this is how it is done
-        pre_process_time = '{:.1f}s'.format(time.time() - pre_process_time)
+        # Heat Map
+        (prompt_tokens, cleaned_color) = self.token_manager(documents, max(0, pre_t - post_t))
 
-        token_savings = max(0, pre_t - post_t)
-        documents.update(
-            {'llm_prompt'       : self.session.common.load_prompt(),
-             'user_query'       : user_input,
-             'dynamic_files'    : '',
-             'dynamic_images'   : [],
-             'history_sessions' : self.opts.history_sessions,
-             'name'             : self.opts.name,
-             'date_time'        : self.get_time(self.opts.time_zone),
-             'num_ctx'          : self.opts.num_ctx,
-             'pre_process_time' : pre_process_time,
-             'light_mode'       : self.set_lightmode_aware(self.opts.light_mode)}
-        )
-        # Stringify everything (except images)
-        for k, v in documents.items():
-            if k in ['dynamic_images']:
-                continue
-            documents[k] = self.session.common.stringify_lists(v)
-
-        # Do heat map stuff
-        (prompt_tokens, cleaned_color) = self.token_manager(documents, token_savings)
-
+        # Get total token estimate of context
         performance_summary = ''
         for k, v in self.token_counter(documents):
             performance_summary += f'{k}:{v}\n'
+        performance = (f'Total Tokens: {prompt_tokens}\n'
+                       f'Duplicate Tokens removed: {max(0, pre_t - post_t)}\n'
+                       'My maximum Context Window size: '
+                       f'{self.opts.completion_tokens}')
 
-        # Supply the LLM with its own performances
-        documents['performance'] = (f'Total Tokens: {prompt_tokens}\n'
-                                    f'Duplicate Tokens removed: {max(0, pre_t - post_t)}\n'
-                                    f'My maximum Context Window size: {self.opts.num_ctx}')
-        return (documents, token_savings, prompt_tokens, cleaned_color, pre_process_time)
+        # pylint: disable=consider-using-f-string  # no, {:.f} this is how it is done
+        pre_process_time = '{:.1f}s'.format(time.time() - pre_process_time)
+
+        # Fill documents with other useful information used downstream. This is a bit dirty
+        # but, some of this information may become useful to provide to the LLM itself. And
+        # so we include it here. Each item bellow becomes available within the LLM prompt
+        # template system like so:
+        #   My name is {name}. The date is {date_time}. It took {pre_process_time}... etc etc
+        documents.update(
+            {'user_query'       : user_input,
+             'dynamic_files'    : '',
+             'dynamic_images'   : [],
+             'performance'      : performance,
+             'history_sessions' : self.opts.history_sessions,
+             'name'             : self.opts.name,
+             'date_time'        : self.get_time(self.opts.time_zone),
+             'completion_tokens': self.opts.completion_tokens,
+             'pre_process_time' : pre_process_time,
+             'light_mode'       : self.set_lightmode_aware(self.opts.light_mode),
+             'prompt_tokens'    : prompt_tokens,
+             'token_savings'    : max(0, pre_t - post_t),
+             'cleaned_color'    : cleaned_color,
+             }
+            )
+        return documents
 
     def load_content_as_context(self, user_input: str) -> dict:
         """Parse user_input for all occurrences of {{ /path/to/file }}"""
@@ -278,33 +274,36 @@ class Chat():
 
     def no_context(self, user_input)->tuple:
         """ perform search without any context involved """
-        # pylint: disable=consider-using-f-string  # no, this is how it is done
-        documents = {'user_query'       : user_input,
-                     'name'             : self.opts.name,
-                     'chat_history'     : '',
-                     'dynamic_files'    : '',
-                     'dynamic_images'   : [],
-                     'history_sessions' : self.opts.history_sessions,
-                     'ai_documents'     : '',
-                     'user_documents'   : '',
-                     'context'          : '',
-                     'date_time'        : self.get_time(self.opts.time_zone),
-                     'num_ctx'          : self.opts.num_ctx,
-                     'pre_process_time' : '{:.1f}s'.format(0),
-                     'performance'      : '',
-                     'light_mode'       : self.set_lightmode_aware(self.opts.light_mode),
-                     'llm_prompt'       : ''}
-        preprocessing = 0
-        token_savings = 0
-        cleaned_color = 0
-        prompt_tokens = self.session.context.token_retreiver(user_input)
-        cleaned_color = 0
+        prompt_tokens = self.session.context.token_retreiver(user_input) # short hand
+        collections = self.session.common.attributes.collections # short hand
         self.session.common.heat_map = self.session.common.create_heatmap(prompt_tokens,
                                                             reverse=True)
         cleaned_color = [v for k,v in
-                            self.session.common.create_heatmap(prompt_tokens / 2).items()
-                            if k<=token_savings][-1:][0]
-        return (documents, token_savings, prompt_tokens, cleaned_color, preprocessing)
+                         self.session.common.create_heatmap(prompt_tokens / 2).items()
+                         if k<=0][-1:][0]
+        # pylint: disable=consider-using-f-string  # no, this is how it is done
+        documents = {'user_query'        : user_input,
+                     'name'              : self.opts.name,
+                     'chat_history'      : '',
+                     'dynamic_files'     : '',
+                     'dynamic_images'    : [],
+                     'history_sessions'  : self.opts.history_sessions,
+                     collections['ai']   : '',
+                     collections['user'] : '',
+                     collections['gold'] : '',
+                     'content_type'      : '',
+                     'context'           : '',
+                     'date_time'         : self.get_time(self.opts.time_zone),
+                     'completion_tokens' : self.opts.completion_tokens,
+                     'pre_process_time'  : '{:.1f}s'.format(0),
+                     'performance'       : '',
+                     'light_mode'        : self.set_lightmode_aware(self.opts.light_mode),
+                     'llm_prompt'        : '',
+                     'prompt_tokens'     : prompt_tokens,
+                     'token_savings'     : 0,
+                     'cleaned_color'     : cleaned_color,
+                     }
+        return documents
 
     def chat(self):
         """ Prompt the User for questions, and begin! """
@@ -331,31 +330,22 @@ class Chat():
 
                 if user_input.find(r'\no-context') >=0:
                     user_input = user_input.replace(r'\no-context ', '')
-                    (documents,
-                     token_savings,
-                     prompt_tokens,
-                     cleaned_color,
-                     preprocessing) = self.no_context(user_input)
+                    documents = self.no_context(user_input)
+                    documents['in_line_commands'] = '\nMeta commands: [no-context, ]'
 
                 else:
                     # Grab our lovely context
-                    (documents,
-                    token_savings,
-                    prompt_tokens,
-                    cleaned_color,
-                    preprocessing) = self.get_documents(user_input)
+                    documents = self.get_documents(user_input)
 
                 # add in-line content
                 documents.update(self.load_content_as_context(user_input))
 
                 # handoff to rich live
-                self.session.renderer.live_stream(documents,
-                                                  token_savings,
-                                                  prompt_tokens,
-                                                  cleaned_color,
-                                                  preprocessing)
+                self.session.renderer.live_stream(documents)
 
-        except KeyboardInterrupt:
+        except KeyboardInterrupt:  # ctl-c
+            sys.exit()
+        except EOFError:  # ctl-d
             sys.exit()
 
 def verify_args(p_args):
@@ -374,13 +364,14 @@ window for your favorite heavy-weight LLM to draw upon.
 This allows for long-term memory, and fast relevent
 content generation.
 """
+    # pylint: disable=line-too-long
     epilog = f"""
 example:
-  ./{os.path.basename(__file__)} -m gemma3-27b -p gemma3-1b -e nomic-embed-text
+  ./{os.path.basename(__file__)} --model gemma3-27b --pre-llm gemma3-1b --embedding-llm nomic-embed-text
 
-Chat can read a .chat.yaml file to import your arguments.
-See .chat.yaml.example for details.
+Chat can read a .chat.yaml file to import your arguments. See .chat.yaml.example for details.
     """
+    # pylint: enable=line-too-long
     parser = argparse.ArgumentParser(description=f'{about}',
                                      epilog=f'{epilog}',
                                      formatter_class=argparse.RawTextHelpFormatter)
@@ -409,14 +400,15 @@ See .chat.yaml.example for details.
     parser.add_argument('--history-matches', metavar='', dest='matches', default=opts.matches,
                         type=int,
                         help='Number of results to pull from each RAG (default: %(default)s)')
-    parser.add_argument('--history-sessions', metavar='', default=opts.history_sessions, type=int,
+    parser.add_argument('--history-sessions', metavar='', default=opts.history_sessions,
+                        type=int,
                         help='Chat history responses availble in context (default: %(default)s)')
     parser.add_argument('--history-max', metavar='', dest='chat_max', default=opts.chat_history,
                         type=int,
                         help='Chat history responses to save to disk (default: %(default)s)')
-    parser.add_argument('--context-window', metavar='', dest='num_ctx', default=opts.num_ctx,
-                        type=int,
-                        help='The maximum context window size (default: %(default)s)')
+    parser.add_argument('--completion-tokens', metavar='', dest='completion_tokens',
+                        default=opts.completion_tokens, type=int,
+                        help='The maximum tokens the LLM can respond with (default: %(default)s)')
     parser.add_argument('--syntax-style', metavar='', dest='syntax_theme',
                         default=opts.syntax_theme, type=str,
                         help=('Your desired syntax-highlight theme (default: %(default)s).'
@@ -446,276 +438,35 @@ See .chat.yaml.example for details.
 
     return verify_args(parser.parse_args(argv))
 
-def estimate_eta(start_time, processed, total):
-    """Estimate time remaining based on progress"""
-    elapsed = time.time() - start_time
-    if processed == 0:
-        return "Calculating..."
-    rate = elapsed / processed
-    remaining = total - processed
-    eta_seconds = int(rate * remaining)
-    return str(timedelta(seconds=eta_seconds))
-
-def make_full_status(_state: dict)->Group:
-    """Use Rich Live to update the user on processing, including error reporting."""
-    eta = estimate_eta(_state['start_time'],
-                   _state['file_idx'] + 1,
-                   _state['file_total'])
-
-    file_table = Table.grid(padding=(0, 1))
-    for file_path in _state['processed_files']:
-        file_table.add_row(f'[dim]File:[/] {file_path}')
-    file_table.add_row('')  # Spacer
-    file_table.add_row((f'[bold green]File Progress:[/] {_state["file_idx"]+1} '
-                        f'/ {_state["file_total"]}'
-                        f' [bold green]Estimated Time Remaining:[/] {eta}'))
-    file_panel = Panel.fit(
-        file_table,
-        title='📂 File Import Status',
-        border_style='green'
-    )
-
-    chunk_panel = _state.get('chunk_panel')
-    if not isinstance(chunk_panel, Panel):
-        chunk_panel = Panel(chunk_panel or 'Awaiting chunk processing...',
-                            border_style='blue',
-                            title='🔄 Processing RAG Input')
-
-    # 🛑 Error Panel
-    error_lines = []
-    for file, err in _state.get('failed', set([])):
-        short_error = str(err).split('\n', maxsplit=1)[0][:100]
-        error_lines.append(f'[red]❌ {file}[/]: {short_error}')
-
-    if error_lines:
-        error_panel = Panel(
-            '\n'.join(error_lines),
-            title='❌ Failed Files',
-            border_style='red'
-        )
-        return Group(file_panel, chunk_panel, error_panel)
-    return Group(file_panel, chunk_panel)
-
-def store_data(d_session: SessionContext,
-               data: str,
-               data_file: str = '',
-               live=None,
-               _state=None) -> tuple[bool,str]:
-    """
-    Tag and Process incoming document into the RAG
-    Returns tuple(sucess, error string)
-    """
-    try:
-        # pylint: disable=protected-access  # protected by try
-        parent_split = (f'Parent=[bold]{d_session.rag.parent_splitter._chunk_size}[/]'
-                       f'/[bold]{d_session.rag.parent_splitter._chunk_overlap}[/]'
-                       f' Split: [bold]{repr(d_session.rag.parent_splitter._separators[0])}[/]')
-        child_split = (f'Child=[bold]{d_session.rag.child_splitter._chunk_size}[/]'
-                       f'/[bold]{d_session.rag.child_splitter._chunk_overlap}[/]'
-                       f' Split: [bold]{repr(d_session.rag.child_splitter._separators[0])}[/]')
-        # pylint: enable=protected-access
-    except AttributeError:
-        parent_split = f'Parent=[bold]2000[/]/[bold]1000[/] Split: [bold]{repr("\n\n")}[/]'
-        child_split = f'Child=[bold]100[/]/[bold]100[/] Split: [bold]{repr(".")}[/]'
-    def make_status_table(parent: tuple[int,int,list],
-                          child: tuple[int,int],
-                          storing: bool=False,
-                          processing: bool=False,
-                          retry: bool=False,
-                          message: str= '') -> Panel:
-        table = Table.grid()
-        proc = f'{" [italic red]LLM Pre-Processor/Tagging[/]" if processing else ""}'
-        proc = f'{proc} {"[yellow]⚠️  Retrying:[/]" if retry else ""}'
-        proc = f'{proc} [dim]{message}[/]' if retry else proc
-        stor = f'{" [italic red]RAG Update[/]" if storing else ""}'
-        meta = f'[dim]Appling Meta Tags to Childeren: {parent[2][:4]}[/]'
-        table.add_row(f'[bold]Current File:[/] {os.path.basename(data_file)}')
-        table.add_row(f'[bold green]Parent Chunk:[/] {parent[0]+1} / {parent[1]}{proc}')
-        table.add_row(f'[cyan]Child Chunks:[/] {child[0]}/{child[1]}{stor}')
-        table.add_row(f'[yellow]Chunk Sizes:[/] {parent_split} [blue]│[/] {child_split}')
-        if parent[2]:
-            table.add_row(f'{meta}')
-        elif not parent[2] and storing:
-            table.add_row('[dim]Warning: No Meta Data[/]')
-            _state['failed'].add((data_file, 'No Meta Data gathered'))
-        return Panel(table, title="🔄 Processing RAG Input", border_style="blue")
-
-    split_docs = d_session.rag.parent_splitter.split_text(data)
-    meta_tags = []
-    for cnt, split_doc in enumerate(split_docs):
-        child_docs = d_session.rag.child_splitter.split_text(split_doc)
-        if live and _state is not None:
-            _state['chunk_panel'] = make_status_table((cnt,
-                                                       len(split_docs),
-                                                       meta_tags),
-                                                       (0, len(child_docs)),
-                                                       processing=True)
-            live.update(make_full_status(_state))
-
-            # Some times the LLM/RAG Tagging does gibe well. And a simple 'try again' works
-            for attempt in range(2):
-                try:
-                    (message,
-                     meta_tags,
-                     _,
-                     status) = d_session.context.pre_processor(split_doc, do_scene=False)
-                    if not status:
-                        raise RuntimeError(message)
-                    _normal = d_session.common.normalize_for_dedup(split_doc)
-                    d_session.rag.store_data(_normal, tags_metadata=meta_tags)
-                    break
-                # pylint: disable=broad-exception-caught  # handling lots of possibilities here
-                except Exception as e:
-                    if attempt == 1:
-                        _state['chunk_panel'] = make_status_table((cnt,
-                                                                   len(split_docs),
-                                                                   meta_tags),
-                                                                   (0, len(child_docs)))
-                        _state['failed'].add((data_file, e))
-                        live.update(make_full_status(_state))
-                        return (False, f'Preprocessor/Tagging error: {e}')
-                    _state['chunk_panel'] = make_status_table((cnt,
-                                                               len(split_docs),
-                                                               meta_tags),
-                                                               (0, len(child_docs)),
-                                                               processing=True,
-                                                               retry=True,
-                                                               message=e)
-                    live.update(make_full_status(_state))
-                    time.sleep(0.5)
-                # pylint enable=broad-exception-caught
-
-        c_cnt = 0
-        for c_cnt, child_doc in enumerate(child_docs):
-            d_session.rag.store_data(child_doc, tags_metadata=meta_tags)
-            if live and _state is not None:
-                _state['chunk_panel'] = make_status_table((cnt,
-                                                           len(split_docs),
-                                                           meta_tags),
-                                                           (c_cnt+1, len(child_docs)),
-                                                           storing=True)
-                live.update(make_full_status(_state))
-        _state['chunk_panel'] = make_status_table((cnt,
-                                                   len(split_docs),
-                                                   []),
-                                                   (c_cnt+1, len(child_docs)))
-        if live and _state is not None:
-            live.update(make_full_status(_state))
-
-def extract_text_from_dir(d_session: SessionContext, v_args: argparse.ArgumentParser) -> None:
-    """ Walk through supplied directory recursively and beginning storing data """
-    files_to_process = []
-    for fdir, _, files in os.walk(v_args.import_dir):
-        for file in files:
-            if file.endswith(('.md', '.html', '.txt', '.pdf')):
-                files_to_process.append((fdir, file))
-    _state = {
-        'file_idx': 0,
-        'file_total': len(files_to_process),
-        'file_name': '',
-        'processed_files': [],
-        'chunk_panel': None,
-        'failed': set([]),
-        'start_time': time.time(),
-    }
-    with Live(make_full_status(_state), refresh_per_second=20) as live:
-        for idx, (fdir, file) in enumerate(files_to_process):
-            _file = os.path.join(fdir, file)
-            _state['file_idx'] = idx
-            _state['file_name'] = _file
-            _state['processed_files'].append(_file)
-            max_history = 10
-            if len(_state['processed_files']) > max_history:
-                _state['processed_files'] = _state['processed_files'][-max_history:]
-            live.update(make_full_status(_state))
-            if file.endswith('.pdf'):
-                v_args.import_pdf = file
-                extract_text_from_pdf(d_session, v_args, do_exit=False)
-                continue
-            with open(_file, 'r', encoding='utf-8') as file_handle:
-                document_content = file_handle.read()
-            if _file.endswith('.html'):
-                soup = BeautifulSoup(document_content, 'html.parser')
-                document_content = soup.get_text()
-            store_data(d_session,document_content,data_file=_file,live=live,_state=_state)
-    sys.exit()
-
-def extract_text_from_pdf(d_session: SessionContext,
-                          v_args: argparse.ArgumentParser,
-                          do_exit=True)->None:
-    """ Store imported PDF text directly into the RAG """
-    print(f'Importing document: {v_args.import_pdf}')
-    loader = PyPDFLoader(v_args.import_pdf)
-    pages = []
-    try:
-        for page in loader.lazy_load():
-            pages.append(page)
-        page_texts = list(map(lambda doc: doc.page_content, pages))
-        for p_cnt, page_text in enumerate(page_texts):
-            if page_text:
-                print(f'\tPage {p_cnt+1}/{len(page_texts)}')
-                store_data(d_session, page_text)
-            else:
-                print(f'\tPage {p_cnt+1}/{len(page_texts)} blank')
-    except pypdf.errors.PdfStreamError as e:
-        print(f'Error loading PDF:\n\n\t{e}\n\nIs this a valid PDF?')
-        sys.exit(1)
-    if do_exit:
-        sys.exit()
-
-def store_text(d_session: SessionContext,
-               v_args: argparse.ArgumentParser)->None:
-    """ Store imported text file directly into the RAG """
-    print(f'Importing document: {v_args.import_txt}')
-    with open(v_args.import_txt, 'r', encoding='utf-8') as file:
-        document_content = file.read()
-        if v_args.import_txt.endswith('.html'):
-            soup = BeautifulSoup(document_content, 'html.parser')
-            document_content = soup.get_text()
-        store_data(d_session, document_content)
-    sys.exit()
-
-def extract_text_from_web(d_session: SessionContext,
-                          v_args: argparse.ArgumentParser)->None:
-    """ extract plain text from web address """
-    response = requests.get(v_args.import_web, timeout=300)
-    if response.status_code == 200:
-        print(f"Document loaded from: {v_args.import_web}")
-        soup = BeautifulSoup(response.content, 'html.parser')
-        text = soup.get_text()
-        store_data(d_session, text)
-    else:
-        print(f'Error obtaining webpage: {response.status_code}\n{response.raw}')
-        sys.exit(1)
-
 if __name__ == '__main__':
     args = parse_args(sys.argv[1:], ChatOptions.from_yaml(current_dir))
-    _opts = ChatOptions.set_from_args(current_dir, args)
+    _opts = ChatOptions.from_args(current_dir, args)
     light_mode_theme = Theme({
             "markdown.code": "black on #e6e6e6",
     })
     if _opts.light_mode:
         console = Console(theme=light_mode_theme)
     session = SessionContext.from_args(console, _opts)
+    import_data = ImportData(session)
     try:
         if args.import_txt:
             if os.path.exists(args.import_txt):
-                store_text(session, _opts)
+                import_data.store_text(args.import_txt)
             else:
                 print(f'Error: The file at {args.import_txt} does not exist.')
                 sys.exit(1)
         if args.import_pdf:
             if os.path.exists(args.import_pdf):
-                extract_text_from_pdf(session, _opts)
+                import_data.extract_text_from_pdf(args.import_pdf)
             else:
                 print(f"Error: The file at {args.import_pdf} does not exist.")
                 sys.exit(1)
         if args.import_web:
-            extract_text_from_web(session, _opts)
+            import_data.extract_text_from_web(args.import_web)
             sys.exit(0)
         if args.import_dir:
             if os.path.exists(args.import_dir):
-                extract_text_from_dir(session, _opts)
+                import_data.extract_text_from_dir(args.import_dir)
                 sys.exit(0)
         chat = Chat(session, _opts)
         chat.chat()

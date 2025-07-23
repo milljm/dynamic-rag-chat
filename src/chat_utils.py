@@ -1,10 +1,13 @@
 """ common utils used by multiple class modules """
+from __future__ import annotations
 import os
 import re
 import sys
 import pickle
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Mapping
 from typing import NamedTuple
 import yaml
 
@@ -16,126 +19,131 @@ class RAGTag(NamedTuple):
     tag: str
     content: str
 
-# pylint: disable=too-many-instance-attributes
 @dataclass
-class ChatOptions:
-    """
-    Chat arguments dataclass, with a method to initialize using **kwargs.
-    """
-    debug: bool
-    host: str
-    model: str
-    num_ctx: int
-    time_zone: str
-    light_mode: bool
-    name: str
-    verbose: bool
-    assistant_mode: bool
-    no_rags: bool
-    model: str
-    preconditioner: str
-    embeddings: str
-    vector_dir: str
-    matches: int
-    pre_host: str
-    emb_host: str
-    api_key: str
-    num_ctx: int
-    chat_history: int
-    history_sessions: int
-    syntax_theme: str
-    color: int
-    import_dir: str
-    import_pdf: str
-    import_txt: str
-    import_web: str
+class StandardAttributes:
+    """ Data class to hold imutable project attributes """
+    collections: dict   # RAG Collection name to collection id
 
     @classmethod
-    def from_yaml(cls, current_dir) -> 'ChatOptions':
-        """ read options from yaml file, or set defaults """
-        chat_yaml = os.path.join(current_dir, '.chat.yaml')
-        _dict = {}
-        if os.path.exists(chat_yaml):
-            with open(chat_yaml, 'r', encoding='utf-8') as f:
-                _dict = yaml.safe_load(f) or {}
-        arg_dict = _dict.get('chat', {})  # short hand
-        # Create the ChatOptions instance with all required arguments
-        return cls(host = arg_dict.get('llm_server', 'http://localhost:11434/v1'),
-            light_mode=arg_dict.get('light_mode', False),
-            name=arg_dict.get('name', 'assistant'),
-            verbose=arg_dict.get('verbose', False),
-            assistant_mode=arg_dict.get('assistant_mode', False),
-            no_rags=arg_dict.get('use_rags', False),
-            model = arg_dict.get('model', 'gemma3:27b'),
-            preconditioner = arg_dict.get('pre_llm', 'gemma3:1b'),
-            embeddings = arg_dict.get('embedding_llm', 'nomic-embed-text'),
-            vector_dir = arg_dict.get('history_dir', os.path.join(current_dir, 'vector_data')),
-            matches = int(arg_dict.get('history_matches', 5)), # 5 from each RAG (User & AI)
-            pre_host = arg_dict.get('pre_server', 'http://localhost:11434/v1'),
-            emb_host = arg_dict.get('embedding_server', 'http://localhost:11434/v1'),
-            api_key = arg_dict.get('api_key', 'none'),
-            num_ctx = int(arg_dict.get('context_window', 4192)),
-            chat_history = int(arg_dict.get('history_max', 1000)),
-            history_sessions = int(arg_dict.get('history_sessions', 5)),
-            time_zone = arg_dict.get('time_zone', 'GMT'),
-            debug = arg_dict.get('debug', False),
-            syntax_theme = arg_dict.get('syntax_theme', 'fruity'),
-            color = 245 if arg_dict.get('light_mode', False) else 233,
-            import_dir = arg_dict.get('import_dir', False),
-            import_pdf = arg_dict.get('import_pdf', False),
-            import_txt = arg_dict.get('import_txt', False),
-            import_web = arg_dict.get('import_web', False),
-        )
+    def attributes(cls)->'StandardAttributes':
+        """ return project attributes shared throught project """
+        return cls(collections={'user' : 'user_documents',
+                                'ai'   : 'ai_documents',
+                                'gold' : 'gold_documents'}
+                   )
+
+# pylint: disable=too-many-instance-attributes  # thats what dataclasses are for
+@dataclass(slots=True, kw_only=True)
+class ChatOptions:
+    """ Chat arguments dataclass """
+    # ---------- “core” options ----------
+    host: str = 'http://localhost:11434/v1'
+    model: str = 'gemma3:27b'
+    completion_tokens: int = 2048
+    time_zone: str = 'GMT'
+    api_key: str = 'none'
+    assistant_mode: bool = False
+    no_rags: bool = False
+    debug: bool = False
+    verbose: bool = False
+    light_mode: bool = False
+    name: str = 'assistant'
+
+    # ---------- RAG / pre‑ & post‑processing ----------
+    preconditioner: str = 'gemma3:1b'
+    embeddings: str = 'nomic-embed-text'
+    pre_host: str = 'http://localhost:11434/v1'
+    emb_host: str = 'http://localhost:11434/v1'
+    vector_dir: str = field(default_factory=lambda: str(Path.cwd() / 'vector_data'))
+    matches: int = 20
+
+    # ---------- history ----------
+    chat_history: int = 1000
+    history_sessions: int = 5
+
+    # ---------- UI ----------
+    syntax_theme: str = 'fruity'
+    color: int = field(init=False)
+
+    # ---------- bulk import ----------
+    import_dir: str | bool = False
+    import_pdf: str | bool = False
+    import_txt: str | bool = False
+    import_web: str | bool = False
+
+    # --- post‑processing of derived fields ---
+    def __post_init__(self) -> None:
+        # derive colour from light/dark mode
+        object.__setattr__(self, "color", 245 if self.light_mode else 233)
+
+    _ALIASES = {
+        # YAML/config wording        # ChatOptions field
+        "llm_server":       "host",
+        "pre_llm":          "preconditioner",
+        "embedding_llm":    "embeddings",
+        "pre_server":       "pre_host",
+        "embedding_server": "emb_host",
+        "history_dir":      "vector_dir",
+        "history_matches":  "matches",
+        "history_max":      "chat_history",
+        "chat_max":         "chat_history",
+        "use_rags":          "no_rags",
+    }
+
+    _INT_FIELDS = {"matches", "completion_tokens", "chat_history", "history_sessions"}
     @classmethod
-    def set_from_args(cls, current_dir, vargs) -> 'ChatOptions':
-        """ populate args from ArgumentParser """
-        arg_dict = vars(vargs)
-        return cls(host = arg_dict.get('host', 'http://localhost:11434/v1'),
-            light_mode=arg_dict.get('light_mode', False),
-            name=arg_dict.get('name', 'assistant'),
-            verbose=arg_dict.get('verbose', False),
-            assistant_mode=arg_dict.get('assistant_mode', False),
-            no_rags=arg_dict.get('use_rags', False),
-            model = arg_dict.get('model', 'gemma3:27b'),
-            preconditioner = arg_dict.get('preconditioner', 'gemma3:1b'),
-            embeddings = arg_dict.get('embeddings', 'nomic-embed-text'),
-            vector_dir = arg_dict.get('history_dir', os.path.join(current_dir, 'vector_data')),
-            matches = int(arg_dict.get('matches', 5)), # 5 from each RAG (User & AI)
-            pre_host = arg_dict.get('pre_host', 'http://localhost:11434/v1'),
-            emb_host = arg_dict.get('emb_host', 'http://localhost:11434/v1'),
-            api_key = arg_dict.get('api_key', 'none'),
-            num_ctx = int(arg_dict.get('context_window', 4192)),
-            chat_history = int(arg_dict.get('chat_max', 1000)),
-            history_sessions = int(arg_dict.get('history_sessions', 5)),
-            time_zone = arg_dict.get('time_zone', 'GMT'),
-            debug = arg_dict.get('debug', False),
-            syntax_theme = arg_dict.get('syntax_theme', 'fruity'),
-            color = 245 if arg_dict.get('light_mode', False) else 233,
-            import_dir = arg_dict.get('import_dir', False),
-            import_pdf = arg_dict.get('import_pdf', False),
-            import_txt = arg_dict.get('import_txt', False),
-            import_web = arg_dict.get('import_web', False),
-        )
+    def _build(cls, current_dir: str | Path, raw: Mapping[str, Any]) -> "ChatOptions":
+        """
+        Convert *any* dict‑like object (from YAML or argparse)
+        into valid kwargs for the dataclass.
+        """
+        data: dict[str, Any] = {}
+        for key, value in raw.items():
+            field_name = cls._ALIASES.get(key, key)
+            if field_name in cls._INT_FIELDS:
+                value = int(value)
+            data[field_name] = value
+
+        # vector directory default needs `current_dir`
+        data.setdefault("vector_dir", os.path.join(current_dir, "vector_data"))
+        return cls(**data)
+
+    @classmethod
+    def from_yaml(cls, current_dir: str | Path) -> "ChatOptions":
+        """Load `.chat.yaml` (if present) and merge with defaults."""
+        cfg_file = Path(current_dir) / ".chat.yaml"
+        raw: dict[str, Any] = {}
+        if cfg_file.exists():
+            raw = yaml.safe_load(cfg_file.read_text("utf‑8")) or {}
+            raw = raw.get("chat", {})
+        return cls._build(current_dir, raw)
+
+    @classmethod
+    def from_args(cls, current_dir: str | Path, args_namespace) -> "ChatOptions":
+        """Build from an `argparse.Namespace`."""
+        return cls._build(current_dir, vars(args_namespace))
 # pylint: enable=too-many-instance-attributes
+
 
 @dataclass
 class RegExp:
     """ regular expression in use throughout the project """
     model_re = re.compile(r'(\w+)\W+')
     find_prompt  = re.compile(r'(?<=[<m]eta_prompt: ).*?(?=[>)])', re.DOTALL)
-    meta_data = re.compile(r'[<]?meta_tags:(.*?);?\s*>', re.DOTALL)
-    meta_block = re.compile(r'[<]?meta_tags:.*?\s*>', re.DOTALL)
-    meta_start_re = re.compile(r'[\(<\[]\s*meta[_\-:]?', re.IGNORECASE)
-    meta_iter = re.compile(r'(\w+):\s*(.+?)(?=[;\n>]|$)')
+    meta_start_re = re.compile(r'{\W*(metadata)\W+:', re.IGNORECASE)
     json_template = re.compile(r'\{+\s*((?:".+?":.+?)+)\s*\}+', re.DOTALL)
-    json_style = re.compile(r'\{\s*(.*?)\s*\}', re.DOTALL)
+    json_style = re.compile(r'```json.*```', re.DOTALL)
     json_malformed = re.compile(r'{+(.*)}', re.DOTALL)
+    all_json = re.compile(r'{.*}', re.DOTALL)
     curly_match = re.compile(r'\{\{\s*(.*?)\s*\}\}', re.DOTALL)
+    entities = re.compile(r'[;,|\n]+|\s{2,}|(?<!\w)\s(?!\w)', re.DOTALL)
+    metadata_key = 'metadata'
 
 class CommonUtils():
     """ method holder for command methods used throughout the project """
     def __init__(self, console, args):
         self.console = console
+        self.__set_project_attributes()
         self.opts = args
         self.regex = RegExp()
         if not os.path.exists(args.vector_dir):
@@ -155,6 +163,10 @@ class CommonUtils():
         self.heat_map = 0
         self.prompt_map = self.create_heatmap(8000)
         self.cleaned_map = self.create_heatmap(1000)
+
+    def __set_project_attributes(self):
+        """ create dataclass with project attributes """
+        self.attributes = StandardAttributes.attributes()
 
     def if_importing(self):
         """ return bool if we are importing documents """
@@ -236,15 +248,15 @@ class CommonUtils():
         Ensure all characters in `entity` are grounded in either `audience` or `entity_location`.
         Returns a list of phantom entities (those not grounded).
         """
-        def normalize_entity_list(field)->set[str]:
+        def normalize_entity_list(e_field)->set[str]:
             """
             Accepts a list or comma-delimited string and returns a set of cleaned entity names.
             """
-            if isinstance(field, str):
-                return set(e.strip() for e in field.split(',') if e.strip())
-            elif isinstance(field, list):
+            if isinstance(e_field, str):
+                return set(e.strip() for e in e_field.split(',') if e.strip())
+            elif isinstance(e_field, list):
                 result = set()
-                for item in field:
+                for item in e_field:
                     if isinstance(item, str):
                         result.update(e.strip() for e in item.split(',') if e.strip())
                 return result
@@ -342,7 +354,7 @@ class CommonUtils():
         return scene_str
 
     def sanatize_response(self, response: str, strip: bool = False)->str:
-        """ remove emojis, meta data tagging, etc """
+        """ remove emojis, metadata tagging, etc """
         response = self.remove_tags(response)
         if strip:
             response = self.normalize_for_dedup(response)
@@ -368,35 +380,6 @@ class CommonUtils():
                 result[key] = str(val)
         return result
 
-    def remove_tags(self, response: str)->str:
-        """ remove meta_tags from response """
-        _response = str(response)
-        for match in self.regex.meta_block.findall(_response):
-            _response = _response.replace(f'{match}', '')
-        return _response
-
-    def parse_tags(self, flat_pairs: dict | list[tuple[str, str]])->list[RAGTag[str, str]]:
-        """Normalize any kind of tag input into RAGTag list of (str, str)"""
-        tags = []
-        # Normalize input to iterable of (k, v) pairs
-        if isinstance(flat_pairs, dict):
-            flat_pairs = flat_pairs.items()
-        for k, v in flat_pairs:
-            canonical_key = self.get_aliases().get(k.strip().lower(), k.strip().lower())
-            # Normalize to comma-separated string if multi_key
-            if canonical_key in self.get_multikeys():
-                if isinstance(v, list):
-                    values = ', '.join(str(i).strip() for i in v if str(i).strip())
-                elif isinstance(v, str):
-                    # If it’s already a string, assume it's comma-separated
-                    values = ', '.join(i.strip() for i in v.split(',') if i.strip())
-                else:
-                    values = str(v).strip() if v is not None else ''
-            else:
-                values = str(v).strip() if v is not None else ''
-            tags.append(RAGTag(canonical_key, values))
-        return tags
-
     @staticmethod
     def sanitize_json_string(json_string):
         r"""
@@ -406,39 +389,56 @@ class CommonUtils():
         json_string = re.sub(r'\n', '', json_string)
         return json_string
 
-    def get_tags(self, response: str)->list[RAGTag[str, str]]:
+    def remove_tags(self, response: str)->str:
+        """ remove metadata from response """
+        _response = str(response)
+        for match in self.regex.all_json.findall(_response):
+            _response = _response.replace(f'{match}', '')
+        return _response
+
+    @staticmethod
+    def parse_tags(meta_tags: dict|list[list[str,str]])->list[RAGTag[str,str]]:
+        """ Parse supplied dictionary or list of lists into RAGTags """
+        _rag_tags = []
+        if isinstance(meta_tags, dict):
+            items = meta_tags.items()
+        else:
+            items = meta_tags  # Assume it's list[list[str, str]]
+        for key, value in items:
+            if isinstance(value, str):
+                # Try to split if it's a multi-item string (comma, semicolon, pipe, etc.)
+                split_values = re.split(r'[;,|]\s*', value.strip())
+                # Use list if it split into multiple values, else keep as string
+                value = split_values if len(split_values) > 1 else split_values[0]
+            _rag_tags.append(RAGTag(key, value))
+        return _rag_tags
+
+    def get_tags(self, response: str)->list[RAGTag]:
         """ Extract tags in JSON and meta_tag format from the LLM's response """
         _tags = []
         try:
             # JSON-style block. Attempt several kinds of matching, break on the first
             # successful json.loads()
             for match in [self.regex.json_template.search(response),
-                          self.regex.json_style.search(response),
                           self.regex.json_malformed.search(response),
                           self.regex.curly_match.search(response)]:
                 if match:
                     json_str = match.group(1)
-                    json_str = self.sanatize_response(json_str)
+                    # print('DEBUG: sanatizing...')
+                    # json_str = self.sanatize_response(json_str)
                     try:
                         data = json.loads(f'{{{json_str}}}')
+                        data = data[self.regex.metadata_key]
                     except json.decoder.JSONDecodeError:
                         continue
                     _tags.extend(self.parse_tags(data))
                     break
-
-            # meta_tag format
-            meta_matches = self.regex.meta_data.findall(response)
-            if meta_matches:
-                flat_pairs = []
-                for match in meta_matches:
-                    flat_pairs.extend(self.regex.meta_iter.findall(match))
-                _tags.extend(self.parse_tags(flat_pairs))
-
             seen = set()
             deduped = []
             for tag in _tags:
                 key = (tag.tag,
-                       tuple(tag.content) if isinstance(tag.content, (list, set)) else tag.content)
+                       tuple(tag.content)
+                       if isinstance(tag.content, (list, set)) else tag.content)
                 if key not in seen:
                     seen.add(key)
                     deduped.append(tag)

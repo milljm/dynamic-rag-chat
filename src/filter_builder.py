@@ -1,13 +1,6 @@
 """ Build filter-schema for use with Chroma """
-from typing import List, Dict, Union, NamedTuple
-
-class RAGTag(NamedTuple):
-    """
-    NamedTuple class constructor.
-    Represents a tag and associated content for filtering.
-    """
-    tag: str
-    content: str
+from typing import List, Dict, Union
+from .chat_utils import RAGTag  # for type hinting
 
 class FilterBuilder:
     """
@@ -30,8 +23,14 @@ class FilterBuilder:
         must_conditions = []
         soft_conditions = []
         for tag in tags:
-            # Skip null, unspecified, and empty content
-            if tag.content.lower() in {'null', 'none', '', 'unspecified', 'unknown'}:
+            # Skip lists, null, unspecified, and empty content
+            if isinstance(tag.content, list) or isinstance(tag.content, bool):
+                continue
+            if not tag.content or tag.content.lower() in {'null',
+                                                          'none',
+                                                          '',
+                                                          'unspecified',
+                                                          'unknown'}:
                 continue
             # Handle the content, splitting it if there are multiple values
             condition_values = tag.content.split(',') if ',' in tag.content else [tag.content]
