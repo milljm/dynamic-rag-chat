@@ -220,7 +220,8 @@ class RenderWindow(PromptManager):
 
         # print(f'DEBUG START>{content}<END')
         # === CASE 1: Chunk has '{' – start buffering
-        if content in ['```', 'json', '{'] and not stream.meta_hiding:
+        if (content in ['```', 'json', '{'] or '{' in content) and not stream.meta_hiding:
+            # print(f'DEBUG: possible hiding character: {content}. Capturing: {stream.meta_capture}')
             # LLM trying to close json block
             if '```' in content and stream.meta_capture:
                 stream.meta_capture += '\n```'
