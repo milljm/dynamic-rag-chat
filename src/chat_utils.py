@@ -74,7 +74,7 @@ class ChatOptions:
     # --- post‑processing of derived fields ---
     def __post_init__(self) -> None:
         # derive colour from light/dark mode
-        object.__setattr__(self, "color", 245 if self.light_mode else 233)
+        object.__setattr__(self, "color", 245 if self.light_mode else 236)
 
     _ALIASES = {
         # YAML/config wording        # ChatOptions field

@@ -54,7 +54,7 @@ class RenderWindowState:
     stream: StreamState = field(default_factory=StreamState)
 
     def __post_init__(self):
-        self.color = 245 if self.light_mode else 233
+        self.color = 245 if self.light_mode else 236
 
 @dataclass
 class Renderables:
