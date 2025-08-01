@@ -21,12 +21,12 @@ class RAGTag(NamedTuple):
 
 @dataclass
 class StandardAttributes:
-    """ Data class to hold imutable project attributes """
+    """ Data class to hold immutable project attributes """
     collections: dict   # RAG Collection name to collection id
 
     @classmethod
     def attributes(cls)->'StandardAttributes':
-        """ return project attributes shared throught project """
+        """ return project attributes shared throughout project """
         return cls(collections={'user' : 'user_documents',
                                 'ai'   : 'ai_documents',
                                 'gold' : 'gold_documents'}
@@ -78,19 +78,19 @@ class ChatOptions:
 
     _ALIASES = {
         # YAML/config wording        # ChatOptions field
-        "llm_server":       "host",
-        "pre_llm":          "preconditioner",
-        "embedding_llm":    "embeddings",
-        "pre_server":       "pre_host",
-        "embedding_server": "emb_host",
-        "history_dir":      "vector_dir",
-        "history_matches":  "matches",
-        "history_max":      "chat_history",
-        "chat_max":         "chat_history",
-        "use_rags":          "no_rags",
+        'llm_server':                'host',
+        'pre_llm':                   'preconditioner',
+        'embedding_llm':             'embeddings',
+        'pre_server':                'pre_host',
+        'embedding_server':          'emb_host',
+        'history_dir':               'vector_dir',
+        'history_matches':           'matches',
+        'history_max':               'chat_history',
+        'chat_max':                  'chat_history',
+        'use_rags':                   'no_rags',
     }
 
-    _INT_FIELDS = {"matches", "completion_tokens", "chat_history", "history_sessions"}
+    _INT_FIELDS = {'matches', 'completion_tokens', 'chat_history', 'history_sessions'}
     @classmethod
     def _build(cls, current_dir: str | Path, raw: Mapping[str, Any]) -> "ChatOptions":
         """

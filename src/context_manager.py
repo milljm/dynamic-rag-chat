@@ -1,5 +1,5 @@
 """
-ContextManager aims at handeling everything relating to the context
+ContextManager aims at handling everything relating to the context
 being supplied to the LLM. It utilizing several methods:
 
     Emoji removal.
@@ -69,7 +69,7 @@ class ContextManager(PromptManager):
         return cleaned_chunks
 
     @staticmethod
-    def token_retreiver(context: str|list[str])->int:
+    def token_retriever(context: str|list[str])->int:
         """ iterate over string or list of strings and do a word count (token) """
         _token_cnt = 0
         if not context or isinstance(context, bool):
@@ -158,7 +158,7 @@ class ContextManager(PromptManager):
 
         *Key init args:*
             .. code-block:: python
-                response: str         # LLM's raw resonse
+                response: str         # LLM's raw response
                 collection: str = ''  # Defaults to AI Document collection
         *Returns None:*
             .. code-block:: python
@@ -215,7 +215,7 @@ class ContextManager(PromptManager):
         _tk_cnt = 0
         max_tokens = 550 * max(1, int(self.opts.history_sessions)) # Defaults = 2750 tokens
         for response in spliced:
-            _tk_cnt += self.token_retreiver(response)
+            _tk_cnt += self.token_retriever(response)
             if _tk_cnt > max_tokens:
                 if self.debug:
                     self.console.print(f'MAX CHAT TOKENS: {_tk_cnt}',
@@ -229,7 +229,7 @@ class ContextManager(PromptManager):
             abridged.append(response)
         return abridged
 
-    def hanlde_topics(self,
+    def handle_topics(self,
                       meta_tags: list[RAGTag],
                       query: str,
                       collection: str,
@@ -265,7 +265,7 @@ class ContextManager(PromptManager):
         entities = topic_field[0].content
         _meta.remove(topic_field[0])
 
-        # In case the pre-processor supplied a string of space seperated items or one item
+        # In case the pre-processor supplied a string of space separated items or one item
         if isinstance(entities, str):
             entities = entities.split(',')
 
@@ -355,7 +355,7 @@ class ContextManager(PromptManager):
                 (_, meta_tags, documents['scene_meta'], _) = self.pre_processor(query)
 
                 # set entities. We will use this to load a grounded character sheet
-                # if it exists in promts/entities/entity.txt
+                # if it exists in prompts/entities/entity.txt
                 documents['entities'] = '\n\n'.join(self.prompt_entities(meta_tags))
 
                 # Make all meta_tags available for prompt templating operations
@@ -368,7 +368,7 @@ class ContextManager(PromptManager):
                                                  f'{documents["content_type"]}')
 
                 if self.debug:
-                    self.console.print(f'TAG RETREIVAL:\n{meta_tags}\n\n',
+                    self.console.print(f'TAG RETRIEVAL:\n{meta_tags}\n\n',
                                        style=f'color({self.opts.color})',
                                        highlight=False)
 
@@ -376,7 +376,7 @@ class ContextManager(PromptManager):
                     storage = []
 
                     # field-filtering RAG retrieval specific for document_topics
-                    storage.extend(self.hanlde_topics(meta_tags,
+                    storage.extend(self.handle_topics(meta_tags,
                                                       query,
                                                       collection,
                                                       'entity'))
@@ -387,7 +387,7 @@ class ContextManager(PromptManager):
                     # Record pre-token counts
                     pages = list(map(lambda doc: doc.page_content, storage))
                     for page in pages:
-                        pre_tokens += self.token_retreiver(page)
+                        pre_tokens += self.token_retriever(page)
 
                     # Remove duplicates RAG matches
                     documents[collection] = self.deduplication(documents['chat_history'],
@@ -395,7 +395,7 @@ class ContextManager(PromptManager):
 
                     # Record post-token counts
                     for page in documents[collection]:
-                        post_tokens += self.token_retreiver(page)
+                        post_tokens += self.token_retriever(page)
 
                 if self.debug:
                     self.console.print(f'CONTEXT RETRIEVAL:\n{documents}\n\n',
@@ -404,7 +404,7 @@ class ContextManager(PromptManager):
 
             # Store the users query to their RAG, now that we are done pre-processing
             # (so as not to bring back identical information in their query)
-            # A little unorthodox, but the first item in the list is ther user's query
+            # A little unorthodox, but the first item in the list is the user's query
             self.rag.store_data(self.common.stringify_lists(data_set[0]),
                                 tags_metadata=meta_tags,
                                 collection=self.common.attributes.collections['user'])

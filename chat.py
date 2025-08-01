@@ -115,7 +115,7 @@ class Chat():
     def token_counter(self, documents: dict)->any:
         """ report each document token counts """
         for key, value in documents.items():
-            yield (key, self.session.context.token_retreiver(value))
+            yield (key, self.session.context.token_retriever(value))
 
     def token_manager(self, documents: dict,
                             token_reduction: int)->tuple[int,int]:
@@ -274,7 +274,7 @@ class Chat():
 
     def no_context(self, user_input)->tuple:
         """ perform search without any context involved """
-        prompt_tokens = self.session.context.token_retreiver(user_input) # short hand
+        prompt_tokens = self.session.context.token_retriever(user_input) # short hand
         collections = self.session.common.attributes.collections # short hand
         self.session.common.heat_map = self.session.common.create_heatmap(prompt_tokens,
                                                             reverse=True)
@@ -361,7 +361,7 @@ collections using quick 1B parameter summarizers to 'tag'
 items of interest that will be fed back into the context
 window for your favorite heavy-weight LLM to draw upon.
 
-This allows for long-term memory, and fast relevent
+This allows for long-term memory, and fast relevant
 content generation.
 """
     # pylint: disable=line-too-long
@@ -423,13 +423,13 @@ Chat can read a .chat.yaml file to import your arguments. See .chat.yaml.example
                         help=('Path to recursively find and import assorted files (*.md *.html, '
                         '*.txt, *.pdf)'))
     parser.add_argument('--light-mode', action='store_true', default=opts.light_mode,
-                        help='Use a color scheme suitible for light background terminals')
+                        help='Use a color scheme suitable for light background terminals')
     parser.add_argument('--assistant-mode', action='store_true', default=opts.assistant_mode,
                         help='Do not utilize story-telling mode prompts or the RAGs. Do not save'
                         ' chat history to disk')
     parser.add_argument('--use-rags', action='store_true', default=opts.no_rags,
                         help='Use RAGs regardless of assistant-mode (no effect when not also using'
-                        ' assistent-mode)')
+                        ' assistant-mode)')
     parser.add_argument('-d', '--debug', action='store_true', default=opts.debug,
                         help='Print preconditioning message, prompt, etc')
     parser.add_argument('-v','--verbose', action='store_true', default=opts.verbose,
