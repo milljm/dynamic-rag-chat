@@ -61,7 +61,7 @@ class Renderables:
     """ Rich Live renderables dataclass object """
     header: Text
     query: Markdown
-    seperater: Markdown
+    separator: Markdown
     assistant: Text
     response: Text|Markdown
     footer: Text
@@ -71,7 +71,7 @@ class Renderables:
         """ return Live Group """
         return Group(self.header,
                      self.query,
-                     self.seperater,
+                     self.separator,
                      Align.right(self.assistant),
                      self.response,
                      self.footer
@@ -158,7 +158,7 @@ class RenderWindow(PromptManager):
         self.renderable = Renderables(
             header = Text(''),
             query = Markdown(''),
-            seperater = Markdown('---'),
+            separator = Markdown('---'),
             assistant = Text('', style='bold color(208)'),
             response = Markdown(''),
             footer = Text('')
@@ -221,7 +221,6 @@ class RenderWindow(PromptManager):
         # print(f'DEBUG START>{content}<END')
         # === CASE 1: Chunk has '{' – start buffering
         if (content in ['```', 'json', '{'] or '{' in content) and not stream.meta_hiding:
-            # print(f'DEBUG: possible hiding character: {content}. Capturing: {stream.meta_capture}')
             # LLM trying to close json block
             if '```' in content and stream.meta_capture:
                 stream.meta_capture += '\n```'
@@ -429,7 +428,7 @@ class RenderWindow(PromptManager):
             yield chunk
 
     def render_footer(self, time_taken: float = 0, **kwargs) -> Text:
-        """Render footer stats with heatmapped colors and token metrics."""
+        """ Render footer stats with heatmap colors and token metrics. """
         prompt_tokens = kwargs['prompt_tokens']
         token_count = kwargs['token_count']
         cleaned_color = kwargs['cleaned_color']
@@ -461,7 +460,7 @@ class RenderWindow(PromptManager):
     # Compose the full chat display with footer (model name, time taken, token count)
     def build_content(self, current_stream: str = '')->Text|Markdown:
         """ render and return markdown/syntax """
-        stream = self.state.stream # shortand
+        stream = self.state.stream # shorthand
         if stream.thinking and self.state.verbose:
             chat_content = Text(current_stream, style=f'color({self.state.color})')
         elif stream.do_once and (stream.thinking or stream.meta_hiding):
@@ -516,7 +515,7 @@ class RenderWindow(PromptManager):
 
             self.stop_namepulse()
             if not current_response or current_response == ' ':
-                self.renderable.response = self.build_content('Error: recieved no response '
+                self.renderable.response = self.build_content('Error: received no response '
                                                               'from LLM')
 
             self.renderable.assistant = Text(documents["name"], style='bold color(208)')
@@ -540,7 +539,7 @@ class RenderWindow(PromptManager):
             self.console.print('DEBUG: saving to RAG...',
                                 style=f'color({self.state.color})',highlight=False)
         self.state.context.handle_context([str(current_response)], direction='store')
-        current_response = self.common.sanatize_response(current_response)
+        current_response = self.common.sanitize_response(current_response)
         self.common.chat_history_session.append(f'\nUSER: {documents["user_query"]}\n\n'
                                                 f'AI: {current_response}')
         self.common.save_chat()

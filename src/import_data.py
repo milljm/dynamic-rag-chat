@@ -121,7 +121,7 @@ class ImportData:
         proc = f'{proc} {"[yellow]⚠️  Retrying:[/]" if k.get("retry", False) else ""}'
         proc = f'{proc} [dim]{k.get("message", False)}[/]' if k.get("retry", False) else proc
         stor = f'{"[italic red]RAG Update[/]" if k.get("storing", False) else ""}'
-        meta = f'[dim]Appling Meta Tags to Childeren: {parent[2][:4]}[/]'
+        meta = f'[dim]Applying Meta Tags to Children: {parent[2][:4]}[/]'
         table.add_row(f'[bold]Current File:[/] {os.path.basename(file_path)}')
         table.add_row(f'[bold green]Parent Chunk:[/] {parent[0]+1} / {parent[1]}{proc}')
         table.add_row(f'[cyan]Child Chunks:[/] {child[0]}/{child[1]} '
@@ -164,12 +164,13 @@ class ImportData:
                                                             processing=True
                                                             )
                 self.live.update(self.make_full_status())
-            # Some times the LLM/RAG Tagging does gibe well. And a simple 'try again' works
+            # Some times the LLM/RAG Tagging does not gibe well. And a simple 'try again' works
             for attempt in range(2):
                 try:
                     (message,
-                    meta_tags,
-                    status) = self.d_session.context.pre_processor(split_doc)
+                     meta_tags,
+                     _,
+                     status) = self.d_session.context.pre_processor(split_doc)
                     if not status:
                         raise RuntimeError(message)
                     _normal = self.d_session.common.normalize_for_dedup(split_doc)
@@ -230,7 +231,7 @@ class ImportData:
         _meta = list(meta_tags)
         _contents = []
         collections = self.d_session.common.attributes.collections  # short hand
-        keyword_contents = [x for x in _meta if x.tag == 'document_topics']
+        keyword_contents = [x for x in _meta if x.tag == 'entity']
         if keyword_contents:
             _meta.remove(keyword_contents[0])
             if isinstance(keyword_contents[0].content, list):

@@ -64,11 +64,11 @@ class RAG():
                                                model=self.opts.embeddings,
                                                api_key=self.opts.api_key)
 
-        self.parent_splitter = RecursiveCharacterTextSplitter(chunk_size=2000,
-                                                              chunk_overlap=1000,
+        self.parent_splitter = RecursiveCharacterTextSplitter(chunk_size=1000,
+                                                              chunk_overlap=500,
                                                               separators=['\n\n'])
-        self.child_splitter = RecursiveCharacterTextSplitter(chunk_size=500,
-                                                             chunk_overlap=250,
+        self.child_splitter = RecursiveCharacterTextSplitter(chunk_size=100,
+                                                             chunk_overlap=50,
                                                              separators=['.'])
 
     @staticmethod
@@ -76,7 +76,7 @@ class RAG():
                                    min_length: int = 3,
                                    max_length: int = 63,
                                    pad_char: str = 'x') -> str:
-        """ padd/sanatize the could-be-invalid collection names """
+        """ pad/sanitize the could-be-invalid collection names """
         # Replace all invalid characters with dashes
         name = re.sub(r'[^a-zA-Z0-9_-]', '-', name)
         # Remove leading/trailing non-alphanumerics to meet start/end rule
@@ -192,7 +192,7 @@ class RAG():
         ff_retriever = self._chroma_retriever(collection,
                                               {'k': self.opts.matches, 'filter': metadatas})
 
-        # Chroma simuliarity retriever
+        # Chroma similarity retriever
         ss_retriever = self._chroma_retriever(collection,
                                               {'k': self.opts.matches})
 
@@ -216,7 +216,7 @@ class RAG():
         if not collection:
             collection = self.common.attributes.collections['ai']
         # Remove metadata tagging information from data
-        data = self.common.sanatize_response(data, strip=True)
+        data = self.common.sanitize_response(data, strip=True)
         if tags_metadata is None:
             tags_metadata = {}
         meta_dict = dict(tags_metadata)

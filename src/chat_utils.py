@@ -176,27 +176,6 @@ class CommonUtils():
                 self.opts.import_txt)
 
     @staticmethod
-    def get_aliases():
-        """
-        Return a dictionary of aliases to be used as aliases when performing field-filtering
-        matches in RAG collection.\n
-        Exp: `{ 'entities' : 'entity' }`\n,
-        will treat metadata tags such as:\n
-          \tRAGTag('entities','[john, jane]')\n
-        to be considered as:\n
-          \tRAGTag('entity', '[john, jane]')
-        """
-        return {
-            "locations": "location",
-            "audiences": "audience",
-            "items": "items",
-            "narrative_arcs": "narrative_arcs",
-            "completed_narrative_arcs": "completed_narrative_arcs",
-            "entity_locations": "entity_location",
-            "keywords_entities": "entity",
-        }
-
-    @staticmethod
     def no_scene()->dict:
         """ return an empty scene """
         return {
@@ -208,7 +187,7 @@ class CommonUtils():
             # Character Presence & Perspective
             'entity': [],                           # Characters mentioned
             'audience': [],                         # Characters being spoken to directly
-            'entity_location': ['unknown'],         # john backseat, jane frontseat, bo navigation
+            'entity_location': ['unknown'],         # john backseat, jane front seat, bo navigation
 
             # Narrative Flow / Contextual Arc
             'narrative_arc': 'unspecified',         # e.g., 'john_trust_arc'
@@ -303,7 +282,7 @@ class CommonUtils():
             # Handle list fields safely
             if isinstance(scene[key], list) and not isinstance(incoming, list):
                 incoming = [incoming]
-            # Handle unique scene tracking features (like missions and completed_missiones)
+            # Handle unique scene tracking features (like missions and completed_missions)
             if key == 'narrative_arcs':
                 if isinstance(incoming, list):
                     scene[key].update(i for i in incoming if i and i.strip())
@@ -353,7 +332,7 @@ class CommonUtils():
         self.save_scene(self.scene_meta)
         return scene_str
 
-    def sanatize_response(self, response: str, strip: bool = False)->str:
+    def sanitize_response(self, response: str, strip: bool = False)->str:
         """ remove emojis, metadata tagging, etc """
         response = self.remove_tags(response)
         if strip:
@@ -424,8 +403,8 @@ class CommonUtils():
                           self.regex.curly_match.search(response)]:
                 if match:
                     json_str = match.group(1)
-                    # print('DEBUG: sanatizing...')
-                    # json_str = self.sanatize_response(json_str)
+                    # print('DEBUG: sanitizing...')
+                    # json_str = self.sanitize_response(json_str)
                     try:
                         data = json.loads(f'{{{json_str}}}')
                         data = data[self.regex.metadata_key]
@@ -476,7 +455,7 @@ class CommonUtils():
         the maximum integer for said color code:
         ./heat_map(10) --> {0: 123, 1: 51, 2: 46, 3: 42, 4: 82, 5: 154,
                             6: 178, 7: 208, 8: 166, 9: 203, 10: 196}
-        Options: reverse = True for oppisite effect
+        Options: reverse = True for opposite effect
         """
         heat = {0: 123} # declare a zero
         colors = [51, 46, 42, 82, 154, 178, 208, 166, 203, 196]
@@ -538,7 +517,7 @@ class CommonUtils():
         try:
             with open(history_file, "rb") as f:
                 loaded_list = pickle.load(f)
-                # trunacate to max ammount
+                # truncate to max amount
                 loaded_list = loaded_list[-self.opts.chat_history:]
         except FileNotFoundError:
             pass
