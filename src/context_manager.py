@@ -33,6 +33,7 @@ class ContextManager(PromptManager):
         self.common = common
         self.rag = rag
         self.opts = args
+        self.mode = 'document_topics' if args.assistant_mode else 'entity'
         self.prompts = PromptManager(self.console,
                                      current_dir,
                                      args,
@@ -81,10 +82,9 @@ class ContextManager(PromptManager):
             _token_cnt += len(context.split(' '))
         return _token_cnt
 
-    @staticmethod
-    def no_entity(tags: list[RAGTag])->bool:
+    def no_entity(self, tags: list[RAGTag])->bool:
         """ Bool check for entity == None """
-        entity_tag = next((item for item in tags if item.tag == 'entity'), None)
+        entity_tag = next((item for item in tags if item.tag == self.mode), None)
         if not entity_tag:
             return True
         entities = ''.join(entity_tag.content)
@@ -269,7 +269,7 @@ class ContextManager(PromptManager):
         if isinstance(entities, str):
             entities = entities.split(',')
 
-        # Perform a balanced search for each entity
+        # Perform a balanced search for each entity/document_topics
         for a_entity in entities:
             for _ in range(max(1, int(entity_weights / len(entities)))):
                 storage.extend(self.gather_context(
@@ -286,7 +286,7 @@ class ContextManager(PromptManager):
         Handles entity content as list or delimiter-separated string.
         """
         # Collect raw values of all entity tags
-        raw_entities = [x.content for x in meta_tags if x.tag == 'entity']
+        raw_entities = [x.content for x in meta_tags if x.tag == self.mode]
         if not raw_entities:
             return ['']
 
@@ -379,7 +379,7 @@ class ContextManager(PromptManager):
                     storage.extend(self.handle_topics(meta_tags,
                                                       query,
                                                       collection,
-                                                      'entity'))
+                                                      self.mode))
 
                     # general retrieval
                     storage.extend(self.rag.retrieve(query, collection))

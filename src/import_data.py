@@ -230,8 +230,9 @@ class ImportData:
         k_cnt = 0
         _meta = list(meta_tags)
         _contents = []
+        mode = 'document_topics' if self.d_session.common.opts.assistant_mode else 'entity'
         collections = self.d_session.common.attributes.collections  # short hand
-        keyword_contents = [x for x in _meta if x.tag == 'entity']
+        keyword_contents = [x for x in _meta if x.tag == mode]
         if keyword_contents:
             _meta.remove(keyword_contents[0])
             if isinstance(keyword_contents[0].content, list):
@@ -243,7 +244,7 @@ class ImportData:
         for c_cnt, child_doc in enumerate(child_docs):
             # For each value in keywords, we write to the RAG with this one value
             for k_cnt, content in enumerate(_contents):
-                _tmp_meta = [RAGTag('document_topics', content), *_meta]
+                _tmp_meta = [RAGTag(mode, content), *_meta]
                 self.d_session.rag.store_data(child_doc,
                                               tags_metadata=_tmp_meta,
                                               collection=collections['gold'])
@@ -327,7 +328,7 @@ class ImportData:
                     directory = file
                     self.extract_text_from_pdf(directory, do_exit=False)
                     continue
-                with open(_file, 'r', encoding='utf-8') as file_handle:
+                with open(_file, 'r', encoding='utf-16') as file_handle:
                     document_content = file_handle.read()
                 if _file.endswith('.html'):
                     soup = BeautifulSoup(document_content, 'html.parser')
