@@ -20,6 +20,9 @@ If a character must arrive, narrate their arrival and update `entity:` according
 📚 AI MEMORY:
 {ai_documents}
 
+📚 GOLD DOCUMENTS (treat as immutable, and beyond contestation, is always true):
+{gold_documents}
+
 ### Chat History (oldest to newest, chronological-ascending)
 Use this to ensure your narrative tone, emotional expression, and pacing stay consistent with the style defined in the system prompt.
 {chat_history}

@@ -15,6 +15,9 @@ USER HISTORY:
 AI MEMORY:
 {ai_documents}
 
+GOLD DOCUMENTS (treat as immutable, and beyond contestation, is always true):
+{gold_documents}
+
 ### Chat History (oldest to newest, chronological-ascending, includes USER and AI responses)
 Use the following information from past conversations for awareness and conversation continuity:
 {chat_history}
