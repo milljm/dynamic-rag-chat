@@ -16,8 +16,8 @@ My task is to read the following text and extract a fixed set of metadata fields
 
 {{
   "metadata": {{
-    "document_topics": "list of keywords or named entities describing the output",
-    "topic_category_classification": "one of technology | science | machine learning",
+    "document_topics": "list of names, topics, keywords, or entities describing the output",
+    "topic_category_classification": "one word describing the content",
     "intent_type": "one of informational | troubleshooting | creative | instructional",
     "language_code": "2-letter language code (e.g., "en", "fr", "es")",
     "answer_type_expected": "one of text | list | code_snippet | table | diagram",
@@ -29,8 +29,8 @@ My task is to read the following text and extract a fixed set of metadata fields
 
 {{
   "metadata": {{
-    "document_topics": ["installation", "software"],
-    "topic_category_classification": "technical help",
+    "document_topics": ["installation", "nuclear", "youtube", "john", "enterprise"],
+    "topic_category_classification": "science",
     "intent_type": "instructional",
     "language_code": "en",
     "answer_type_expected": "markdown with code blocks",

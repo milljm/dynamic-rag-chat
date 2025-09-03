@@ -490,7 +490,8 @@ class RenderWindow(PromptManager):
                                 style=f'color({color})')
         self.renderable.query = Markdown(f'**You:** {documents["user_query"]}')
         self.renderable.assistant = Text(documents["name"], style='bold color(208)')
-        self.renderable.response = Text('Thinking...', style=f'color({color}')
+        self.renderable.response = Text('Thinking/Server loading model...', style=f'color({color}')
+        self.renderable.footer = self.render_footer(0.0, **footer_meta)
 
         with Live(refresh_per_second=20, console=self.console) as live:
             live.console.clear(home=True)
