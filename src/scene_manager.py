@@ -120,6 +120,15 @@ class SceneManager:
         """
         scene = dict(self.scene)
         tag_dict = self._ragtag_to_dict(tags)
+
+        # hack to fix missing *required* fields... because you can't rely on LLMs to
+        #  always generate the metadata fields you ask them to
+        tag_dict['location'] = tag_dict.get('location', '')
+        tag_dict['entity'] = tag_dict.get('entity', [self.opts.user_name.lower()])
+        tag_dict['audience'] = tag_dict.get('audience', [self.opts.user_name.lower()])
+        tag_dict['entities_about'] = tag_dict.get(
+            'entities_about',
+            [f'{self.opts.user_name.lower()}: the protagonist'])
         if self.opts.debug:
             self.console.print(f'EXISTING EPHEMERAL SCENE:\n{scene}',
                                f'\nINCOMING SCENE:\n{tag_dict}',
