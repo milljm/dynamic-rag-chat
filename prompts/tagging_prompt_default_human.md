@@ -45,7 +45,7 @@ This metadata is for RAG continuity only. Do not explain, summarize, or add anyt
 ---
 ### Previous:
 Previous Session (CHAT_HISTORY) to help guide your tone and location information:
-{{previous}}
+{{ previous }}
 
 ### Character Sheets
 {{ entities }}

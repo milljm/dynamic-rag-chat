@@ -14,31 +14,31 @@ My task is to read the following text and extract a fixed set of metadata fields
 - Use `[]` for empty arrays.
 - Use lowercase for all values.
 
-{{
-  "metadata": {{
+{
+  "metadata": {
     "document_topics": "list of names, topics, keywords, or entities describing the output",
     "topic_category_classification": "one word describing the content",
     "intent_type": "one of informational | troubleshooting | creative | instructional",
     "language_code": "2-letter language code (e.g., "en", "fr", "es")",
     "answer_type_expected": "one of text | list | code_snippet | table | diagram",
     "operating_system": "if applicable, one of macOS | Linux | Windows",
-  }}
-}}
+  }
+}
 
-✅ Example:
+Example:
 
-{{
-  "metadata": {{
+{
+  "metadata": {
     "document_topics": ["installation", "nuclear", "youtube", "john", "enterprise"],
     "topic_category_classification": "science",
     "intent_type": "instructional",
     "language_code": "en",
     "answer_type_expected": "markdown with code blocks",
     "operating_system": "Linux",
-  }}
-}}
+  }
+}
 
 ---
 
 Now, extract metadata from this input:
-{context}
+{{ user_query }}
