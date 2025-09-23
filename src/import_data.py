@@ -169,7 +169,9 @@ class ImportData:
                 try:
                     (message,
                      meta_tags,
-                     status) = self.d_session.context.pre_processor(split_doc)
+                     status) = self.d_session.context.pre_processor('',
+                                                                     {'user_query' : split_doc},
+                                                                    False)
                     if not status:
                         raise RuntimeError(message)
                     _normal = self.d_session.common.normalize_for_dedup(split_doc)
@@ -327,7 +329,7 @@ class ImportData:
                     directory = file
                     self.extract_text_from_pdf(directory, do_exit=False)
                     continue
-                with open(_file, 'r', encoding='utf-16') as file_handle:
+                with open(_file, 'r', encoding='utf-8') as file_handle:
                     document_content = file_handle.read()
                 if _file.endswith('.html'):
                     soup = BeautifulSoup(document_content, 'html.parser')
