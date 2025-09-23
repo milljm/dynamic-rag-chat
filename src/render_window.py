@@ -1,5 +1,4 @@
 """ module responsible for rendering output to the screen """
-import os
 from dataclasses import dataclass, field
 import time
 from threading import Thread
@@ -9,9 +8,10 @@ from rich.syntax import Syntax
 from rich.text import Text
 from rich.align import Align
 from rich.console import Group
-from langchain.prompts import ChatPromptTemplate
+from langchain.prompts import ChatPromptTemplate, PromptTemplate
+from langchain_core.prompts import HumanMessagePromptTemplate, SystemMessagePromptTemplate
 from langchain.schema.messages import HumanMessage
-from langchain.schema import BaseMessage   # For Type Hinting
+from langchain.schema import BaseMessage, Document   # For Type Hinting
 from langchain_openai import ChatOpenAI
 from .prompt_manager import PromptManager
 from .context_manager import ContextManager # For Type Hinting
@@ -40,6 +40,7 @@ class RenderWindowState:
     no_rags: bool
     light_mode: bool
     model: str
+    nsfw_model: str
     host: str
     api_key: str
     completion_tokens: int
@@ -115,15 +116,22 @@ class RenderWindow(PromptManager):
         # populate dataclasses, setup
         self._load_states(current_dir, context, args)
 
-        # Our heavy-weight LLM
-        self.llm = ChatOpenAI(
-            base_url=self.state.host,
-            model=self.state.model,
-            temperature=0.4 if self.state.assistant_mode else '1.1',
-            streaming=True,
-            max_completion_tokens=self.state.completion_tokens,
-            api_key=self.state.api_key
-        )
+        # Our heavy-weight LLMs
+        self.llm = {
+                'sfw'  : ChatOpenAI(base_url=self.state.host,
+                                    model=self.state.model,
+                                    temperature=0.6 if self.state.assistant_mode else 0.7,
+                                    streaming=True,
+                                    max_completion_tokens=self.state.completion_tokens,
+                                    api_key=self.state.api_key),
+
+                'nsfw' : ChatOpenAI(base_url=self.state.host,
+                                    model=self.state.nsfw_model,
+                                    temperature=0.6 if self.state.assistant_mode else 0.7,
+                                    streaming=True,
+                                    max_completion_tokens=self.state.completion_tokens,
+                                    api_key=self.state.api_key),
+            }
 
         # Prompts
         self.prompts = PromptManager(
@@ -148,6 +156,7 @@ class RenderWindow(PromptManager):
             no_rags=args.no_rags,
             light_mode = args.light_mode,
             model = args.model,
+            nsfw_model = args.nsfw_model,
             host = args.host,
             api_key = args.api_key,
             completion_tokens = args.completion_tokens,
@@ -179,9 +188,13 @@ class RenderWindow(PromptManager):
                 yield syntax
         Markdown.elements["fence"] = SimpleCodeBlock
 
-    def _format_model_name(self) -> str:
-        """Extracts a cleaned model identifier from full model name."""
-        return '-'.join(self.common.regex.model_re.findall(self.state.model)[:2])
+    def _format_model_name(self, is_nsfw: bool) -> str:
+        """Extract a cleaned model identifier and prefix with sfw/nsfw."""
+        model = self.state.nsfw_model if is_nsfw else self.state.model
+        label = 'nsfw' if is_nsfw else 'sfw'
+        matches = self.common.regex.model_re.findall(model)[:2]
+        model_short = '-'.join(matches)
+        return f'{label}-{model_short}'
 
     def _pulse_emoji(self) -> str:
         stream = self.state.stream
@@ -380,9 +393,8 @@ class RenderWindow(PromptManager):
                     break  # Only handle first HumanMessage
         return messages
 
-    # Stream response as chunks
-    def stream_response(self, documents: dict):
-        """ Parse LLM Prompt """
+    def get_messages(self, documents: dict)->list[Document]:
+        """ return formatted message to be sent to LLM stream """
         prompts = self.prompts
         # pylint: disable=no-member # dynamic prompts (see self.__build_prompts)
         system_prompt = (prompts.get_prompt(f'{prompts.plot_prompt_file}_system.md')
@@ -391,20 +403,30 @@ class RenderWindow(PromptManager):
         human_prompt = (prompts.get_prompt(f'{prompts.plot_prompt_file}_human.md')
                      if self.debug else prompts.plot_prompt_human)
         # pylint: enable=no-member
+
+        # Prompt conversions/templates
+        system_tmpl = PromptTemplate(template=system_prompt,
+                                     template_format="jinja2")
+        human_tmpl  = PromptTemplate(template=human_prompt,
+                                     template_format="jinja2")
+
+        system_msg = SystemMessagePromptTemplate(prompt=system_tmpl)
+        human_msg  = HumanMessagePromptTemplate(prompt=human_tmpl)
+
         prompt_template = ChatPromptTemplate.from_messages([
-                ("system", system_prompt),
-                ("human", human_prompt)
-            ])
+            system_msg,
+            human_msg
+        ])
+
+        # Does this post require SFW, or NSFW
+        llm = 'nsfw' if documents['explicit'] else 'sfw'
 
         if self.debug:
             self.console.print(f'LLM DOCUMENTS: {documents.keys()}\n'
                                f'{documents["performance"]}\n',
                                style=f'color({self.state.color})',
                                highlight=False)
-        else:
-            with open(os.path.join(self.opts.vector_dir, 'debug.log'),
-                      'w', encoding='utf-8') as f:
-                f.write(f'LLM DOCUMENTS: {documents.keys()}')
+        self.common.write_debug(self.llm[llm].model_name, documents.keys())
 
         # Format text messages from template
         images = documents.pop('dynamic_images', [])
@@ -413,16 +435,24 @@ class RenderWindow(PromptManager):
         # Optional: inject images into HumanMessage if present
         messages = self.add_image_block(formatted_messages, images)
 
+        if self.debug:
+            self.console.print(f'Content rating: {llm}',
+                          style=f'color({self.state.color})',
+                          highlight=False)
+
         # pylint: enable=no-member
         if self.debug:
             self.console.print(f'HEAVY LLM PROMPT (llm.stream()):\n{formatted_messages}\n\n',
                           style=f'color({self.state.color})',
                           highlight=False)
-        else:
-            with open(os.path.join(self.opts.vector_dir, 'debug.log'),
-                      'w', encoding='utf-8') as f:
-                f.write(f'HEAVY LLM PROMPT (llm.stream()): {formatted_messages}')
-        for chunk in self.llm.stream(messages):
+        self.common.write_debug(self.llm[llm].model_name, formatted_messages)
+        return messages
+
+    # Stream response as chunks
+    def stream_response(self, documents: dict, messages: Document):
+        """ Parse LLM Prompt """
+        llm = 'nsfw' if documents['explicit'] else 'sfw'
+        for chunk in self.llm[llm].stream(messages):
             chunk = self.reveal_thinking(chunk, self.state.verbose)
             chunk = self.if_metatags(chunk, self.state.verbose)
             yield chunk
@@ -434,14 +464,15 @@ class RenderWindow(PromptManager):
         cleaned_color = kwargs['cleaned_color']
         token_savings = kwargs['token_savings']
         pre_processing_time = kwargs['pre_process_time']
+        rating = kwargs['content_rating']
 
         foot_color = self.state.color - 6 if self.state.light_mode else self.state.color
 
         footer = Text('\n', style=f'color({foot_color})')
-        footer.append(self._format_model_name(), style='color(202)')
+        footer.append(self._format_model_name(rating), style='color(202)')
         footer.append(self._pulse_emoji(), style=f'color({12 if self.state.light_mode else 51})')
         footer.append(f'{time_taken:.2f}', style='color(94)')
-        footer.append('s Tokens(deduplication:', style=f'color({foot_color})')
+        footer.append('s Tokens(dedup:', style=f'color({foot_color})')
         footer.append(f'{token_savings}', style=f'color({cleaned_color})')
         footer.append(' context:', style=f'color({foot_color})')
         footer.append(f'{prompt_tokens}', style=f'color({self._color_for_context(prompt_tokens)})')
@@ -472,13 +503,19 @@ class RenderWindow(PromptManager):
 
     def live_stream(self, documents: dict)->None:
         """ Handle the Rich Live updating process """
-        stream = self.state.stream  # shorthand
+        stream = self.state.stream   # shorthand
+        context = self.state.context # shorthand
+        messages = self.get_messages(documents)
+        token_total = documents['prompt_tokens']
+        for message in messages:
+            token_total += context.token_retriever(message.content)
         current_response = ''
         footer_meta = {'token_savings'   : documents['token_savings'],
-                       'prompt_tokens'   : documents['prompt_tokens'],
+                       'prompt_tokens'   : token_total,
                        'cleaned_color'   : documents['cleaned_color'],
                        'pre_process_time': documents['pre_process_time'],
-                       'token_count'     : 0}
+                       'token_count'     : 0,
+                       'content_rating'  : documents['explicit']}
 
         start_time = 0
         color = self.state.color-5 if self.state.light_mode else self.state.color
@@ -497,7 +534,7 @@ class RenderWindow(PromptManager):
             live.console.clear(home=True)
             self.render_chat(live)
             self.start_namepulse()
-            for piece in self.stream_response(documents):
+            for piece in self.stream_response(documents, messages):
                 if start_time == 0:
                     start_time = time.time()
                 current_response += piece.content
@@ -527,7 +564,8 @@ class RenderWindow(PromptManager):
         if self.debug and self.state.no_rags and self.state.assistant_mode:
             self.console.print(f'DEBUG: storing meta\n{stream.meta_capture}\n\n',
                                 style=f'color({self.state.color})',highlight=False)
-        current_response += f'\n\n{stream.meta_capture}'
+        # current_response += f'\n\n{stream.meta_capture}'
+        documents['llm_response'] = current_response
         if self.state.assistant_mode and not self.state.no_rags:
             self.common.chat_history_session.append(f'\nUSER: {documents["user_query"]}\n\n'
                                                 f'AI: {current_response}')
@@ -539,8 +577,10 @@ class RenderWindow(PromptManager):
         if self.debug:
             self.console.print('DEBUG: saving to RAG...',
                                 style=f'color({self.state.color})',highlight=False)
-        self.state.context.handle_context([str(current_response)], direction='store')
+        self.common.write_debug('last', current_response)
+        self.state.context.handle_context(documents, direction='store')
         current_response = self.common.sanitize_response(current_response)
+        self.common.write_debug('sanitized', current_response)
         self.common.chat_history_session.append(f'\nUSER: {documents["user_query"]}\n\n'
                                                 f'AI: {current_response}')
         self.common.save_chat()
