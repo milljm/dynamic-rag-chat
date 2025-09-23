@@ -11,13 +11,15 @@ import os
 from difflib import SequenceMatcher
 import threading
 from langchain.schema import Document
-from langchain.prompts import ChatPromptTemplate
+from langchain.prompts import ChatPromptTemplate, PromptTemplate
+from langchain_core.prompts import HumanMessagePromptTemplate
 from langchain_openai import ChatOpenAI
 from openai import APITimeoutError
 from .rag_manager import RAG, RAGTag
 from .chat_utils import CommonUtils, ChatOptions
 from .prompt_manager import PromptManager
 from .filter_builder import FilterBuilder
+from .scene_manager import SceneManager
 
 class ContextManager(PromptManager):
     """ A collection of methods aimed at producing/reducing the context """
@@ -26,12 +28,14 @@ class ContextManager(PromptManager):
                  console,
                  common: CommonUtils,
                  rag: RAG,
+                 scene: SceneManager,
                  current_dir,
                  args: ChatOptions):
         super().__init__(console, current_dir, args)
         self.console = console
         self.common = common
         self.rag = rag
+        self.scene = scene
         self.opts = args
         self.mode = 'document_topics' if args.assistant_mode else 'entity'
         self.prompts = PromptManager(self.console,
@@ -73,14 +77,15 @@ class ContextManager(PromptManager):
     def token_retriever(context: str|list[str])->int:
         """ iterate over string or list of strings and do a word count (token) """
         _token_cnt = 0
-        if not context or isinstance(context, bool):
+        if not isinstance(context, list|str):
             return _token_cnt
-        if isinstance(context, list|tuple):
+        if isinstance(context, list):
             for sentence in context:
-                _token_cnt += len(sentence.split())
+                if sentence is not None:
+                    _token_cnt += len(sentence.split())
         else:
             _token_cnt += len(context.split(' '))
-        return _token_cnt
+        return int(_token_cnt * 1.3)
 
     def no_entity(self, tags: list[RAGTag])->bool:
         """ Bool check for entity == None """
@@ -94,7 +99,7 @@ class ContextManager(PromptManager):
 
     def pre_processor(self,
                       query: str,
-                      previous: str='',
+                      documents: dict,
                       do_scene: bool=True)->tuple[str,list[RAGTag]]:
         """
         lightweight LLM as a tagging pre-processor
@@ -106,47 +111,42 @@ class ContextManager(PromptManager):
         human_prompt = (prompts.get_prompt(f'{prompts.tag_prompt_file}_human.md')
                         if self.debug else prompts.tag_prompt_human)
         # pylint: enable=no-member
-        prompt_template = ChatPromptTemplate.from_messages([
-                    ("human", human_prompt)
-                ])
-        prompt = prompt_template.format_messages(context=query, previous=previous)
+        human_tmpl = PromptTemplate(template=human_prompt,
+                                    template_format="jinja2")
+        human_msg = HumanMessagePromptTemplate(prompt=human_tmpl)
+
+        prompt_template = ChatPromptTemplate.from_messages([human_msg])
+
+        prompt = prompt_template.format_messages(**documents)
         if self.debug:
             self.console.print(f'PRE-PROCESSOR PROMPT:\n{prompt}\n\n',
                                 style=f'color({self.opts.color})', highlight=False)
-        else:
-            with open(os.path.join(self.opts.vector_dir, 'debug.log'),
-                      'w', encoding='utf-8') as f:
-                f.write(f'PRE-PROCESSOR PROMPT: {prompt}')
         try:
             content = self.pre_llm.invoke(prompt).content
+            self.common.write_debug(self.pre_llm.model_name, content)
         except APITimeoutError:
             return ('APITimeoutError', [], False)
         if self.debug:
             self.console.print(f'PRE-PROCESSOR RESPONSE:\n{content}\n\n',
                                 style=f'color({self.opts.color})', highlight=False)
-        else:
-            with open(os.path.join(self.opts.vector_dir, 'debug.log'),
-                      'w', encoding='utf-8') as f:
-                f.write(f'PRE-PROCESSOR RESPONSE: {content}')
-        tags = self.common.get_tags(content)
-        if self.no_entity(tags) and previous and not self.common.if_importing:
-            try:
-                last_contents = self.common.chat_history_session[-1:]
-            except IndexError:
-                last_contents = ''
-            return self.pre_processor(query, previous=last_contents)
-        # when importing documents directly into the RAG, we don't want to produce a scene
-        scene_consistency = self.common.no_scene()
-        if do_scene:
-            scene_consistency = self.common.scene_tracker_from_tags(tags)
-        return (content, tags, scene_consistency, True)
 
-    def post_process(self, response)->None:
+        # Parse tags (JSON) response from LLM
+        tags = self.common.get_tags(content)
+
+        # when importing documents, do not inherit entities from previous turns
+        if do_scene:
+            tags = self.scene.ground_scene(tags, query)
+            if self.debug:
+                self.console.print(f'SCENE MANAGER OVERRIDE:\n{tags}\n\n',
+                                    style=f'color({self.opts.color})', highlight=False)
+        return (content, tags, True)
+
+    def post_process(self, documents: dict)->None:
         """ Start a thread to process LLMs response """
-        threading.Thread(target=self.save_response, args=(response,),
+        threading.Thread(target=self.save_response, args=(documents,),
                          daemon=True).start()
 
-    def save_response(self, response: str, collection: str='')->None:
+    def save_response(self, documents: dict, collection: str='')->None:
         """
         ### Save Response
 
@@ -158,25 +158,27 @@ class ContextManager(PromptManager):
 
         *Key init args:*
             .. code-block:: python
-                response: str         # LLM's raw response
+                documents: dict       # document object containing LLMs response
                 collection: str = ''  # Defaults to AI Document collection
         *Returns None:*
             .. code-block:: python
                 return None
         """
+        # tagify the AI response
+        response = documents['llm_response']
+        (_, list_rag_tags, _) = self.pre_processor(response, documents)
         collections = self.common.attributes.collections  # short hand
         # protect against empty or gold RAG (read-only) collections
         if not collection or collection == collections['gold']:
             collection = collections['ai']
-        list_rag_tags: list[RAGTag] = self.common.get_tags(response)
+        # list_rag_tags: list[RAGTag] = self.common.get_tags(response)
+        self.scene.ground_scene(list_rag_tags, response)
         if self.debug:
-            self.console.print(f'META TAGS PARSED: {list_rag_tags}',
+            self.console.print(f'THREADED META TAGS PARSED: {list_rag_tags}',
                                style=f'color({self.opts.color})',
                                highlight=False)
         else:
-            with open(os.path.join(self.opts.vector_dir, 'debug.log'),
-                      'w', encoding='utf-8') as f:
-                f.write(f'META TAGS PARSED: {list_rag_tags}')
+            self.common.write_debug('meta_tags', list_rag_tags)
         rag = RAG(self.console, self.common, self.opts)
         rag.store_data(response, tags_metadata=list_rag_tags, collection=collection)
 
@@ -197,7 +199,7 @@ class ContextManager(PromptManager):
         earlier = history_size - recent_tail
 
         # Spread earlier indices linearly
-        step = earlier / base_count
+        step = max(1, earlier) / max(1, base_count)
         indices = [int(i * step) for i in range(base_count)]
 
         # Add tail
@@ -221,10 +223,6 @@ class ContextManager(PromptManager):
                     self.console.print(f'MAX CHAT TOKENS: {_tk_cnt}',
                                        style=f'color({self.opts.color})',
                                        highlight=False)
-                else:
-                    with open(os.path.join(self.opts.vector_dir, 'debug.log'),
-                              'w', encoding='utf-8') as f:
-                        f.write(f'MAX CHAT TOKENS: {_tk_cnt}')
                 return abridged
             abridged.append(response)
         return abridged
@@ -280,6 +278,18 @@ class ContextManager(PromptManager):
                                             )
         return storage
 
+    @staticmethod
+    def is_explicit(meta_tags: list[RAGTag[str,str]]) -> bool:
+        """ Return bool if content detected is NSFW """
+        try:
+            rating = [x.content for x in meta_tags if x.tag == 'content_rating'] # shorthand
+            return 'nsfw' in rating[0].lower()
+        #pylint: disable=bare-except   # LLMs can get so many things wrong
+        except:
+            pass
+        #pylint: enable=bare-except
+        return False
+
     def prompt_entities(self, meta_tags: list[RAGTag[str,str]]) -> list[str]:
         """
         Return list of strings with grounding info for each entity detected in meta_tags.
@@ -311,11 +321,14 @@ class ContextManager(PromptManager):
                 if not name or name in seen:
                     continue
                 seen.add(name)
+                safe_name = self.common.regex.safe_name.sub('_', name).strip('_')
                 entity_file = os.path.join(
-                    self.current_dir, 'prompts', 'entities', f'{name}.txt'
+                    self.current_dir, 'prompts', 'entities', f'{safe_name}.txt'
                 )
                 if self.debug:
-                    print(f'DEBUG: {entity_file}')
+                    self.console.print(f'Loading Entity File:\n{entity_file}\n\n',
+                                       style=f'color({self.opts.color})',
+                                       highlight=False)
                 if os.path.exists(entity_file):
                     with open(entity_file, 'r', encoding='utf-8') as f:
                         _entity_prompt.append(f.read())
@@ -336,7 +349,14 @@ class ContextManager(PromptManager):
                                       metadatas=filter_dict)
         return documents
 
-    def handle_context(self, data_set: list,
+    def get_explicit(self):
+        """ read and return nsfw.md file """
+        nsfw_file = os.path.join(self.current_dir, 'prompts', 'nsfw.md')
+        if os.path.exists(nsfw_file):
+            with open(nsfw_file, 'r', encoding='utf-8') as f:
+                return f.read()
+
+    def handle_context(self, documents: dict,
                              direction='query')->tuple[dict[str,list], int]:
         """ Method to handle all the lovely context """
         # Retrieve context from AI and User RAG and Chat History
@@ -345,70 +365,80 @@ class ContextManager(PromptManager):
             post_tokens = 0
             collection_list = [self.common.attributes.collections[x] for
                                 x in self.common.attributes.collections]
-            documents = {key: [] for key in collection_list}
-            documents['chat_history'] = self.get_chat_history()
+            # documents = {key: [] for key in collection_list}
             if self.opts.assistant_mode and not self.opts.no_rags:
                 return (documents, pre_tokens, post_tokens)
-            if data_set:
-                query = self.common.stringify_lists(data_set[0])
-                # tagify the users query
-                (_, meta_tags, documents['scene_meta'], _) = self.pre_processor(query)
 
-                # set entities. We will use this to load a grounded character sheet
-                # if it exists in prompts/entities/entity.txt
-                documents['entities'] = '\n\n'.join(self.prompt_entities(meta_tags))
+            query = documents.get('user_query', '')
 
-                # Make all meta_tags available for prompt templating operations
-                # Note: This *might* have the side-effect of breaking necessary keys, though rare.
-                documents.update(meta_tags)
+            # tag the users query
+            (_, meta_tags, _) = self.pre_processor(query, documents)
 
-                # If content_type is populated, instruct the LLM to respond in kind
-                if documents.get('content_type', False):
-                    documents['content_type'] = ('- Respond in the following format: ',
-                                                 f'{documents["content_type"]}')
+            # grab entities and perform another tagging process (with character sheets)
+            documents['entities'] = '\n\n'.join(self.prompt_entities(meta_tags))
+            (_, meta_tags, _) = self.pre_processor(query, documents)
 
-                if self.debug:
-                    self.console.print(f'TAG RETRIEVAL:\n{meta_tags}\n\n',
-                                       style=f'color({self.opts.color})',
-                                       highlight=False)
+            # Populate explicit content if triggered
+            documents['explicit'] = self.is_explicit(meta_tags)
 
-                for collection in collection_list:
-                    storage = []
+            documents['explicit_content'] = (self.get_explicit() if documents['explicit']
+                                                else '')
 
-                    # field-filtering RAG retrieval specific for document_topics
-                    storage.extend(self.handle_topics(meta_tags,
-                                                      query,
-                                                      collection,
-                                                      self.mode))
+            # Known characters the user has encountered during the story
+            # documents['known_characters'] = self.scene.render_known_characters_for_prompt()
 
-                    # general retrieval
-                    storage.extend(self.rag.retrieve(query, collection))
+            # Make all meta_tags available for prompt templating operations
+            # Note: This *might* have the side-effect of breaking necessary keys, though rare.
+            documents.update(meta_tags)
 
-                    # Record pre-token counts
-                    pages = list(map(lambda doc: doc.page_content, storage))
-                    for page in pages:
-                        pre_tokens += self.token_retriever(page)
+            # If content_type is populated, instruct the LLM to respond in kind
+            if documents.get('content_type', False):
+                documents['content_type'] = ('- Respond in the following format: ',
+                                                f'{documents["content_type"]}')
 
-                    # Remove duplicates RAG matches
-                    documents[collection] = self.deduplication(documents['chat_history'],
-                                                               pages)
+            if self.debug:
+                self.console.print(f'TAG RETRIEVAL:\n{meta_tags}\n\n',
+                                    style=f'color({self.opts.color})',
+                                    highlight=False)
 
-                    # Record post-token counts
-                    for page in documents[collection]:
-                        post_tokens += self.token_retriever(page)
+            for collection in collection_list:
+                storage = []
 
-                if self.debug:
-                    self.console.print(f'CONTEXT RETRIEVAL:\n{documents}\n\n',
-                                       style=f'color({self.opts.color})',
-                                       highlight=False)
+                # field-filtering RAG retrieval specific for document_topics
+                storage.extend(self.handle_topics(meta_tags,
+                                                  query,
+                                                  collection,
+                                                  self.mode))
+
+                # general retrieval
+                storage.extend(self.rag.retrieve(query, collection))
+
+                # Record pre-token counts
+                pages = list(map(lambda doc: doc.page_content, storage))
+                for page in pages:
+                    pre_tokens += self.token_retriever(page)
+
+                # Remove duplicates RAG matches
+                documents[collection] = self.deduplication(documents['chat_history'],
+                                                           pages)
+
+                # Record post-token counts
+                for page in documents[collection]:
+                    post_tokens += self.token_retriever(page)
+
+            if self.debug:
+                self.console.print(f'CONTEXT RETRIEVAL:\n{documents}\n\n',
+                                    style=f'color({self.opts.color})',
+                                    highlight=False)
 
             # Store the users query to their RAG, now that we are done pre-processing
             # (so as not to bring back identical information in their query)
             # A little unorthodox, but the first item in the list is the user's query
-            self.rag.store_data(self.common.stringify_lists(data_set[0]),
+            self.rag.store_data(query,
                                 tags_metadata=meta_tags,
                                 collection=self.common.attributes.collections['user'])
             # Return data collected
             return (documents, pre_tokens, post_tokens)
+
         # Store data (non-blocking)
-        return self.post_process(data_set[0])
+        return self.post_process(documents)

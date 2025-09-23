@@ -169,7 +169,6 @@ class ImportData:
                 try:
                     (message,
                      meta_tags,
-                     _,
                      status) = self.d_session.context.pre_processor(split_doc)
                     if not status:
                         raise RuntimeError(message)

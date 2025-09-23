@@ -18,6 +18,7 @@
 #     "requests",
 #     "beautifulsoup4",
 #     "pygments",
+#     "jinja2",
 # ]
 # ///
 import os
@@ -43,6 +44,7 @@ from src import RAG
 from src import RenderWindow
 from src import CommonUtils, ChatOptions
 from src import ImportData
+from src import SceneManager
 console = Console(highlight=True)
 current_dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -55,24 +57,28 @@ class SessionContext:
     rag = RAG
     context = ContextManager
     renderer = RenderWindow
+    scene = SceneManager
 
     """
     common: CommonUtils
     rag: RAG
     context: ContextManager
     renderer: RenderWindow
+    scene: SceneManager
 
     @classmethod
     def from_args(cls, c_console, c_args)->'SessionContext':
         """ instance and return session dataclass """
         _common = CommonUtils(c_console, c_args)
+        _scene = SceneManager(console, _common, c_args)
         _rag = RAG(c_console, _common, c_args)
-        _context = ContextManager(console, _common, _rag, current_dir, c_args)
+        _context = ContextManager(console, _common, _rag, _scene, current_dir, c_args)
         _renderer = RenderWindow(console, _common, _context, current_dir, c_args)
         return cls(common=_common,
                    rag=_rag,
                    context=_context,
-                   renderer=_renderer)
+                   renderer=_renderer,
+                   scene=_scene)
 
 class Chat():
     """ Begin initializing variables classes. Call .chat() to begin """
@@ -82,7 +88,7 @@ class Chat():
         self._initialize_startup_tasks()
 
     def _initialize_startup_tasks(self):
-        """ run starup routines """
+        """ run startup routines """
         opts = self.opts # shorthand
         if opts.debug:
             console.print('[italic dim grey30]Debug mode enabled. I will re-read the '
@@ -138,10 +144,28 @@ class Chat():
         Populate documents, the object which is fed to prompt formaters, and
         ultimately is what makes up the context for the LLM
         """
+        documents = dict()
         pre_process_time = time.time()
+        history = self.session.common.chat_history_session  # shorthand
+        documents.update(
+            {'user_query'       : user_input,
+             'dynamic_files'    : '',
+             'dynamic_images'   : [],
+             'history_sessions' : self.opts.history_sessions,
+             'name'             : self.opts.name,
+             'user_name'        : self.opts.user_name,
+             'date_time'        : self.get_time(self.opts.time_zone),
+             'pre_process_time' : pre_process_time,
+             'light_mode'       : self.set_lightmode_aware(self.opts.light_mode),
+             'previous'         : history.pop() if history else '',
+             'chat_history'     : history,
+             'entities'         : []
+             }
+            )
+
         (documents,
          pre_t,
-         post_t) = self.session.context.handle_context([user_input])
+         post_t) = self.session.context.handle_context(documents)
 
         # Heat Map
         (prompt_tokens, cleaned_color) = self.token_manager(documents, max(0, pre_t - post_t))
@@ -159,21 +183,11 @@ class Chat():
         pre_process_time = '{:.1f}s'.format(time.time() - pre_process_time)
 
         # Fill documents with other useful information used downstream. This is a bit dirty
-        # but, some of this information may become useful to provide to the LLM itself. And
-        # so we include it here. Each item bellow becomes available within the LLM prompt
-        # template system like so:
-        #   My name is {name}. The date is {date_time}. It took {pre_process_time}... etc etc
-        documents.update(
-            {'user_query'       : user_input,
-             'dynamic_files'    : '',
-             'dynamic_images'   : [],
+        # but, some of this information may become useful to provide to the LLM itself.
+        documents.update({
              'performance'      : performance,
-             'history_sessions' : self.opts.history_sessions,
-             'name'             : self.opts.name,
-             'date_time'        : self.get_time(self.opts.time_zone),
              'completion_tokens': self.opts.completion_tokens,
              'pre_process_time' : pre_process_time,
-             'light_mode'       : self.set_lightmode_aware(self.opts.light_mode),
              'prompt_tokens'    : prompt_tokens,
              'token_savings'    : max(0, pre_t - post_t),
              'cleaned_color'    : cleaned_color,
@@ -284,7 +298,9 @@ class Chat():
         # pylint: disable=consider-using-f-string  # no, this is how it is done
         documents = {'user_query'        : user_input,
                      'name'              : self.opts.name,
+                     'user_name'         : self.opts.user_name,
                      'chat_history'      : '',
+                     'previous'          : '',
                      'dynamic_files'     : '',
                      'dynamic_images'    : [],
                      'history_sessions'  : self.opts.history_sessions,
@@ -293,6 +309,8 @@ class Chat():
                      collections['gold'] : '',
                      'content_type'      : '',
                      'context'           : '',
+                     'explicit'          : False,
+                     'explicit_content'  : '',
                      'date_time'         : self.get_time(self.opts.time_zone),
                      'completion_tokens' : self.opts.completion_tokens,
                      'pre_process_time'  : '{:.1f}s'.format(0),
@@ -322,12 +340,25 @@ class Chat():
                 if not user_input:
                     continue
                 if user_input == r'\?':
-                    console.print('in-command switches you can use:\n\n\t\\no-context '
-                                  '[italic]msg[/italic] (perform a query with no context)\n'
-                                  '\t{{/absolute/path/to/file}}   - Include a file as context\n'
-                                  '\t{{https://somewebsite.com/}} - Include URL as context')
+                    console.print('in-command switches you can use:\n\n' \
+                        '\t\\no-context [italic]msg[/italic]              - (perform a'
+                        ' query with no context)\n'
+                        '\t\\delete-last                 - (Delete last message from history)\n'
+                        '\t{{/absolute/path/to/file}}   - (Include a file as context)\n'
+                        '\t{{https://somewebsite.com/}} - (Include URL as context)\n'
+                    )
                     continue
+                # Delete last message
+                if user_input.find(r'\delete-last') >=0:
+                    user_input = user_input.replace(r'\delete-last', '')
+                    try:
+                        _ = self.session.common.chat_history_session.pop()
+                        self.session.common.save_chat()
+                    except IndexError:
+                        # There were not items in history
+                        pass
 
+                # No context or not
                 if user_input.find(r'\no-context') >=0:
                     user_input = user_input.replace(r'\no-context ', '')
                     documents = self.no_context(user_input)
@@ -377,6 +408,8 @@ Chat can read a .chat.yaml file to import your arguments. See .chat.yaml.example
                                      formatter_class=argparse.RawTextHelpFormatter)
     parser.add_argument('--model', default=opts.model, metavar='',
                         help='LLM Model (default: %(default)s)')
+    parser.add_argument('--nsfw-model', default=opts.nsfw_model, metavar='',
+                        help='NSFW LLM Model (default: %(default)s)')
     parser.add_argument('--pre-llm', metavar='', dest='preconditioner',
                         default=opts.preconditioner,
                         type=str, help='pre-processor LLM (default: %(default)s)')
@@ -395,6 +428,8 @@ Chat can read a .chat.yaml file to import your arguments. See .chat.yaml.example
                         help='You API Key (default: REDACTED)')
     parser.add_argument('--name', metavar='', default=opts.name, type=str,
                         help='Your assistants name (default: %(default)s)')
+    parser.add_argument('--user-name', metavar='', default=opts.user_name, type=str,
+                        help='Your characters name (default: %(default)s)')
     parser.add_argument('--time-zone', metavar='', default=opts.time_zone,
                         type=str, help='your assistants name (default: %(default)s)')
     parser.add_argument('--history-matches', metavar='', dest='matches', default=opts.matches,

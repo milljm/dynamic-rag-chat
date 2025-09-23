@@ -187,26 +187,36 @@ class RAG():
         """
         if not metadatas:
             metadatas = None
+        try:
+            # Chroma field-filtering retriever
+            ff_retriever = self._chroma_retriever(collection,
+                                                {'k': self.opts.matches, 'filter': metadatas})
 
-        # Chroma field-filtering retriever
-        ff_retriever = self._chroma_retriever(collection,
-                                              {'k': self.opts.matches, 'filter': metadatas})
+            # Chroma similarity retriever
+            ss_retriever = self._chroma_retriever(collection,
+                                                {'k': self.opts.matches})
 
-        # Chroma similarity retriever
-        ss_retriever = self._chroma_retriever(collection,
-                                              {'k': self.opts.matches})
+            documents = self._ensemble_retriever([ff_retriever, ss_retriever],
+                                                [0.5, 0.5],
+                                                query)
 
-        documents = self._ensemble_retriever([ff_retriever, ss_retriever],
-                                             [0.5, 0.5],
-                                             query)
+            # BM25 results
+            if not documents:
+                return documents
+            bm25_retriever = self._bm25_retriever(documents)
+            documents = bm25_retriever.invoke(query)
+            # grab parent document
+            documents.extend(self._parent_retriever(collection).invoke(query))
+        except ValueError:
+            self.console.print('Pardon the interruption, we had a rare error while attempting ',
+                               'to retrieve RAG data using the following filter search:',
+                               f'\n{metadatas}\n\n',
+                               'Attempting to run search again, but without meta_data ',
+                               '(similarity only search)',
+                               style=f'color({self.opts.color})',
+                               highlight=False)
+            return self.retrieve(query, collection)
 
-        # BM25 results
-        if not documents:
-            return documents
-        bm25_retriever = self._bm25_retriever(documents)
-        documents = bm25_retriever.invoke(query)
-        # grab parent document
-        documents.extend(self._parent_retriever(collection).invoke(query))
         return documents
 
     def store_data(self, data,
@@ -225,10 +235,6 @@ class RAG():
             self.console.print(f'STORE DATA >>>{data}<<<\n\nTAGS:\n{meta_dict}',
                                style=f'color({self.opts.color})',
                                highlight=False)
-        else:
-            with open(os.path.join(self.opts.vector_dir, 'debug.log'),
-                      'w', encoding='utf-8') as f:
-                f.write(f'STORE DATA: TAGS:{meta_dict}, {data}')
         doc = Document(data, metadata=meta_dict)
         retriever = self._parent_retriever(collection)
         try:

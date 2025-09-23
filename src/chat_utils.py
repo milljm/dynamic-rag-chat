@@ -7,7 +7,7 @@ import pickle
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, Optional
 from typing import NamedTuple
 import yaml
 
@@ -39,6 +39,7 @@ class ChatOptions:
     # ---------- “core” options ----------
     host: str = 'http://localhost:11434/v1'
     model: str = 'gemma3:27b'
+    nsfw_model: Optional[str] = None
     completion_tokens: int = 2048
     time_zone: str = 'GMT'
     api_key: str = 'none'
@@ -48,6 +49,7 @@ class ChatOptions:
     verbose: bool = False
     light_mode: bool = False
     name: str = 'assistant'
+    user_name: str = 'John'
 
     # ---------- RAG / pre‑ & post‑processing ----------
     preconditioner: str = 'gemma3:1b'
@@ -74,7 +76,11 @@ class ChatOptions:
     # --- post‑processing of derived fields ---
     def __post_init__(self) -> None:
         # derive colour from light/dark mode
-        object.__setattr__(self, "color", 245 if self.light_mode else 236)
+        object.__setattr__(self, 'color', 245 if self.light_mode else 236)
+
+        # normalize nsfw_model: fallback to model if unset/empty/legacy sentinel
+        if not self.nsfw_model or str(self.nsfw_model).strip().lower() in {'', 'none', 'not_set'}:
+            object.__setattr__(self, 'nsfw_model', self.model)
 
     _ALIASES = {
         # YAML/config wording        # ChatOptions field
@@ -94,7 +100,7 @@ class ChatOptions:
     @classmethod
     def _build(cls, current_dir: str | Path, raw: Mapping[str, Any]) -> "ChatOptions":
         """
-        Convert *any* dict‑like object (from YAML or argparse)
+        Convert *any* dict-like object (from YAML or argparse)
         into valid kwargs for the dataclass.
         """
         data: dict[str, Any] = {}
@@ -105,25 +111,24 @@ class ChatOptions:
             data[field_name] = value
 
         # vector directory default needs `current_dir`
-        data.setdefault("vector_dir", os.path.join(current_dir, "vector_data"))
+        data.setdefault('vector_dir', os.path.join(current_dir, 'vector_data'))
         return cls(**data)
 
     @classmethod
-    def from_yaml(cls, current_dir: str | Path) -> "ChatOptions":
+    def from_yaml(cls, current_dir: str | Path) -> 'ChatOptions':
         """Load `.chat.yaml` (if present) and merge with defaults."""
-        cfg_file = Path(current_dir) / ".chat.yaml"
+        cfg_file = Path(current_dir) / '.chat.yaml'
         raw: dict[str, Any] = {}
         if cfg_file.exists():
-            raw = yaml.safe_load(cfg_file.read_text("utf‑8")) or {}
-            raw = raw.get("chat", {})
+            raw = yaml.safe_load(cfg_file.read_text('utf-8')) or {}
+            raw = raw.get('chat', {})
         return cls._build(current_dir, raw)
 
     @classmethod
-    def from_args(cls, current_dir: str | Path, args_namespace) -> "ChatOptions":
+    def from_args(cls, current_dir: str | Path, args_namespace) -> 'ChatOptions':
         """Build from an `argparse.Namespace`."""
         return cls._build(current_dir, vars(args_namespace))
 # pylint: enable=too-many-instance-attributes
-
 
 @dataclass
 class RegExp:
@@ -137,6 +142,9 @@ class RegExp:
     all_json = re.compile(r'{.*}', re.DOTALL)
     curly_match = re.compile(r'\{\{\s*(.*?)\s*\}\}', re.DOTALL)
     entities = re.compile(r'[;,|\n]+|\s{2,}|(?<!\w)\s(?!\w)', re.DOTALL)
+    safe_name = re.compile(r'[^a-z0-9]+')  # lowercase + underscores
+    core = re.compile(r'[^a-z0-9._:-]+') # friendly token
+    names = re.compile(r"([A-Za-z'-]+)")
     metadata_key = 'metadata'
 
 class CommonUtils():
@@ -152,9 +160,6 @@ class CommonUtils():
             except OSError:
                 print(f'Unable to create directory: {args.vector_dir}')
                 sys.exit(1)
-
-        # Load from file. If file does not exist then self.scene_meta == self._scene_meta above
-        self.scene_meta = self.load_scene()
 
         # Session's Chat History list
         self.chat_history_session = self.load_chat()
@@ -175,166 +180,10 @@ class CommonUtils():
                 self.opts.import_pdf or
                 self.opts.import_txt)
 
-    @staticmethod
-    def no_scene()->dict:
-        """ return an empty scene """
-        return {
-            # Core Spatial-Temporal Anchors
-            'location': 'unknown',                  # e.g., 'Beast cockpit'
-            'time': 'unknown',                      # 'day', 'night', 'dusk', 'morning'
-            'status': 'unknown',                    # 'in motion', 'camped', 'combat'
-
-            # Character Presence & Perspective
-            'entity': [],                           # Characters mentioned
-            'audience': [],                         # Characters being spoken to directly
-            'entity_location': ['unknown'],         # john backseat, jane front seat, bo navigation
-
-            # Narrative Flow / Contextual Arc
-            'narrative_arc': 'unspecified',         # e.g., 'john_trust_arc'
-            'scene_type': 'unspecified',            # e.g., 'banter', 'flashback', 'combat',
-            'tone': 'neutral',                      # e.g., 'playful', 'tense'
-            'emotion': 'neutral',                   # emotion felt or scene tone
-            'focus': ['conversation'],              # narrative function (dialogue, strategy, etc.)
-            'narrative_arcs': set(['']),            # e.g., 'head_to_sector8', 'save_world'
-            'completed_narrative_arcs': set(['']),  # e.g., 'talk_to_john', 'help_jane'
-
-            # Environmental & Sensory Cues
-            'weather': None,                        # e.g., 'storm approaching'
-            'sensory_mood': None,                   # e.g., 'dim light and engine hum'
-
-            # Mechanical/Narrative Nudges
-            'user_choice': None,                    # User's last clear decision or action
-            'last_object_interacted': None,         # e.g., 'radio', 'rifle', 'memory shard'
-
-            # System Controls / Optional
-            'time_jump_allowed': False,             # Can the LLM skip forward?
-            'scene_locked': False,                  # Prevents new characters from entering scene
-            'narrator_mode': False,                 # If True, LLM may use omniscient 3rd-person
-        }
-
-    def get_multikeys(self):
-        """
-        Return non-flat keys from self.no_scene()\n
-        e.g., Return what items may contain a list or set
-        """
-        return {k.strip().lower() for k, v in self.no_scene().items()
-                if isinstance(v, (list, set))
-                }
-
-    @staticmethod
-    def validate_entity_presence(scene: dict)->list[str]:
-        """
-        Ensure all characters in `entity` are grounded in either `audience` or `entity_location`.
-        Returns a list of phantom entities (those not grounded).
-        """
-        def normalize_entity_list(e_field)->set[str]:
-            """
-            Accepts a list or comma-delimited string and returns a set of cleaned entity names.
-            """
-            if isinstance(e_field, str):
-                return set(e.strip() for e in e_field.split(',') if e.strip())
-            elif isinstance(e_field, list):
-                result = set()
-                for item in e_field:
-                    if isinstance(item, str):
-                        result.update(e.strip() for e in item.split(',') if e.strip())
-                return result
-            return set()
-        raw_entities = scene.get('entity', [])
-        raw_audience = scene.get('audience', [])
-        raw_locations = scene.get('entity_location', [])
-        entities = normalize_entity_list(raw_entities)
-        audience = normalize_entity_list(raw_audience)
-        locations = normalize_entity_list(raw_locations)
-
-        physically_present = set()
-        for ent in entities:
-            ent_lower = ent.strip().lower()
-            for loc in locations:
-                if ent_lower in loc.lower():
-                    physically_present.add(ent)
-        grounded = audience.union(physically_present)
-        phantoms = [e for e in entities if e not in grounded]
-        return phantoms
-
-    def _clear_scene(self)->dict:
-        """ clear the scene """
-        self.scene_meta = self.no_scene()
-
-    def scene_tracker_from_tags(self, tags: list[RAGTag])->str:
-        """ Build a formatted scene state string based on incoming RAGTags and internal memory """
-        tag_dict = {tag.tag: tag.content for tag in tags}
-        # Allow for an update to self.no_scene schema
-        for key, value in self.no_scene().items():
-            if key not in self.scene_meta:
-                self.scene_meta[key] = value
-        scene = self.scene_meta.copy()
-        for key, value in scene.items():
-            if key not in self.no_scene():
-                self.scene_meta.pop(key)
-
-        scene = self.scene_meta.copy()
-        for key in scene:
-            incoming = tag_dict.get(key)
-            # Skip if incoming is invalid or empty
-            if incoming in (None, 'none', 'unknown', [], '', {}, 'null'):
-                continue
-            # Handle list fields safely
-            if isinstance(scene[key], list) and not isinstance(incoming, list):
-                incoming = [incoming]
-            # Handle unique scene tracking features (like missions and completed_missions)
-            if key == 'narrative_arcs':
-                if isinstance(incoming, list):
-                    scene[key].update(i for i in incoming if i and i.strip())
-                elif isinstance(incoming, str) and incoming.strip():
-                    scene[key].add(incoming.strip())
-            elif key == 'completed_narrative_arcs':
-                if isinstance(incoming, list):
-                    scene[key].update(i for i in incoming if i and i.strip())
-                elif isinstance(incoming, str) and incoming.strip():
-                    scene[key].add(incoming.strip())
-                try:
-                    _arcs = set(scene[key])
-                    for _mission in _arcs:
-                        scene['completed_narrative_arcs'].remove(_mission)
-                        scene['narrative_arcs'].remove(_mission)
-                except KeyError:
-                    pass
-            else:
-                scene[key] = incoming
-        # Update internal memory with merged scene state
-        self.scene_meta = scene  # No `.copy()` needed
-        # Convert to string for LLM injection
-        def stringify(k, v):
-            if isinstance(v, (list, set)):
-                clean = sorted(i for i in v if i and str(i).strip())
-                return f'{k}=' + (', '.join(clean) if clean else 'none')
-            if v in (None, '', [], {}, 'none', 'unknown'):
-                return f'{k}=none'
-            return f'{k}={v}'
-        phantoms = self.validate_entity_presence(scene)
-        scene_str = '#SCENE_STATE: ' + '; '.join(stringify(k, v) for k, v in sorted(scene.items()))
-        if phantoms:
-            scene_str += (
-    '\n\n⚠️ CRITICAL WARNING: The following entities are listed in `entity:` '
-    f'but are NOT grounded in `audience:` or `entity_location:`: {", ".join(phantoms)}.\n'
-    'They may only be referenced passively. These characters must not speak, act, or appear. '
-    'They are not physically present in the scene.\n'
-    '🧠 You may reference them emotionally (e.g., thoughts, memories, feelings), but they must '
-    'NOT:\n'
-    '- Perform actions (e.g., enter the room, move, react)\n'
-    '- Speak or interrupt\n'
-    '- Be visually or physically described unless in remembered detail\n'
-    'They may NOT arrive, emerge, appear, or be discovered mid-scene.\n'
-    'Scene location is LOCKED. Character list is FINAL.\n'
-    'Any attempt to use these characters as if present is a violation of story continuity.\n'
-    '### 🔐 Scene Presence Rules (Active)')
-        self.save_scene(self.scene_meta)
-        return scene_str
-
     def sanitize_response(self, response: str, strip: bool = False)->str:
         """ remove emojis, metadata tagging, etc """
         response = self.remove_tags(response)
+        response = self.removed_other(response)
         if strip:
             response = self.normalize_for_dedup(response)
         return response
@@ -367,6 +216,16 @@ class CommonUtils():
         json_string = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', json_string)
         json_string = re.sub(r'\n', '', json_string)
         return json_string
+
+    def removed_other(self, response: str)->str:
+        """ remove other fluff that the LLM likes to add """
+        _response = str(response)
+        _response = _response.replace('```', '')
+        _response = _response.replace('Metadata:', '')
+        _response = _response.replace('Metadata JSON object:', '')
+        if not self.opts.assistant_mode:
+            _response = _response.replace('json', '')
+        return _response
 
     def remove_tags(self, response: str)->str:
         """ remove metadata from response """
@@ -402,6 +261,7 @@ class CommonUtils():
                           self.regex.json_malformed.search(response),
                           self.regex.curly_match.search(response)]:
                 if match:
+
                     json_str = match.group(1)
                     # print('DEBUG: sanitizing...')
                     # json_str = self.sanitize_response(json_str)
@@ -469,33 +329,6 @@ class CommonUtils():
             x = int(((i+1)/10) * hot_max)
             heat[x] = colors[i]
         return heat
-
-    def save_scene(self, scene)->None:
-        """ persist scenes """
-        scene_file = os.path.join(self.opts.vector_dir, 'ephemeral_scene.pkl')
-        try:
-            with open(scene_file, "wb") as f:
-                pickle.dump(scene, f)
-        except FileNotFoundError as e:
-            print(f'Error saving chat. Check --history-dir\n{e}')
-
-    def load_scene(self)->dict:
-        """ Persist chat history (load) """
-        scene_file = os.path.join(self.opts.vector_dir, 'ephemeral_scene.pkl')
-        try:
-            with open(scene_file, "rb") as f:
-                loaded_scene = pickle.load(f)
-        except FileNotFoundError:
-            with open(scene_file, "wb") as f:
-                pickle.dump(self.no_scene(), f)
-            return self.no_scene()
-        except pickle.UnpicklingError as e:
-            print(f'Scene file {scene_file} not a pickle file:\n{e}')
-            sys.exit(1)
-        # pylint: disable=broad-exception-caught  # so many ways to fail, catch them all
-        except Exception as e:
-            print(f'Warning: Error loading scene file: {e}')
-        return loaded_scene
 
     def save_chat(self)->None:
         """ Persist chat history (save) """
@@ -569,3 +402,10 @@ class CommonUtils():
                           'w', encoding='utf-8') as f:
                     f.write(f'PROMPT CHANGE: {llm_prompt}')
         return self.load_prompt()
+
+    def write_debug(self, prefix: str, message: str)->None:
+        """ Write to vector_data/{prefix}_debug.log """
+        sanitized = prefix.replace('/', '-')
+        with open(os.path.join(self.opts.vector_dir, f'{sanitized}_debug.log'),
+                  'w', encoding='utf-8') as f:
+            f.write(str(message))

@@ -10,6 +10,7 @@
 # directory when finished to remove any trace of your conversations.
 chat:
   model: gemma3:27b                       (heavy-weight LLM, your main go-to)
+  nsfw_model: some-nsfw-capable-model     (Optional. Defaults to model if not set. If your stories are going to be rated higher than PG=13 material, you'll want to make an NSFW model available)
   pre_llm: gemma3:1b                      (light-weight LLM, used for metadata tagging)
   embedding_llm: nomic-embed-text         (embeddings for RAG vector database work)
   history_dir:                            /some/writable/path or leave blank for default
@@ -22,8 +23,9 @@ chat:
   time_zone: 'America/Denver'             (currently not used in the system prompts, easy to implement though: {date_time})
   light_mode: False                       (set to true if you use a high luminance terminal background)
   context_window: 4192                    (ask the server to use this context window size. Sometimes can be ignore)
-  name: your assistants name              (name your assistant/story-teller)
-  assitant_mode: True                     (use non-story telling prompts. Useful if you're using this chat script as a tool instead of a story teller)
+  name: your assistant's name             (name your assistant/story-teller)
+  user_name: your character's name        (Use this to ground your LLMs to you being the protagonist in your stories)
+  assistant_mode: True                    (use non-story telling prompts. Useful if you're using this chat script as a tool instead of a story teller)
   syntax_style: fruity                    (specify a syntax highlighting theme see: https://pygments.org/styles/ for themes)
   debug: False
 
