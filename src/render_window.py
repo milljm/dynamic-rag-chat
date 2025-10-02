@@ -9,9 +9,9 @@ from rich.text import Text
 from rich.align import Align
 from rich.console import Group
 from langchain.prompts import ChatPromptTemplate, PromptTemplate
-from langchain_core.prompts import HumanMessagePromptTemplate, SystemMessagePromptTemplate
 from langchain.schema.messages import HumanMessage
 from langchain.schema import BaseMessage, Document   # For Type Hinting
+from langchain_core.prompts import HumanMessagePromptTemplate, SystemMessagePromptTemplate
 from langchain_openai import ChatOpenAI
 from .prompt_manager import PromptManager
 from .context_manager import ContextManager # For Type Hinting
@@ -112,6 +112,7 @@ class RenderWindow(PromptManager):
         self.console = console
         self.common = common
         self.opts = args
+        self.thinking_chunk = ''
 
         # populate dataclasses, setup
         self._load_states(current_dir, context, args)
@@ -120,14 +121,20 @@ class RenderWindow(PromptManager):
         self.llm = {
                 'sfw'  : ChatOpenAI(base_url=self.state.host,
                                     model=self.state.model,
-                                    temperature=0.6 if self.state.assistant_mode else 0.7,
+                                    temperature=0.6 if self.state.assistant_mode
+                                                    else args.temperature,
+                                    top_p=args.top_p,
+                                    frequency_penalty=args.repetition_penalty,
                                     streaming=True,
                                     max_completion_tokens=self.state.completion_tokens,
                                     api_key=self.state.api_key),
 
                 'nsfw' : ChatOpenAI(base_url=self.state.host,
                                     model=self.state.nsfw_model,
-                                    temperature=0.6 if self.state.assistant_mode else 0.7,
+                                    temperature=0.6 if self.state.assistant_mode
+                                                    else args.temperature,
+                                    top_p=args.top_p,
+                                    frequency_penalty=args.repetition_penalty,
                                     streaming=True,
                                     max_completion_tokens=self.state.completion_tokens,
                                     api_key=self.state.api_key),
@@ -304,6 +311,8 @@ class RenderWindow(PromptManager):
 
         # End of <think> block
         if stream.thinking and '</think>' in content:
+            self.common.save_thinking(self.thinking_chunk)
+            self.thinking_chunk = ''
             stream.thinking = False
             self.stop_thinking()
             chunk.content = ''
@@ -320,6 +329,7 @@ class RenderWindow(PromptManager):
         # Middle of thinking stream
         if stream.thinking:
             chunk.content = content if show else ''
+            self.thinking_chunk += content
             return chunk
 
         return chunk
@@ -398,10 +408,10 @@ class RenderWindow(PromptManager):
         prompts = self.prompts
         # pylint: disable=no-member # dynamic prompts (see self.__build_prompts)
         system_prompt = (prompts.get_prompt(f'{prompts.plot_prompt_file}_system.md')
-                     if self.debug else prompts.plot_prompt_system)
+                     if self.debug or self.opts.prompts_debug else prompts.plot_prompt_system)
 
         human_prompt = (prompts.get_prompt(f'{prompts.plot_prompt_file}_human.md')
-                     if self.debug else prompts.plot_prompt_human)
+                     if self.debug or self.opts.prompts_debug else prompts.plot_prompt_human)
         # pylint: enable=no-member
 
         # Prompt conversions/templates
@@ -505,6 +515,7 @@ class RenderWindow(PromptManager):
         """ Handle the Rich Live updating process """
         stream = self.state.stream   # shorthand
         context = self.state.context # shorthand
+        history = self.common.chat_history_session # shorthand
         messages = self.get_messages(documents)
         token_total = documents['prompt_tokens']
         for message in messages:
@@ -566,12 +577,10 @@ class RenderWindow(PromptManager):
                                 style=f'color({self.state.color})',highlight=False)
         # current_response += f'\n\n{stream.meta_capture}'
         documents['llm_response'] = current_response
-        if self.state.assistant_mode and not self.state.no_rags:
-            self.common.chat_history_session.append(f'\nUSER: {documents["user_query"]}\n\n'
-                                                f'AI: {current_response}')
-            if self.state.verbose:
-                self.console.print('Info: Nothing saved (assistant-mode)',
-                                style=f'color({self.state.color})',highlight=False)
+        if self.state.assistant_mode:
+            history[history.get('current', 'default')].append(
+                f'\nUSER: {documents["user_query"]}\n\n'
+                f'AI: {current_response}')
             return
         stream.meta_capture = ''
         if self.debug:
@@ -581,9 +590,12 @@ class RenderWindow(PromptManager):
         self.state.context.handle_context(documents, direction='store')
         current_response = self.common.sanitize_response(current_response)
         self.common.write_debug('sanitized', current_response)
-        self.common.chat_history_session.append(f'\nUSER: {documents["user_query"]}\n\n'
-                                                f'AI: {current_response}')
+
+        history[history.get('current', 'default')].append(
+            f'\nUSER: {documents["user_query"]}\n\n'
+            f'AI: {current_response}')
         self.common.save_chat()
+
         if self.debug:
             self.console.print('DEBUG: live finished',
                                 style=f'color({self.state.color})',highlight=False)

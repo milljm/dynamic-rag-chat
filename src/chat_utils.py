@@ -48,8 +48,14 @@ class ChatOptions:
     debug: bool = False
     verbose: bool = False
     light_mode: bool = False
+    prompts_debug: bool = False
     name: str = 'assistant'
     user_name: str = 'John'
+    temperature: float = 0.9
+    top_p: float = 0.8
+    repetition_penalty: float = 1.05
+    context_window: int = 32768
+    continue_from: int = -1
 
     # ---------- RAG / pre‑ & post‑processing ----------
     preconditioner: str = 'gemma3:1b'
@@ -60,7 +66,7 @@ class ChatOptions:
     matches: int = 20
 
     # ---------- history ----------
-    chat_history: int = 1000
+    chat_history: int = 10000
     history_sessions: int = 5
 
     # ---------- UI ----------
@@ -161,12 +167,13 @@ class CommonUtils():
                 print(f'Unable to create directory: {args.vector_dir}')
                 sys.exit(1)
 
-        # Session's Chat History list
+        # Session's Chat History dictionary
+        self.chat_history_session = {}
         self.chat_history_session = self.load_chat()
 
         # Heat Map
         self.heat_map = 0
-        self.prompt_map = self.create_heatmap(8000)
+        self.prompt_map = self.create_heatmap(int(args.context_window))
         self.cleaned_map = self.create_heatmap(1000)
 
     def __set_project_attributes(self):
@@ -334,6 +341,11 @@ class CommonUtils():
         """ Persist chat history (save) """
         if self.opts.assistant_mode and not self.opts.no_rags:
             return
+        if self.opts.continue_from != -1:
+            if self.opts.debug:
+                self.console.print('CONTINUE_FROM Enabled. Not saving chat',
+                                   style=f'color({self.opts.color})', highlight=True)
+            return
         history_file = os.path.join(self.opts.vector_dir, 'chat_history.pkl')
         try:
             with open(history_file, "wb") as f:
@@ -341,17 +353,16 @@ class CommonUtils():
         except FileNotFoundError as e:
             print(f'Error saving chat. Check --history-dir\n{e}')
 
-    def load_chat(self)->list:
+    def load_chat(self)->dict:
         """ Persist chat history (load) """
-        loaded_list = []
+        loaded_dict = {'default': [],
+                       'current': 'default'}
         if self.opts.assistant_mode and not self.opts.no_rags:
-            return []
+            return loaded_dict | self.chat_history_session
         history_file = os.path.join(self.opts.vector_dir, 'chat_history.pkl')
         try:
             with open(history_file, "rb") as f:
-                loaded_list = pickle.load(f)
-                # truncate to max amount
-                loaded_list = loaded_list[-self.opts.chat_history:]
+                loaded_dict = pickle.load(f)
         except FileNotFoundError:
             pass
         except pickle.UnpicklingError as e:
@@ -360,7 +371,13 @@ class CommonUtils():
         # pylint: disable=broad-exception-caught  # so many ways to fail, catch them all
         except Exception as e:
             print(f'Warning: Error loading chat: {e}')
-        return loaded_list
+        return loaded_dict
+
+    def save_thinking(self, thinking_str: str)->None:
+        """ Save Thinking """
+        thinking_file = os.path.join(self.opts.vector_dir, 'thinking_debug.log')
+        with open(thinking_file, 'w', encoding='utf-8') as f:
+            f.write(thinking_str)
 
     def save_prompt(self, prompt)->str:
         """ Save the LLMs prompt, overwriting the previous one """
