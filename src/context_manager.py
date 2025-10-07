@@ -109,7 +109,7 @@ class ContextManager(PromptManager):
         query = self.common.normalize_for_dedup(query)
         # pylint: disable=no-member # dynamic prompts (see self.__build_prompts)
         human_prompt = (prompts.get_prompt(f'{prompts.tag_prompt_file}_human.md')
-                        if self.debug else prompts.tag_prompt_human)
+                        if self.debug or self.opts.prompts_debug else prompts.tag_prompt_human)
         # pylint: enable=no-member
         human_tmpl = PromptTemplate(template=human_prompt,
                                     template_format="jinja2")
@@ -133,12 +133,11 @@ class ContextManager(PromptManager):
         # Parse tags (JSON) response from LLM
         tags = self.common.get_tags(content)
 
-        # when importing documents, do not inherit entities from previous turns
         if do_scene:
             tags = self.scene.ground_scene(tags, query)
             if self.debug:
                 self.console.print(f'SCENE MANAGER OVERRIDE:\n{tags}\n\n',
-                                    style=f'color({self.opts.color})', highlight=False)
+                                style=f'color({self.opts.color})', highlight=False)
         return (content, tags, True)
 
     def post_process(self, documents: dict)->None:
@@ -167,6 +166,11 @@ class ContextManager(PromptManager):
         # tagify the AI response
         response = documents['llm_response']
         (_, list_rag_tags, _) = self.pre_processor(response, documents)
+
+        # Handle triggers
+        self.scene.finalize_turn(response)
+        self.scene.save_scene()
+
         collections = self.common.attributes.collections  # short hand
         # protect against empty or gold RAG (read-only) collections
         if not collection or collection == collections['gold']:
@@ -206,26 +210,9 @@ class ContextManager(PromptManager):
         indices += list(range(history_size - recent_tail, history_size))
         return sorted(set(indices))
 
-    def get_chat_history(self)->list:
-        """
-        Limit Chat History to 550 * int(history_sessions) tokens (defaults = 2750 tokens)
-        """
-        splice_list = self.stagger_history(len(self.common.chat_history_session),
-                                           self.opts.history_sessions)
-        spliced = [self.common.chat_history_session[x] for x in splice_list]
-        abridged = []
-        _tk_cnt = 0
-        max_tokens = 550 * max(1, int(self.opts.history_sessions)) # Defaults = 2750 tokens
-        for response in spliced:
-            _tk_cnt += self.token_retriever(response)
-            if _tk_cnt > max_tokens:
-                if self.debug:
-                    self.console.print(f'MAX CHAT TOKENS: {_tk_cnt}',
-                                       style=f'color({self.opts.color})',
-                                       highlight=False)
-                return abridged
-            abridged.append(response)
-        return abridged
+    def get_chat_history(self, history_list)->list:
+        """ just return n previous turns """
+        return '\n\n'.join(history_list[-self.opts.history_sessions:])
 
     def handle_topics(self,
                       meta_tags: list[RAGTag],
@@ -282,7 +269,7 @@ class ContextManager(PromptManager):
     def is_explicit(meta_tags: list[RAGTag[str,str]]) -> bool:
         """ Return bool if content detected is NSFW """
         try:
-            rating = [x.content for x in meta_tags if x.tag == 'content_rating'] # shorthand
+            rating = [x.content for x in meta_tags if x.tag == 'scene_mode'] # shorthand
             return 'nsfw' in rating[0].lower()
         #pylint: disable=bare-except   # LLMs can get so many things wrong
         except:
@@ -366,6 +353,13 @@ class ContextManager(PromptManager):
             collection_list = [self.common.attributes.collections[x] for
                                 x in self.common.attributes.collections]
             # documents = {key: [] for key in collection_list}
+
+            # populate chat history
+            history = documents['history'] # shorthand
+            documents['chat_history'] = self.get_chat_history(
+                    history[history.get('current',
+                                        'default')])
+
             if self.opts.assistant_mode and not self.opts.no_rags:
                 return (documents, pre_tokens, post_tokens)
 
@@ -376,19 +370,21 @@ class ContextManager(PromptManager):
 
             # grab entities and perform another tagging process (with character sheets)
             documents['entities'] = '\n\n'.join(self.prompt_entities(meta_tags))
-            (_, meta_tags, _) = self.pre_processor(query, documents)
 
             # Populate explicit content if triggered
             documents['explicit'] = self.is_explicit(meta_tags)
 
-            documents['explicit_content'] = (self.get_explicit() if documents['explicit']
-                                                else '')
+            # documents['nsfw_content'] = (self.get_explicit() if documents['explicit'] else '')
+            documents['nsfw_content'] = self.get_explicit()
 
             # Known characters the user has encountered during the story
             # documents['known_characters'] = self.scene.render_known_characters_for_prompt()
 
             # Make all meta_tags available for prompt templating operations
             # Note: This *might* have the side-effect of breaking necessary keys, though rare.
+            #       as in, we are allowing any tags that the pre-processor *might* invent on its
+            #       own, could overwrite a required on. Still, the benefits outweigh the negs.
+            #       Allowing it provides a synergy pipeline. Allowing us to stream from LLM to LLM
             documents.update(meta_tags)
 
             # If content_type is populated, instruct the LLM to respond in kind
@@ -426,10 +422,11 @@ class ContextManager(PromptManager):
                 for page in documents[collection]:
                     post_tokens += self.token_retriever(page)
 
-            if self.debug:
-                self.console.print(f'CONTEXT RETRIEVAL:\n{documents}\n\n',
-                                    style=f'color({self.opts.color})',
-                                    highlight=False)
+                # Stringify RAG retrieval lists
+                documents[collection] = self.common.stringify_lists(documents[collection])
+
+            # Stringify lists in chat_history
+            documents['chat_history'] = self.common.stringify_lists(documents['chat_history'])
 
             # Store the users query to their RAG, now that we are done pre-processing
             # (so as not to bring back identical information in their query)

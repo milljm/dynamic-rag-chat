@@ -1,27 +1,16 @@
-### In-Line Content
-The following (if populated) is content the user loaded for you to examine
-#### START IN-LINE CONTENT
+Use Chat History for flow; never repeat any line exactly as written between <<CHAT_HISTORY_START>> and <<CHAT_HISTORY_END>>.
 
-{dynamic_files}
+<<ENFORCE:PROGRESS>>
+# Per-turn rules:
+# - Do NOT repeat the previous assistant line.
+# - Do NOT end with ellipses or "trails off."
 
-#### END IN-LINE CONTENT
+<<CHAT_HISTORY_START>>
+{{chat_history}}
+<<CHAT_HISTORY_END>>
 
-### 📚 Dynamic Knowledge Base (RAG Sources)
-CRITICAL: You will treat the following information as factual but not to establish tone or emotion:
+<<ATTACHMENTS_START>>
+{{dynamic_files}}
+<<ATTACHMENTS_END>>
 
-USER HISTORY:
-{user_documents}
-
-AI MEMORY:
-{ai_documents}
-
-GOLD DOCUMENTS (treat as immutable, and beyond contestation, is always true):
-{gold_documents}
-
-### Chat History (oldest to newest, chronological-ascending, includes USER and AI responses)
-Use the following information from past conversations for awareness and conversation continuity:
-{chat_history}
-
-### User Input (the users query or comment)
-Answer the user's question. Or comment, discuss, joke, with the user if there is no question:
-{user_query}
+Anser the following users query: **{{user_query}}**

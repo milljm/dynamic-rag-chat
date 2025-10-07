@@ -23,13 +23,16 @@
 # ///
 import os
 import io
+import re
 import sys
 import time
 import base64
 import argparse
 import datetime
 import mimetypes
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
+from copy import deepcopy
+from typing import Dict, Any, List, Optional
 import pytz
 import requests
 from rich.console import Console
@@ -47,6 +50,52 @@ from src import ImportData
 from src import SceneManager
 console = Console(highlight=True)
 current_dir = os.path.dirname(os.path.abspath(__file__))
+
+
+
+
+CMD_LINE = re.compile(r"^[ \t]*\\(?P<cmd>[A-Za-z0-9_\-\?]+)(?:[ \t]+(?P<args>.*))?$")
+RARE_TOKENS = (r"[RARE NOW]", r"[RARE USED]", r"[RARE RESET]", r"[SAFE MODE]")
+RARE_TOKENS_RE = re.compile("|".join(re.escape(t) for t in RARE_TOKENS))
+INCLUDE_RE = re.compile(r"\{\{([^}]+)\}\}")  # {{/path}} or {{https://url}}
+
+HELP_TEXT = (
+    "in-command switches you can use:\n\n"
+    "\t\\no-context msg              - perform a query with no context\n"
+    "\t\\delete-last                 - delete last message from history\n"
+    "\t\\turn                        - show turn/status\n"
+    "\t\\rewind N                    - rewind to turn N (keep 0..N)\n"
+    "\t\\branch NAME@N               - set/fork branch name, if empty list branches;\n"
+    "\t                               optional @N to fork from first N turns\n"
+    "\t\\seed N                      - set RNG seed (or omit to clear)\n"
+    "\t\\history [N]                 - show last N user inputs (default 5)\n"
+    "\n[bold]context injection[/bold]\n"
+    "    {{/absolute/path/to/file}}       - include a file as context\n"
+    "    {{https://somewebsite.com/}}     - include URL as context\n"
+    "\n[bold]story controls[/bold]\n"
+    f"    {', '.join(RARE_TOKENS)}\n"
+    "\n[bold]keyboard shortcuts (terminal):[/bold]\n\n"
+    "    [yellow]Ctrl-W[/yellow] - delete word left of cursor\n"
+    "    [yellow]Ctrl-U[/yellow] - delete everything left of cursor\n"
+    "    [yellow]Ctrl-K[/yellow] - delete everything right of cursor\n"
+    "    [yellow]Ctrl-A[/yellow] - move to beginning of line\n"
+    "    [yellow]Ctrl-E[/yellow] - move to end of line\n"
+    "    [yellow]Ctrl-L[/yellow] - clear screen\n"
+)
+
+@dataclass
+class ParsedInput:
+    """ In-line command options dataclass """
+    # What the user actually wants to “say” to the model (after stripping controls)
+    clean_text: str
+    # Commands like \rewind, \turn, \no-context, etc. (only one command per line supported;
+    # if you want multiple, call handle_command() repeatedly from your UI)
+    command: Optional[str]
+    args: str
+    # Inline story toggles like [RARE NOW], [SAFE MODE] etc.
+    rare_controls: List[str]
+    # Context includes found: absolute paths or URLs
+    includes: List[str]
 
 @dataclass
 class SessionContext:
@@ -80,11 +129,80 @@ class SessionContext:
                    renderer=_renderer,
                    scene=_scene)
 
+
+def parse_user_input(raw: str) -> ParsedInput:
+    """ Parse incoming command string and return a ParsedInput dataclass """
+    line = raw.strip()
+
+    # 1) Extract a leading command like \rewind 12
+    command, c_args = None, ""
+    m = CMD_LINE.match(line.splitlines()[0]) if line else None
+    if m:
+        command = m.group(1).lower()
+        c_args = (m.group(2) or "").strip()
+        # remove the first line entirely (the \cmd line)
+        rest = line.splitlines()[1:]
+        line = "\n".join(rest).strip()
+
+    # 2) Extract RARE tokens anywhere in the remaining text
+    rare_controls = RARE_TOKENS_RE.findall(line)
+    if rare_controls:
+        line = RARE_TOKENS_RE.sub("", line).strip()
+
+    # 3) Extract includes like {{/abs/path}} or {{https://...}}
+    includes = INCLUDE_RE.findall(line)
+    if includes:
+        line = INCLUDE_RE.sub("", line).strip()
+
+    return ParsedInput(
+        clean_text=line,
+        command=command,
+        args=c_args,
+        rare_controls=rare_controls,
+        includes=includes,
+    )
+
+def apply_rare_controls(found: List[str], scene: Dict[str, Any]):
+    """ RARE Event Handler """
+    scene.setdefault('rare_event_pending', False)
+    scene.setdefault('rare_event_used', False)
+    scene.setdefault('rare_event_cooldown', 0)
+    scene.setdefault('safe_mode_turns', 0)
+
+    if ('[RARE NOW]' in found
+        and scene.get('safe_mode_turns', 0) == 0
+        and scene.get('rare_event_cooldown', 0) == 0):
+        scene['rare_event_pending'] = True
+    if '[RARE USED]' in found:
+        scene['rare_event_used'] = True
+        scene['rare_event_pending'] = False
+        scene['rare_event_cooldown'] = max(scene.get('rare_event_cooldown', 0), 20)
+    if '[RARE RESET]' in found:
+        scene.update({
+            'rare_event_pending': False,
+            'rare_event_used': False,
+            'rare_event_cooldown': 0,
+            'safe_mode_turns': 0
+        })
+    if '[SAFE MODE]' in found:
+        scene['safe_mode_turns'] = max(scene.get('safe_mode_turns', 0), 30)
+
+def now_addendum(scene: Dict[str, Any]) -> str:
+    """ drop in rare event LLM trigger command (literally worded) """
+    if scene.get('safe_mode_turns', 0) > 0:
+        return ''
+    if scene.get('rare_event_pending'):
+        return "\nNOW: A rare involuntary event MAY occur this turn." \
+        " Otherwise, do not force protagonist actions."
+    return ''
+
 class Chat():
     """ Begin initializing variables classes. Call .chat() to begin """
     def __init__(self, o_session, _args):
         self.opts: ChatOptions = _args
         self.session: SessionContext = o_session
+
+        self.chat_branch = self.session.common.chat_history_session['current']
         self._initialize_startup_tasks()
 
     def _initialize_startup_tasks(self):
@@ -93,11 +211,29 @@ class Chat():
         if opts.debug:
             console.print('[italic dim grey30]Debug mode enabled. I will re-read the '
                                'prompt files each time.[/]')
+        elif opts.prompts_debug:
+            console.print('[italic dim grey30]prompts-debug enabled. I will re-read the '
+                               'prompt files each time.[/]')
         if opts.assistant_mode and not opts.no_rags:
             console.print('[italic dim grey30]Assistant mode enabled. RAGs disabled, Chat '
                                'History will not persist.[/]')
         elif opts.no_rags and opts.assistant_mode:
             console.print('[italic dim grey30]Assistant mode enabled.[/]')
+
+    def _branch_exists(self, history, name):
+        return name in history and name != 'current'
+
+    def _slice_upto(self, lst, n):
+        n = max(0, min(n, len(lst)))
+        return lst[:n]
+
+    def qwen_prompt(self)->str:
+        """ return the contents of qwen.md """
+        qwen_file = os.path.join(self.opts.vector_dir, '../', 'prompts', 'qwen.md')
+        if os.path.exists(qwen_file):
+            with open(qwen_file, 'r', encoding='utf-8') as f:
+                return f.read()
+        return ''
 
     @staticmethod
     def get_time(tzone: str)->str:
@@ -147,6 +283,7 @@ class Chat():
         documents = dict()
         pre_process_time = time.time()
         history = self.session.common.chat_history_session  # shorthand
+        previous = history[history.get('current', 'default')][-2:-1:]
         documents.update(
             {'user_query'       : user_input,
              'dynamic_files'    : '',
@@ -157,9 +294,11 @@ class Chat():
              'date_time'        : self.get_time(self.opts.time_zone),
              'pre_process_time' : pre_process_time,
              'light_mode'       : self.set_lightmode_aware(self.opts.light_mode),
-             'previous'         : history.pop() if history else '',
-             'chat_history'     : history,
-             'entities'         : []
+             'previous'         : previous,
+             'history'          : history,
+             'entities'         : [],
+             'explicit'         : False,
+             'qwen_prompts'     : self.qwen_prompt(),
              }
             )
 
@@ -310,7 +449,7 @@ class Chat():
                      'content_type'      : '',
                      'context'           : '',
                      'explicit'          : False,
-                     'explicit_content'  : '',
+                     'nsfw_content'      : '',
                      'date_time'         : self.get_time(self.opts.time_zone),
                      'completion_tokens' : self.opts.completion_tokens,
                      'pre_process_time'  : '{:.1f}s'.format(0),
@@ -320,6 +459,7 @@ class Chat():
                      'prompt_tokens'     : prompt_tokens,
                      'token_savings'     : 0,
                      'cleaned_color'     : cleaned_color,
+                     'qwen_prompts'      : self.qwen_prompt(),
                      }
         return documents
 
@@ -327,56 +467,186 @@ class Chat():
         """ Prompt the User for questions, and begin! """
         c_session = PromptSession()
         kb = KeyBindings()
+        history = self.session.common.chat_history_session # shorthand
         @kb.add('enter')
         def _(event):
             buffer = event.current_buffer
             buffer.insert_text('\n')
+
         console.print('💬 Press [italic red]Esc+Enter[/italic red] to send (multi-line), '
-                      r'[red]\? Esc+Enter[/red] for help, '
-                      '[italic red]Ctrl+C[/italic red] to quit.\n')
+                    r'[red]\? Esc+Enter[/red] for help, '
+                    '[italic red]Ctrl+C[/italic red] to quit.\n')
+
         try:
             while True:
-                user_input = c_session.prompt(">>> ", multiline=True, key_bindings=kb).strip()
-                if not user_input:
+                raw = c_session.prompt(">>> ", multiline=True, key_bindings=kb).strip()
+                if not raw:
                     continue
-                if user_input == r'\?':
-                    console.print('in-command switches you can use:\n\n' \
-                        '\t\\no-context [italic]msg[/italic]              - (perform a'
-                        ' query with no context)\n'
-                        '\t\\delete-last                 - (Delete last message from history)\n'
-                        '\t{{/absolute/path/to/file}}   - (Include a file as context)\n'
-                        '\t{{https://somewebsite.com/}} - (Include URL as context)\n'
-                    )
+
+                if raw == r'\?':
+                    console.print(HELP_TEXT)
                     continue
-                # Delete last message
-                if user_input.find(r'\delete-last') >=0:
-                    user_input = user_input.replace(r'\delete-last', '')
-                    try:
-                        _ = self.session.common.chat_history_session.pop()
+
+                parsed = parse_user_input(raw)
+
+                # Global commands that do not call the model:
+                if parsed.command:
+                    cmd, arg = parsed.command, parsed.args
+                    if cmd == "delete-last":
+                        try:
+                            _ = history[self.chat_branch].pop()
+                            self.session.common.save_chat()
+                            console.print("[green]Deleted last.[/green]", highlight=False)
+                        except IndexError:
+                            console.print("[yellow]History empty.[/yellow]")
+                        continue
+                    elif cmd == "turn":
+                        console.print(max(1,len(history[self.chat_branch])-1))
+                        continue
+                    elif cmd == "rewind":
+                        try:
+                            n = int(arg)
+                            history[self.chat_branch] = list(history[self.chat_branch][:-n])
+                            self.session.common.save_chat()
+                            console.print(f"[green]Rewound to {n}.[/green]", highlight=False)
+                            if len(history[self.chat_branch]):
+                                print(f" {history[self.chat_branch][-1]}")
+                        except ValueError:
+                            console.print("[red]usage: \\rewind N[/red]")
+                        continue
+                    elif cmd == "branch":
+                        if not arg:
+                            branches = sorted([k for k in history.keys() if k != 'current'])
+                            maxlen = max((len(n) for n in branches), default=0)
+
+                            if self.chat_branch in branches:
+                                branches.remove(self.chat_branch)
+                                branches.insert(0, self.chat_branch)
+
+                            for name in branches:
+                                count = len(history[name])
+                                preview = ""
+                                if count > 0:
+                                    last = history[name][-1].replace("\n", " ")
+                                    preview = last[:40] + ("…" if len(last) > 40 else "")
+                                    preview = f"[dim]{preview}[/dim]"  # <= dim effect
+
+                                if name == self.chat_branch:
+                                    console.print(
+                                        f"\t➡ [green]{name:<{maxlen}}[/green] : "
+                                        f"[{count:>3}] {preview}",
+                                        highlight=False
+                                    )
+                                else:
+                                    console.print(
+                                        f"\t  {name:<{maxlen}} : [{count:>3}] {preview}",
+                                        highlight=False
+                                    )
+                            continue
+
+
+                        # parse "name@N" to branch from first N turns of current branch
+                        # examples: "\branch testing@5" or just "\branch testing"
+                        raw = arg.strip()
+                        if raw == "current" or raw == "":  # guard reserved/empty
+                            console.print("[red]Invalid branch name.[/red]", highlight=False)
+                            continue
+
+                        if "@" in raw:
+                            name, n_str = raw.split("@", 1)
+                            try:
+                                cut = int(n_str)
+                            except ValueError:
+                                console.print("[red]usage: \\branch NAME[@N][/red]",
+                                               highlight=False)
+                                continue
+                        else:
+                            name, cut = raw, None
+
+                        # switching if it exists, else create from current up to cut (or full)
+                        if self._branch_exists(history, name):
+                            if name == self.chat_branch:
+                                console.print(f"[green]Already on branch:[/green] {name}",
+                                               highlight=False)
+                            else:
+                                self.chat_branch = name
+                                history['current'] = name
+                                console.print(f"[green]Switched to :[/green] {name}",
+                                               highlight=False)
+                            self.session.common.save_chat()
+                            continue
+
+                        # create new branch from current
+                        src = self.chat_branch
+                        base = history[src]
+                        new_list = deepcopy(self._slice_upto(
+                                            base, cut if cut is not None else len(base)))
+                        history[name] = new_list
+                        history['current'] = name
+                        self.chat_branch = name
                         self.session.common.save_chat()
-                    except IndexError:
-                        # There were not items in history
+                        console.print(f"[green]Branched to:[/green] {name}", highlight=False)
+                        continue
+                    elif cmd == "seed":
+                        try:
+                            val = int(arg)
+                            self.session.state.set_seed(val)
+                            console.print(f"[green]Seed set:[/green] {val}")
+                        except IndexError:
+                            self.session.state.set_seed(None)
+                            console.print("[yellow]Seed cleared.[/yellow]")
+                        continue
+                    elif cmd == "history":
+                        try:
+                            n = int(arg or "5")
+                        except ValueError:
+                            n = 5
+                        turns = history[self.chat_branch][-n:]
+                        total = len(history[self.chat_branch])
+                        start = total - len(turns)
+                        for i, v in enumerate(turns, start=start+1):
+                            print(f'\n\n⬇ TURN {i} ⬇\n{v}')
+                        continue
+                    elif cmd == "no-context":
+                        # fall-thru to model call but bypass normal context build
                         pass
+                    else:
+                        console.print(f"[red]Unknown command:[/red] \\{cmd}")
+                        continue
 
-                # No context or not
-                if user_input.find(r'\no-context') >=0:
-                    user_input = user_input.replace(r'\no-context ', '')
-                    documents = self.no_context(user_input)
-                    documents['in_line_commands'] = '\nMeta commands: [no-context, ]'
+                # Apply inline RARE controls (toggle flags), never seen by the model
+                apply_rare_controls(parsed.rare_controls, self.session.scene.get_scene())
 
+                # Build documents (with or without context)
+                if parsed.command == "no-context":
+                    documents = self.no_context(parsed.args or parsed.clean_text)
+                    documents['in_line_commands'] = 'Meta: [no-context]'
+                    # Use args+clean_text as the actual user content for this query
+                    user_payload = (parsed.args or parsed.clean_text)
                 else:
-                    # Grab our lovely context
-                    documents = self.get_documents(user_input)
+                    user_payload = parsed.clean_text
+                    documents = self.get_documents(user_payload)
 
-                # add in-line content
-                documents.update(self.load_content_as_context(user_input))
+                # Add any inline includes as context (files/URLs)
+                if parsed.includes:
+                    inc_docs = self.load_content_as_context(
+                        " ".join(f"{{{{{x}}}}}" for x in parsed.includes))
+                    documents.update(inc_docs)
 
-                # handoff to rich live
+                # Inject NOW addendum if armed
+                sys_addon = now_addendum(self.session.scene.get_scene())
+                if sys_addon:
+                    # renderer should append this to system prompt
+                    documents['system_addendum'] = sys_addon
+
+                # Handoff to renderer
+                # Your renderer should read documents['system_addendum']
+                # (if any) and append to the system prompt
                 self.session.renderer.live_stream(documents)
 
-        except KeyboardInterrupt:  # ctl-c
+        except KeyboardInterrupt:
             sys.exit()
-        except EOFError:  # ctl-d
+        except EOFError:
             sys.exit()
 
 def verify_args(p_args):
@@ -384,8 +654,96 @@ def verify_args(p_args):
     # The issue added to the feature tracker: nothing to verify yet
     return p_args
 
-def parse_args(argv, opts):
-    """ parse arguments """
+def _add_arguments(parser: argparse.ArgumentParser, defaults, *, use_defaults: bool) -> None:
+    """Register all CLI options. If use_defaults=False, suppress defaults (for pre-parse)."""
+    D = (lambda name: getattr(defaults, name)) if use_defaults else (lambda _: argparse.SUPPRESS)
+
+    parser.add_argument('--model', metavar='', default=D('model'),
+                        help='LLM Model (default: %(default)s)')
+    parser.add_argument('--nsfw-model', metavar='', default=D('nsfw_model'),
+                        help='NSFW LLM Model (default: %(default)s)')
+    parser.add_argument('--pre-llm', metavar='', dest='preconditioner',
+                        default=D('preconditioner'),
+                        type=str, help='pre-processor LLM (default: %(default)s)')
+    parser.add_argument('--embedding-llm', metavar='', dest='embeddings',
+                        default=D('embeddings'),
+                        type=str, help='LM embedding model (default: %(default)s)')
+    parser.add_argument('--history-dir', metavar='', dest='vector_dir', default=D('vector_dir'),
+                        type=str, help='History directory (default: %(default)s)')
+    parser.add_argument('--llm-server', metavar='', dest='host', default=D('host'),
+                        type=str, help='OpenAI API server address (default: %(default)s)')
+    parser.add_argument('--pre-server', metavar='', dest='pre_host', default=D('pre_host'),
+                        type=str, help='OpenAI API server address (default: %(default)s)')
+    parser.add_argument('--embedding-server', metavar='', dest='emb_host', default=D('emb_host'),
+                        type=str, help='OpenAI API server address (default: %(default)s)')
+    parser.add_argument('--api-key', metavar='', default=D('api_key'),
+                        type=str, help='You API Key (default: REDACTED)')
+    parser.add_argument('--name', metavar='', default=D('name'),
+                        type=str, help='Your assistants name (default: %(default)s)')
+    parser.add_argument('--user-name', metavar='', default=D('user_name'),
+                        type=str, help='Your characters name (default: %(default)s)')
+    parser.add_argument('--time-zone', metavar='', default=D('time_zone'),
+                        type=str, help='your assistants name (default: %(default)s)')
+    parser.add_argument('--history-matches', metavar='', dest='matches',
+                        default=D('matches'), type=int,
+                        help='Number of results to pull from each RAG (default: %(default)s)')
+    parser.add_argument('--history-sessions', metavar='', default=D('history_sessions'),
+                        type=int, help='Chat history responses available in context '
+                        '(default: %(default)s)')
+    parser.add_argument('--history-max', metavar='', dest='chat_max', default=D('chat_history'),
+                        type=int, help='Chat history responses to save to disk '
+                        '(default: %(default)s)')
+    parser.add_argument('--completion-tokens', metavar='', dest='completion_tokens',
+                        default=D('completion_tokens'), type=int,
+                        help='The maximum tokens the LLM can respond with (default: %(default)s)')
+    parser.add_argument('--syntax-style', metavar='', dest='syntax_theme',
+                        default=D('syntax_theme'), type=str,
+                        help=('Your desired syntax-highlight theme (default: %(default)s). '
+                              'See https://pygments.org/styles/ for available themes'))
+
+    # imports
+    parser.add_argument('--import-pdf', metavar='', type=str,
+                        help='Path to pdf to pre-populate main RAG')
+    parser.add_argument('--import-txt', metavar='', type=str,
+                        help='Path to txt to pre-populate main RAG')
+    parser.add_argument('--import-web', metavar='', type=str,
+                        help='URL to pre-populate main RAG')
+    parser.add_argument('--import-dir', metavar='', type=str,
+                        help=('Path to recursively find and import assorted files (*.md *.html, '
+                              '*.txt, *.pdf)'))
+
+    # flags (bools)
+    parser.add_argument('--light-mode', action='store_true', default=D('light_mode'),
+                        help='Use a color scheme suitable for light background terminals')
+    parser.add_argument('--assistant-mode', action='store_true', default=D('assistant_mode'),
+                        help='Do not utilize story-telling mode prompts or the RAGs. Do not save '
+                        'chat history to disk')
+    parser.add_argument('--use-rags', action='store_true', default=D('no_rags'),
+                        help='Use RAGs regardless of assistant-mode (no effect when not also using '
+                        'assistant-mode)')
+    parser.add_argument('-d', '--debug', action='store_true', default=D('debug'),
+                        help='Print preconditioning message, prompt, etc')
+    parser.add_argument('-v', '--verbose', action='store_true', default=D('verbose'),
+                        help='Do not hide what the model is thinking (if the model supports '
+                        'thinking)')
+    parser.add_argument('--prompts-debug', action='store_true', default=D('prompts_debug'),
+                        help='re-read the prompt files every turn')
+
+    parser.add_argument('--temperature', metavar='', type=float, default=D('temperature'),
+                        help='Model temperature (default: %(default)s)')
+    parser.add_argument('--top-p', metavar='', type=float, default=D('top_p'),
+                        help='Model top_p (default: %(default)s)')
+    parser.add_argument('--repetition-penalty', metavar='', type=float,
+                        default=D('repetition_penalty'),
+                        help='Model repetition penalty (default: %(default)s)')
+    parser.add_argument('--context-window', metavar='', type=int,
+                        default=D('context_window'),
+                        help=('Does nothing, except to beautify the color map of "context". '
+                              'Input here, what your max context window is being set on the server '
+                              '(default: %(default)s)'))
+
+def parse_args(argv, yaml_opts):
+    """Two-stage parse so help shows effective defaults: CLI > YAML > dataclass."""
     about = """
 A tool capable of dynamically creating/instancing RAG
 collections using quick 1B parameter summarizers to 'tag'
@@ -395,81 +753,28 @@ window for your favorite heavy-weight LLM to draw upon.
 This allows for long-term memory, and fast relevant
 content generation.
 """
-    # pylint: disable=line-too-long
     epilog = f"""
 example:
   ./{os.path.basename(__file__)} --model gemma3-27b --pre-llm gemma3-1b --embedding-llm nomic-embed-text
 
 Chat can read a .chat.yaml file to import your arguments. See .chat.yaml.example for details.
-    """
-    # pylint: enable=line-too-long
-    parser = argparse.ArgumentParser(description=f'{about}',
-                                     epilog=f'{epilog}',
-                                     formatter_class=argparse.RawTextHelpFormatter)
-    parser.add_argument('--model', default=opts.model, metavar='',
-                        help='LLM Model (default: %(default)s)')
-    parser.add_argument('--nsfw-model', default=opts.nsfw_model, metavar='',
-                        help='NSFW LLM Model (default: %(default)s)')
-    parser.add_argument('--pre-llm', metavar='', dest='preconditioner',
-                        default=opts.preconditioner,
-                        type=str, help='pre-processor LLM (default: %(default)s)')
-    parser.add_argument('--embedding-llm', metavar='', dest='embeddings',
-                        default=opts.embeddings,
-                        type=str, help='LM embedding model (default: %(default)s)')
-    parser.add_argument('--history-dir', metavar='', dest='vector_dir', default=opts.vector_dir,
-                        type=str, help='History directory (default: %(default)s)')
-    parser.add_argument('--llm-server', metavar='', dest='host', default=opts.host, type=str,
-                        help='OpenAI API server address (default: %(default)s)')
-    parser.add_argument('--pre-server', metavar='', dest='pre_host', default=opts.pre_host,
-                        type=str, help='OpenAI API server address (default: %(default)s)')
-    parser.add_argument('--embedding-server', metavar='', dest='emb_host', default=opts.emb_host,
-                        type=str, help='OpenAI API server address (default: %(default)s)')
-    parser.add_argument('--api-key', metavar='', default=opts.api_key, type=str,
-                        help='You API Key (default: REDACTED)')
-    parser.add_argument('--name', metavar='', default=opts.name, type=str,
-                        help='Your assistants name (default: %(default)s)')
-    parser.add_argument('--user-name', metavar='', default=opts.user_name, type=str,
-                        help='Your characters name (default: %(default)s)')
-    parser.add_argument('--time-zone', metavar='', default=opts.time_zone,
-                        type=str, help='your assistants name (default: %(default)s)')
-    parser.add_argument('--history-matches', metavar='', dest='matches', default=opts.matches,
-                        type=int,
-                        help='Number of results to pull from each RAG (default: %(default)s)')
-    parser.add_argument('--history-sessions', metavar='', default=opts.history_sessions,
-                        type=int,
-                        help='Chat history responses availble in context (default: %(default)s)')
-    parser.add_argument('--history-max', metavar='', dest='chat_max', default=opts.chat_history,
-                        type=int,
-                        help='Chat history responses to save to disk (default: %(default)s)')
-    parser.add_argument('--completion-tokens', metavar='', dest='completion_tokens',
-                        default=opts.completion_tokens, type=int,
-                        help='The maximum tokens the LLM can respond with (default: %(default)s)')
-    parser.add_argument('--syntax-style', metavar='', dest='syntax_theme',
-                        default=opts.syntax_theme, type=str,
-                        help=('Your desired syntax-highlight theme (default: %(default)s).'
-                              ' See https://pygments.org/styles/ for available themes'))
-    parser.add_argument('--import-pdf', metavar='', type=str,
-                        help='Path to pdf to pre-populate main RAG')
-    parser.add_argument('--import-txt', metavar='', type=str,
-                        help='Path to txt to pre-populate main RAG')
-    parser.add_argument('--import-web', metavar='', type=str,
-                        help='URL to pre-populate main RAG')
-    parser.add_argument('--import-dir', metavar='', type=str,
-                        help=('Path to recursively find and import assorted files (*.md *.html, '
-                        '*.txt, *.pdf)'))
-    parser.add_argument('--light-mode', action='store_true', default=opts.light_mode,
-                        help='Use a color scheme suitable for light background terminals')
-    parser.add_argument('--assistant-mode', action='store_true', default=opts.assistant_mode,
-                        help='Do not utilize story-telling mode prompts or the RAGs. Do not save'
-                        ' chat history to disk')
-    parser.add_argument('--use-rags', action='store_true', default=opts.no_rags,
-                        help='Use RAGs regardless of assistant-mode (no effect when not also using'
-                        ' assistant-mode)')
-    parser.add_argument('-d', '--debug', action='store_true', default=opts.debug,
-                        help='Print preconditioning message, prompt, etc')
-    parser.add_argument('-v','--verbose', action='store_true', default=opts.verbose,
-                        help='Do not hide what the model is thinking (if the model supports'
-                        ' thinking)')
+"""
+
+    # -------- Stage 1: pre-parse (suppress defaults, ignore -h) --------
+    pre = argparse.ArgumentParser(add_help=False)
+    _add_arguments(pre, yaml_opts, use_defaults=False)   # no defaults => only capture user-supplied
+    partial, _ = pre.parse_known_args(argv)
+    merged = asdict(yaml_opts)
+    merged.update({k: v for k, v in vars(partial).items() if v is not None})
+
+    # -------- Stage 2: real parser with merged defaults --------
+    parser = argparse.ArgumentParser(
+        description=about,
+        epilog=epilog,
+        formatter_class=argparse.RawTextHelpFormatter
+    )
+    # give it a proper -h/--help
+    _add_arguments(parser, argparse.Namespace(**merged), use_defaults=True)
 
     return verify_args(parser.parse_args(argv))
 
