@@ -67,6 +67,7 @@ HELP_TEXT = (
     "\t\\rewind N                    - rewind to turn N (keep 0..N)\n"
     "\t\\branch NAME@N               - set/fork branch name, if empty list branches;\n"
     "\t                               optional @N to fork from first N turns\n"
+    "\t\\dbranch NAME                - delete chat history branch\n"
     "\t\\seed N                      - set RNG seed (or omit to clear)\n"
     "\t\\history [N]                 - show last N user inputs (default 5)\n"
     "\n[bold]context injection[/bold]\n"
@@ -501,18 +502,43 @@ class Chat():
                             console.print("[yellow]History empty.[/yellow]")
                         continue
                     elif cmd == "turn":
-                        console.print(max(1,len(history[self.chat_branch])-1))
+                        console.print(max(1,len(history[self.chat_branch])))
                         continue
                     elif cmd == "rewind":
                         try:
                             n = int(arg)
-                            history[self.chat_branch] = list(history[self.chat_branch][:-n])
+                            cur = history[self.chat_branch]
+                            total = len(cur)
+                            if not (1 <= n <= total):
+                                console.print(f"[red]usage: \\rewind N  (1 ≤ N ≤ {total})[/red]")
+                                continue
+                            # keep the first n turns (1-based absolute index)
+                            history[self.chat_branch] = cur[:n]
                             self.session.common.save_chat()
-                            console.print(f"[green]Rewound to {n}.[/green]", highlight=False)
-                            if len(history[self.chat_branch]):
-                                print(f" {history[self.chat_branch][-1]}")
+                            console.print(f"[green]Rewound to turn {n} of {total}.[/green]",
+                                           highlight=False)
+
+                            if history[self.chat_branch]:
+                                print(f"\n⬇ CURRENT (TURN {len(history[self.chat_branch])}) ⬇\n"
+                                    f"{history[self.chat_branch][-1]}")
                         except ValueError:
                             console.print("[red]usage: \\rewind N[/red]")
+                        continue
+                    elif cmd == "dbranch":
+                        for branch in history.keys():
+                            if branch == 'current':
+                                continue
+                            if arg == self.chat_branch:
+                                console.print("[red]Cannot delete current branch you are on[/red]")
+                                break
+                            if arg == 'default':
+                                console.print("[red]Cannot delete default branch[/red]")
+                                break
+                            if arg == branch and arg != 'current':
+                                history.pop(arg)
+                                self.session.common.save_chat()
+                                console.print(f"[green]Deleted: [/green]{arg}", highlight=False)
+                                break
                         continue
                     elif cmd == "branch":
                         if not arg:

@@ -212,7 +212,7 @@ class ContextManager(PromptManager):
 
     def get_chat_history(self, history_list)->list:
         """ just return n previous turns """
-        return '\n\n'.join(history_list[-self.opts.history_sessions:])
+        return history_list[-self.opts.history_sessions:]
 
     def handle_topics(self,
                       meta_tags: list[RAGTag],
@@ -356,9 +356,8 @@ class ContextManager(PromptManager):
 
             # populate chat history
             history = documents['history'] # shorthand
-            documents['chat_history'] = self.get_chat_history(
-                    history[history.get('current',
-                                        'default')])
+            documents['chat_history'] = self.get_chat_history(history[history.get('current',
+                                                                'default')])
 
             if self.opts.assistant_mode and not self.opts.no_rags:
                 return (documents, pre_tokens, post_tokens)
@@ -374,7 +373,7 @@ class ContextManager(PromptManager):
             # Populate explicit content if triggered
             documents['explicit'] = self.is_explicit(meta_tags)
 
-            # documents['nsfw_content'] = (self.get_explicit() if documents['explicit'] else '')
+            #documents['nsfw_content'] = (self.get_explicit() if documents['explicit'] else '')
             documents['nsfw_content'] = self.get_explicit()
 
             # Known characters the user has encountered during the story
@@ -399,7 +398,6 @@ class ContextManager(PromptManager):
 
             for collection in collection_list:
                 storage = []
-
                 # field-filtering RAG retrieval specific for document_topics
                 storage.extend(self.handle_topics(meta_tags,
                                                   query,
@@ -413,7 +411,6 @@ class ContextManager(PromptManager):
                 pages = list(map(lambda doc: doc.page_content, storage))
                 for page in pages:
                     pre_tokens += self.token_retriever(page)
-
                 # Remove duplicates RAG matches
                 documents[collection] = self.deduplication(documents['chat_history'],
                                                            pages)
@@ -427,7 +424,6 @@ class ContextManager(PromptManager):
 
             # Stringify lists in chat_history
             documents['chat_history'] = self.common.stringify_lists(documents['chat_history'])
-
             # Store the users query to their RAG, now that we are done pre-processing
             # (so as not to bring back identical information in their query)
             # A little unorthodox, but the first item in the list is the user's query
