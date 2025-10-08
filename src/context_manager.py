@@ -165,6 +165,7 @@ class ContextManager(PromptManager):
         """
         # tagify the AI response
         response = documents['llm_response']
+        history = documents['history'] # shorthand
         (_, list_rag_tags, _) = self.pre_processor(response, documents)
 
         # Handle triggers
@@ -175,6 +176,7 @@ class ContextManager(PromptManager):
         # protect against empty or gold RAG (read-only) collections
         if not collection or collection == collections['gold']:
             collection = collections['ai']
+        collection = f'{history.get("current", "default")}_{collection}'
         # list_rag_tags: list[RAGTag] = self.common.get_tags(response)
         self.scene.ground_scene(list_rag_tags, response)
         if self.debug:
@@ -350,14 +352,15 @@ class ContextManager(PromptManager):
         if direction == 'query':
             pre_tokens = 0
             post_tokens = 0
-            collection_list = [self.common.attributes.collections[x] for
+            history = documents['history'] # shorthand
+            branch = history.get('current', 'default')
+            collection_list = [f'{branch}_{self.common.attributes.collections[x]}' for
                                 x in self.common.attributes.collections]
-            # documents = {key: [] for key in collection_list}
+            collection_list.append('gold_documents')
 
             # populate chat history
-            history = documents['history'] # shorthand
             documents['chat_history'] = self.get_chat_history(history[history.get('current',
-                                                                'default')])
+                                                                                  'default')])
 
             if self.opts.assistant_mode and not self.opts.no_rags:
                 return (documents, pre_tokens, post_tokens)
@@ -397,6 +400,10 @@ class ContextManager(PromptManager):
                                     highlight=False)
 
             for collection in collection_list:
+                if self.debug:
+                    self.console.print(f'Collection: {collection}',
+                                       style=f'color({self.opts.color})',
+                                       highlight=False)
                 storage = []
                 # field-filtering RAG retrieval specific for document_topics
                 storage.extend(self.handle_topics(meta_tags,
@@ -405,7 +412,12 @@ class ContextManager(PromptManager):
                                                   self.mode))
 
                 # general retrieval
-                storage.extend(self.rag.retrieve(query, collection))
+                _retrieved = self.rag.retrieve(query, collection)
+                if self.debug:
+                    self.console.print(f'Data:\n{_retrieved}\n\n',
+                                       style=f'color({self.opts.color})',
+                                       highlight=False)
+                storage.extend(_retrieved)
 
                 # Record pre-token counts
                 pages = list(map(lambda doc: doc.page_content, storage))
@@ -429,7 +441,8 @@ class ContextManager(PromptManager):
             # A little unorthodox, but the first item in the list is the user's query
             self.rag.store_data(query,
                                 tags_metadata=meta_tags,
-                                collection=self.common.attributes.collections['user'])
+                                collection=f'{history.get("current", "default")}_'
+                                f'{self.common.attributes.collections["user"]}')
             # Return data collected
             return (documents, pre_tokens, post_tokens)
 

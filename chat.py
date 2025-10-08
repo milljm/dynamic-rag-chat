@@ -569,8 +569,6 @@ class Chat():
                                         highlight=False
                                     )
                             continue
-
-
                         # parse "name@N" to branch from first N turns of current branch
                         # examples: "\branch testing@5" or just "\branch testing"
                         raw = arg.strip()
@@ -611,7 +609,28 @@ class Chat():
                         history['current'] = name
                         self.chat_branch = name
                         self.session.common.save_chat()
-                        console.print(f"[green]Branched to:[/green] {name}", highlight=False)
+                        # ---------------- RAG sync for the new branch ----------------
+                        try:
+                            if cut is None:
+                                # exact fork of current branch's RAG
+                                self.session.rag.clone_collection(src, name, overwrite=False)
+                            else:
+                                # rebuild target RAG from the truncated history we just created
+                                self.session.rag.build_collection_from_texts(
+                                    name, new_list, overwrite=True)
+
+                            console.print(f"[green]Branched to:[/green] {name}", highlight=False)
+                        # pylint: disable=broad-exception-caught
+                        except Exception as e:
+                        # pylint: enable=broad-exception-caught
+                            console.print(f"[red]RAG sync failed for '{name}':[/red] "
+                                          f"{e}", highlight=False)
+                            # optional: rollback history on failure
+                            # history.pop(name, None)
+                            # history['current'] = src
+                            # self.chat_branch = src
+                            # self.session.common.save_chat()
+                        # ----------------------------------------------------------------
                         continue
                     elif cmd == "seed":
                         try:
