@@ -55,6 +55,8 @@ class ChatOptions:
     repetition_penalty: float = 1.05
     context_window: int = 32768
     continue_from: int = -1
+    sex: str = 'male'
+    character_sheet: str = ''
 
     # ---------- RAG / pre‑ & post‑processing ----------
     preconditioner: str = 'gemma3:1b'

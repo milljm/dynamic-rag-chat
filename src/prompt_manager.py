@@ -8,7 +8,7 @@ class PromptManager():
     Handle all the possible prompt files we may introduce with RAG/Tagging
 
     Most can be handled by a default. But This class is here so we can support possibly\n
-    more naunced LLMs.
+    more nuanced LLMs.
     """
     def __init__(self, console, current_dir, args: ChatOptions, prompt_model: str = 'default'):
         self.console = console
@@ -28,12 +28,13 @@ class PromptManager():
         """
         A way to manage a growing number of prompt templates
         {key : value} pairs become self.key_* : contents-of-file
-        filenaming convention: {value}_system.md / {value}_human.md
+        file naming convention: {value}_system.md / {value}_human.md
         """
         prompt_files = {
             'pre_prompt'  :f'pre_conditioner_prompt_{self.model}',
             'tag_prompt'  :f'tagging_prompt_{self.model}',
-            'plot_prompt' :f'plot_prompt_{self.model}'
+            'plot_prompt' :f'plot_prompt_{self.model}',
+            'entity_prompt'  :f'entity_prompt_{self.model}',
         }
         for prompt_key, prompt_base in prompt_files.items():
             prompt_dir = os.path.join('prompts', prompt_base)
