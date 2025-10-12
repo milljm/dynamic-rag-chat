@@ -163,12 +163,29 @@ class ContextManager(PromptManager):
             .. code-block:: python
                 return None
         """
-        # tagify the AI response
-        response = documents['llm_response']
+        # Handle Scene State
         history = documents['history'] # shorthand
-        (_, list_rag_tags, _) = self.pre_processor(response, documents)
 
-        # Handle triggers
+        # Swap rolls, feeding the LLM's response back at the pre-processor for tagging
+        response = documents['llm_response']
+        roll_reversal = {'user_query'   : documents['llm_response'],
+                         'chat_history' : history[history.get('current', 'default')][-5:],
+                         'user_name'    : documents['user_name']}
+        if self.debug:
+            self.console.print(f'ROLL REVERSAL PRE-PROCESSOR:\n{roll_reversal}\n\n',
+                style=f'color({self.opts.color})', highlight=False)
+        (_, list_rag_tags, _) = self.pre_processor(response, roll_reversal)
+
+        scene = dict(self.scene.get_scene())
+        for char in scene['entity']:
+            if self.debug:
+                self.console.print(f'CHAR CHECK:\n{char}\n\n',
+                                style=f'color({self.opts.color})', highlight=False)
+            if self.scene.is_new_character(char):
+                if self.debug:
+                    self.console.print(f'ADD CHAR:\n{char}\n\n',
+                                style=f'color({self.opts.color})', highlight=False)
+                self.create_character(char, roll_reversal)
         self.scene.finalize_turn(response)
         self.scene.save_scene()
 
@@ -187,6 +204,46 @@ class ContextManager(PromptManager):
             self.common.write_debug('meta_tags', list_rag_tags)
         rag = RAG(self.console, self.common, self.opts)
         rag.store_data(response, tags_metadata=list_rag_tags, collection=collection)
+
+    def create_character(self, char: str, documents: dict)->None:
+        """ Query the LLM to generate a character file based on chat_history """
+        # pylint: disable=no-member # dynamic prompts (see self.__build_prompts)
+        prompts = self.prompts
+        populated = {'character_name' : char} | documents
+
+        human_prompt = (prompts.get_prompt(f'{prompts.entity_prompt_file}_human.md')
+                        if self.debug or self.opts.prompts_debug else prompts.entity_prompt_human)
+        # pylint: enable=no-member
+        human_tmpl = PromptTemplate(template=human_prompt,
+                                    template_format="jinja2")
+        human_msg = HumanMessagePromptTemplate(prompt=human_tmpl)
+
+        prompt_template = ChatPromptTemplate.from_messages([human_msg])
+
+        prompt = prompt_template.format_messages(**populated)
+        if self.debug:
+            self.console.print(f'PRE-PROCESSOR ENTITY PROMPT:\n{prompt}\n\n',
+                                style=f'color({self.opts.color})', highlight=False)
+        try:
+            content = self.pre_llm.invoke(prompt).content
+        except APITimeoutError:
+            self.console.print('PRE-PROCESSOR ENTITY API ERROR\n\n',
+                                style=f'color({self.opts.color})', highlight=False)
+            return
+        if self.debug:
+            self.console.print(f'PRE-PROCESSOR ENTITY RESPONSE:\n{content}\n\n',
+                                style=f'color({self.opts.color})', highlight=False)
+
+        safe_name = self.common.regex.safe_name.sub('_', char).strip('_')
+        entity_file = os.path.join(self.opts.vector_dir, 'entities', f'{safe_name}.txt')
+        if not os.path.exists(os.path.join(self.opts.vector_dir, 'entities')):
+            os.makedirs(os.path.join(self.opts.vector_dir, 'entities'))
+        if not os.path.exists(entity_file):
+            if self.debug:
+                self.console.print(f'Generating New Character:\n{content}\n\n',
+                                style=f'color({self.opts.color})', highlight=False)
+            with open(entity_file, 'w', encoding='utf-8') as f:
+                f.write(content)
 
     @staticmethod
     def stagger_history(history_size: int,
@@ -312,7 +369,7 @@ class ContextManager(PromptManager):
                 seen.add(name)
                 safe_name = self.common.regex.safe_name.sub('_', name).strip('_')
                 entity_file = os.path.join(
-                    self.current_dir, 'prompts', 'entities', f'{safe_name}.txt'
+                    self.opts.vector_dir, 'entities', f'{safe_name}.txt'
                 )
                 if self.debug:
                     self.console.print(f'Loading Entity File:\n{entity_file}\n\n',
@@ -362,6 +419,9 @@ class ContextManager(PromptManager):
             documents['chat_history'] = self.get_chat_history(history[history.get('current',
                                                                                   'default')])
 
+            #documents['nsfw_content'] = (self.get_explicit() if documents['explicit'] else '')
+            documents['nsfw_content'] = self.get_explicit()
+
             if self.opts.assistant_mode and not self.opts.no_rags:
                 return (documents, pre_tokens, post_tokens)
 
@@ -370,14 +430,11 @@ class ContextManager(PromptManager):
             # tag the users query
             (_, meta_tags, _) = self.pre_processor(query, documents)
 
-            # grab entities and perform another tagging process (with character sheets)
-            documents['entities'] = '\n\n'.join(self.prompt_entities(meta_tags))
-
             # Populate explicit content if triggered
             documents['explicit'] = self.is_explicit(meta_tags)
 
-            #documents['nsfw_content'] = (self.get_explicit() if documents['explicit'] else '')
-            documents['nsfw_content'] = self.get_explicit()
+            # grab entities and perform another tagging process (with character sheets)
+            documents['entities'] = '\n\n'.join(self.prompt_entities(meta_tags))
 
             # Known characters the user has encountered during the story
             # documents['known_characters'] = self.scene.render_known_characters_for_prompt()

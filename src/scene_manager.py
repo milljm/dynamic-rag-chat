@@ -7,8 +7,8 @@ from collections import namedtuple
 from .ragtag_manager import RAGTag
 from .chat_utils import CommonUtils, ChatOptions
 
-PRONOUNS = {'i', 'you', 'we', 'him', 'her', 'she',
-            'they', 'user', 'them', 'me', 'reader'}
+PRONOUNS = {'i', 'you', 'we', 'him', 'her', 'she', 'teller',
+            'they', 'user', 'them', 'me', 'reader', 'asker', 'liability'}
 
 PRONOUN_ALIASES = {'narrator','protagonist','mc','pc','player',
                    'storyteller','dm','gm', 'ai', 'assistant'}
@@ -74,7 +74,7 @@ class SceneManager:
         return {
             'entity'           : [self.opts.user_name.lower()],
             'audience'         : [self.opts.user_name.lower()],
-            'known_characters' : [f'{self.opts.user_name.lower()}: the protagonist'],
+            'known_characters' : [self.opts.user_name.lower()],
             'plots'            : {},
             'location'         : '',
             'entities_about'   : [],
@@ -384,76 +384,44 @@ class SceneManager:
         moved = hits >= 1
         return hits, score, matches, moved
 
-    def _grow_known_characters(self, entities_about: set[str]) -> None:
-        """ append any new entities found in entities_about to known_characters """
-        if not entities_about:
-            return
+    def is_new_character(self, character: str) -> bool:
+        """
+        Return True if a new, non-ignored character is discovered
+        and append it to known_characters.
+        """
+        if self.debug:
+            self.console.print(f'KNOWS:\n{self.scene["known_characters"]}\n\n',
+                style=f'color({self.opts.color})', highlight=False)
+        # Combine all the "ignore me" categories into one set
+        ignored = PRONOUNS | PRONOUN_ALIASES | GENERIC_HEAD_WORDS
 
-        existing = self.scene.get('known_characters', [])
+        entry = (character or "").strip().lower()
+        if not entry or entry in ignored:
+            if self.debug:
+                self.console.print('IGNORE TRIGGERED',
+                    style=f'color({self.opts.color})', highlight=False)
+            return False
 
-        # Build index (name_key -> index) preserving order
-        index: dict[str, int] = {}
-        out: list[str] = []
-        for line in existing:
-            key = self._extract_name(line)
-            if key and key not in index:
-                index[key] = len(out)
-                out.append(self._clean_line(line))
+        # Catch edge case by silly LLM 'first woman', 'second intruder'
+        for _ignore in GENERIC_HEAD_WORDS:
+            if entry.find(_ignore) != -1:
+                if self.debug:
+                    self.console.print(f'EDGE CASE TRIGGERED: {_ignore} {entry.find(_ignore)}',
+                        style=f'color({self.opts.color})', highlight=False)
+                return False
 
-        # Build a set of allowed “current names” from entity/audience (post-pronoun-fix)
-        allowed_current = { (s or '').strip().lower()
-                            for s in (self.scene.get('entity')
-                                      or []) + (self.scene.get('audience') or []) }
+        if self.debug:
+            self.console.print(f'ENTITY: {entry} NOT IN KNOWN: {entry not in (c.lower() for c in self.scene["known_characters"])}',
+                style=f'color({self.opts.color})', highlight=False)
+        if entry not in (c.lower() for c in self.scene['known_characters']):
+            self.scene['known_characters'].append(entry)
+            self.save_scene()
+            return True
 
-        added = False
-        for raw in list(entities_about):
-            line = self._clean_line(raw)
-            if not line:
-                continue
-
-            head_orig, head_low = self._split_head(line)
-
-            # 1) Block pronouns outright
-            if self.is_pronounish(head_orig):
-                # skip pronoun/alias-headed entries like "reader: ..." or "myself: ..."
-                continue
-
-            # 2) Block conceptual/generic heads unless they look like proper names
-            if any(w in GENERIC_HEAD_WORDS for w in head_low.replace('-', ' ').split()):
-                if not self._looks_like_proper_name(head_orig):
-                    if self.opts.debug:
-                        self.console.print(f"SKIP GENERIC HEAD: {line}",
-                                        style=f'color({self.opts.color})', highlight=True)
-                    continue
-
-            # 3) (Optional) If head not currently in scene’s actors, still allow if
-            # it looks like a proper name
-            if head_low not in allowed_current and not self._looks_like_proper_name(head_orig):
-                if self.opts.debug:
-                    self.console.print(f"SKIP UNKNOWN / NOT A NAME: {line}",
-                                    style=f'color({self.opts.color})', highlight=True)
-                continue
-
-            key = self._extract_name(line)
-            if not key or key in PRONOUNS:
-                continue
-
-            if key not in index:
-                index[key] = len(out)
-                out.append(line)
-                added = True
-                if self.opts.debug:
-                    self.console.print(f'ADDING CHARACTER: {line}',
-                                    style=f'color({self.opts.color})', highlight=True)
-            else:
-                # Optional upgrade-to-richer description
-                i = index[key]
-                if len(line) > len(out[i]) and line.lower() != out[i].lower():
-                    out[i] = line
-                    added = True
-
-        if added:
-            self.scene['known_characters'] = out
+        if self.debug:
+            self.console.print('NO NEW CHARS DISCOVERED',
+                style=f'color({self.opts.color})', highlight=False)
+        return False
 
     def update_scene_mode(self, tag_dict: dict[str, Any], query: str) -> None:
         """
@@ -552,7 +520,7 @@ class SceneManager:
         tag_dict = self._ragtag_to_dict(tags)
 
         # hack to fix missing *required* fields... because you can't rely on LLMs to
-        #  always generate the metadata fields you ask them to
+        # always generate the metadata fields you ask them to
         tag_dict['location'] = tag_dict.get('location', '')
 
         tag_dict['entity'] = tag_dict.get('entity', [self.opts.user_name.lower()])
@@ -580,8 +548,6 @@ class SceneManager:
         t_e_set = {s.lower() for s in t_entities} - PRONOUNS
         t_a_set = ({s.lower() for s in set(scene_dict['audience'].t)}
                    if scene_dict['audience'].t else set())
-        t_ea_set = ({s.lower() for s in set(scene_dict['entities_about'].t)}
-                   if scene_dict['entities_about'].t else set())
 
         # Build scene entity/audience sets from ephemeral data
         s_e_set = {s.lower() for s in set(scene_dict['entity'].s)}
@@ -615,9 +581,6 @@ class SceneManager:
             audience_set = s_a_set.union(t_a_set)
             self.scene['audience'] = list(audience_set)
             self.scene['entity'] = list(entity_set)
-
-        # Update known_characters (always grows)
-        self._grow_known_characters(t_ea_set)
 
         # Update incoming scene data with grounded scene
         self.update_scene_mode(tag_dict, query)

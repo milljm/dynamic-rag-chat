@@ -276,6 +276,14 @@ class Chat():
 
         return (tokens, cleaned_color)
 
+    def get_character_sheet(self)->str:
+        """ return contents of character sheet if supplied a path to one """
+        if self.opts.character_sheet:
+            if os.path.exists(self.opts.character_sheet):
+                with open(self.opts.character_sheet, 'r', encoding='utf-8') as f:
+                    return f.read()
+        return ''
+
     def get_documents(self, user_input)->tuple[dict,int,int,int,float]:
         """
         Populate documents, the object which is fed to prompt formaters, and
@@ -286,20 +294,25 @@ class Chat():
         history = self.session.common.chat_history_session  # shorthand
         previous = history[history.get('current', 'default')][-2:-1:]
         documents.update(
-            {'user_query'       : user_input,
-             'dynamic_files'    : '',
-             'dynamic_images'   : [],
-             'history_sessions' : self.opts.history_sessions,
-             'name'             : self.opts.name,
-             'user_name'        : self.opts.user_name,
-             'date_time'        : self.get_time(self.opts.time_zone),
-             'pre_process_time' : pre_process_time,
-             'light_mode'       : self.set_lightmode_aware(self.opts.light_mode),
-             'previous'         : previous,
-             'history'          : history,
-             'entities'         : [],
-             'explicit'         : False,
-             'qwen_prompts'     : self.qwen_prompt(),
+            {'user_query'         : user_input,
+             'dynamic_files'      : '',
+             'dynamic_images'     : [],
+             'history_sessions'   : self.opts.history_sessions,
+             'name'               : self.opts.name,
+             'user_name'          : self.opts.user_name,
+             'pro_object'         : 'him' if self.opts.sex == 'male' else 'her',
+             'pro_subject'        : 'he' if self.opts.sex == 'male' else 'she',
+             'possessive_adj'     : 'his' if self.opts.sex == 'male' else 'her',
+             'possessive_pronoun' : 'his' if self.opts.sex == 'male' else 'hers',
+             'character_sheet'    : self.get_character_sheet(),
+             'date_time'          : self.get_time(self.opts.time_zone),
+             'pre_process_time'   : pre_process_time,
+             'light_mode'         : self.set_lightmode_aware(self.opts.light_mode),
+             'previous'           : previous,
+             'history'            : history,
+             'entities'           : [],
+             'explicit'           : False,
+             'qwen_prompts'       : self.qwen_prompt(),
              }
             )
 
@@ -372,18 +385,17 @@ class Chat():
         mime_format = mimetypes.guess_type(included_file)[0]
         data = ''
         icon = '📁'  # Default icon
-
         if mime_format:
             mime, _format = mime_format.split('/')
             if mime == 'image':
                 icon, data = self._process_image(included_file, _format)
             elif _format == 'pdf':
                 icon, data = self._process_pdf(included_file)
-            elif _format == 'html':
-                icon = "🌍"
-            elif mime == 'text':
-                icon = "📄"
             else:
+                if _format == 'html':
+                    icon = "🌍"
+                elif mime == 'text':
+                    icon = "📄"
                 with open(included_file, 'r', encoding='utf-8') as f:
                     data = f.read()
         return data, icon
@@ -727,6 +739,10 @@ def _add_arguments(parser: argparse.ArgumentParser, defaults, *, use_defaults: b
                         type=str, help='Your assistants name (default: %(default)s)')
     parser.add_argument('--user-name', metavar='', default=D('user_name'),
                         type=str, help='Your characters name (default: %(default)s)')
+    parser.add_argument('--sex', metavar='', default=D('sex'),
+                        type=str, help='Your characters sex (default: %(default)s)')
+    parser.add_argument('--character-sheet', metavar='', default=D('character_sheet'),
+                        type=str, help='Your characters sex (default: %(default)s)')
     parser.add_argument('--time-zone', metavar='', default=D('time_zone'),
                         type=str, help='your assistants name (default: %(default)s)')
     parser.add_argument('--history-matches', metavar='', dest='matches',
