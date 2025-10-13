@@ -39,7 +39,7 @@ class ChatOptions:
     host: str = 'http://localhost:11434/v1'
     model: str = 'gemma3:27b'
     nsfw_model: Optional[str] = None
-    completion_tokens: int = 2048
+    completion_tokens: int = 1000
     time_zone: str = 'GMT'
     api_key: str = 'none'
     assistant_mode: bool = False
@@ -48,11 +48,14 @@ class ChatOptions:
     verbose: bool = False
     light_mode: bool = False
     prompts_debug: bool = False
+    one_shot: bool = False
     name: str = 'assistant'
     user_name: str = 'John'
-    temperature: float = 0.9
-    top_p: float = 0.8
-    repetition_penalty: float = 1.05
+    temperature: float = 0.5
+    top_p: float = 0.95
+    repeat_penalty: float = 1.10
+    frequency_penalty: float = 0.4
+    presence_penalty: float = 0.2
     context_window: int = 32768
     continue_from: int = -1
     sex: str = 'male'
@@ -152,6 +155,7 @@ class RegExp:
     safe_name = re.compile(r'[^a-z0-9]+')  # lowercase + underscores
     core = re.compile(r'[^a-z0-9._:-]+') # friendly token
     names = re.compile(r"([A-Za-z'-]+)")
+    ooc_prefix = re.compile(r'^\s*(?:OOC:|SYSTEM:|OOC>)', re.I)
     metadata_key = 'metadata'
 
 class CommonUtils():
@@ -304,7 +308,7 @@ class CommonUtils():
         return ' '.join(text.lower().split())
 
     @staticmethod
-    def stringify_lists(nested_list)->str:
+    def stringify_lists(nested_list: list|str)->str:
         """ return a flat string """
         def process(item):
             result = []

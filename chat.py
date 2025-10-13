@@ -448,31 +448,31 @@ class Chat():
                          self.session.common.create_heatmap(prompt_tokens / 2).items()
                          if k<=0][-1:][0]
         # pylint: disable=consider-using-f-string  # no, this is how it is done
-        documents = {'user_query'        : user_input,
-                     'name'              : self.opts.name,
-                     'user_name'         : self.opts.user_name,
-                     'chat_history'      : '',
-                     'previous'          : '',
-                     'dynamic_files'     : '',
-                     'dynamic_images'    : [],
-                     'history_sessions'  : self.opts.history_sessions,
-                     collections['ai']   : '',
-                     collections['user'] : '',
-                     collections['gold'] : '',
-                     'content_type'      : '',
-                     'context'           : '',
-                     'explicit'          : False,
-                     'nsfw_content'      : '',
-                     'date_time'         : self.get_time(self.opts.time_zone),
-                     'completion_tokens' : self.opts.completion_tokens,
-                     'pre_process_time'  : '{:.1f}s'.format(0),
-                     'performance'       : '',
-                     'light_mode'        : self.set_lightmode_aware(self.opts.light_mode),
-                     'llm_prompt'        : '',
-                     'prompt_tokens'     : prompt_tokens,
-                     'token_savings'     : 0,
-                     'cleaned_color'     : cleaned_color,
-                     'qwen_prompts'      : self.qwen_prompt(),
+        documents = {'user_query'               : user_input,
+                     'name'                     : self.opts.name,
+                     'user_name'                : self.opts.user_name,
+                     'chat_history'             : '',
+                     'previous'                 : '',
+                     'dynamic_files'            : '',
+                     'dynamic_images'           : [],
+                     'history_sessions'         : self.opts.history_sessions,
+                     collections['ai']          : '',
+                     collections['user']        : '',
+                     collections['gold']        : '',
+                     'content_type'             : '',
+                     'context'                  : '',
+                     'explicit'                 : False,
+                     'additional_content'       : '',
+                     'date_time'                : self.get_time(self.opts.time_zone),
+                     'completion_tokens'        : self.opts.completion_tokens,
+                     'pre_process_time'         : '{:.1f}s'.format(0),
+                     'performance'              : '',
+                     'light_mode'               : self.set_lightmode_aware(self.opts.light_mode),
+                     'llm_prompt'               : '',
+                     'prompt_tokens'            : prompt_tokens,
+                     'token_savings'            : 0,
+                     'cleaned_color'            : cleaned_color,
+                     'qwen_prompts'             : self.qwen_prompt(),
                      }
         return documents
 
@@ -492,7 +492,9 @@ class Chat():
 
         try:
             while True:
-                raw = c_session.prompt(">>> ", multiline=True, key_bindings=kb).strip()
+                raw = c_session.prompt(">>> ",
+                                       multiline=True,
+                                       key_bindings=kb).strip()
                 if not raw:
                     continue
 
@@ -779,6 +781,8 @@ def _add_arguments(parser: argparse.ArgumentParser, defaults, *, use_defaults: b
     parser.add_argument('--assistant-mode', action='store_true', default=D('assistant_mode'),
                         help='Do not utilize story-telling mode prompts or the RAGs. Do not save '
                         'chat history to disk')
+    parser.add_argument('--one-shot', action='store_true', default=D('one_shot'),
+                        help='summarize history for one-shot type LLMs')
     parser.add_argument('--use-rags', action='store_true', default=D('no_rags'),
                         help='Use RAGs regardless of assistant-mode (no effect when not also using '
                         'assistant-mode)')
@@ -790,13 +794,21 @@ def _add_arguments(parser: argparse.ArgumentParser, defaults, *, use_defaults: b
     parser.add_argument('--prompts-debug', action='store_true', default=D('prompts_debug'),
                         help='re-read the prompt files every turn')
 
+
     parser.add_argument('--temperature', metavar='', type=float, default=D('temperature'),
                         help='Model temperature (default: %(default)s)')
+    parser.add_argument('--repeat-penalty', metavar='', type=float,
+                        default=D('repeat_penalty'),
+                        help='Model repeat penalty (default: %(default)s)')
     parser.add_argument('--top-p', metavar='', type=float, default=D('top_p'),
                         help='Model top_p (default: %(default)s)')
-    parser.add_argument('--repetition-penalty', metavar='', type=float,
-                        default=D('repetition_penalty'),
-                        help='Model repetition penalty (default: %(default)s)')
+    parser.add_argument('--frequency-penalty', metavar='', type=float,
+                        default=D('frequency_penalty'),
+                        help='Model frequency penalty (default: %(default)s)')
+    parser.add_argument('--presence-penalty', metavar='', type=float,
+                        default=D('presence_penalty'),
+                        help='Model presence penalty (default: %(default)s)')
+
     parser.add_argument('--context-window', metavar='', type=int,
                         default=D('context_window'),
                         help=('Does nothing, except to beautify the color map of "context". '
