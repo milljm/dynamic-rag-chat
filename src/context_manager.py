@@ -186,6 +186,7 @@ class ContextManager(PromptManager):
                     self.console.print(f'ADD CHAR:\n{char}\n\n',
                                 style=f'color({self.opts.color})', highlight=False)
                 self.create_character(char, roll_reversal)
+
         self.scene.finalize_turn(response)
         self.scene.save_scene()
 
@@ -207,10 +208,23 @@ class ContextManager(PromptManager):
 
     def create_character(self, char: str, documents: dict)->None:
         """ Query the LLM to generate a character file based on chat_history """
-        # pylint: disable=no-member # dynamic prompts (see self.__build_prompts)
+        if not os.path.exists(os.path.join(self.opts.vector_dir, 'entities')):
+            os.makedirs(os.path.join(self.opts.vector_dir, 'entities'))
+
+        safe_name = self.common.regex.safe_name.sub('_', char).strip('_')
+        entity_file = os.path.join(self.opts.vector_dir, 'entities', f'{safe_name}.txt')
+
+        # Entity already exists
+        if os.path.exists(entity_file):
+            if self.debug:
+                self.console.print(f'Character Already Exists:\n{char}\n\n',
+                    style=f'color({self.opts.color})', highlight=False)
+            return
+
         prompts = self.prompts
         populated = {'character_name' : char} | documents
 
+        # pylint: disable=no-member # dynamic prompts (see self.__build_prompts)
         human_prompt = (prompts.get_prompt(f'{prompts.entity_prompt_file}_human.md')
                         if self.debug or self.opts.prompts_debug else prompts.entity_prompt_human)
         # pylint: enable=no-member
@@ -234,16 +248,15 @@ class ContextManager(PromptManager):
             self.console.print(f'PRE-PROCESSOR ENTITY RESPONSE:\n{content}\n\n',
                                 style=f'color({self.opts.color})', highlight=False)
 
-        safe_name = self.common.regex.safe_name.sub('_', char).strip('_')
-        entity_file = os.path.join(self.opts.vector_dir, 'entities', f'{safe_name}.txt')
-        if not os.path.exists(os.path.join(self.opts.vector_dir, 'entities')):
-            os.makedirs(os.path.join(self.opts.vector_dir, 'entities'))
-        if not os.path.exists(entity_file):
-            if self.debug:
-                self.console.print(f'Generating New Character:\n{content}\n\n',
-                                style=f'color({self.opts.color})', highlight=False)
-            with open(entity_file, 'w', encoding='utf-8') as f:
-                f.write(content)
+        with open(os.path.join(self.opts.vector_dir,
+                                'character_llm_debug.log'), 'w', encoding='utf-8') as f:
+            f.write('\n\n'.join([str(prompt),str(content)]))
+
+        if self.debug:
+            self.console.print(f'Generating New Character:\n{content}\n\n',
+                            style=f'color({self.opts.color})', highlight=False)
+        with open(entity_file, 'w', encoding='utf-8') as f:
+            f.write(content)
 
     @staticmethod
     def stagger_history(history_size: int,
@@ -395,12 +408,38 @@ class ContextManager(PromptManager):
                                       metadatas=filter_dict)
         return documents
 
-    def get_explicit(self):
+    def get_explicit(self)->str:
         """ read and return nsfw.md file """
         nsfw_file = os.path.join(self.current_dir, 'prompts', 'nsfw.md')
         if os.path.exists(nsfw_file):
             with open(nsfw_file, 'r', encoding='utf-8') as f:
                 return f.read()
+        return ''
+
+    def summarize_history(self, documents)->list:
+        """ return summarized history + very last two unmolested turns """
+        prompts = self.prompts
+        summarizing = {'chat_history'    : documents['chat_history'],
+                       'character_sheet' : documents['character_sheet'],
+                       'entities'        : documents['entities'],
+                       'user_name'       : documents['user_name']}
+        # pylint: disable=no-member # dynamic prompts (see self.__build_prompts)
+        human_prompt = (prompts.get_prompt(f'{prompts.pre_prompt_file}_human.md')
+                        if self.debug or self.opts.prompts_debug else prompts.pre_prompt_human)
+        # pylint: enable=no-member
+        human_tmpl = PromptTemplate(template=human_prompt,
+                                    template_format="jinja2")
+        human_msg = HumanMessagePromptTemplate(prompt=human_tmpl)
+        prompt_template = ChatPromptTemplate.from_messages([human_msg])
+        prompt = prompt_template.format_messages(**summarizing)
+        if self.debug:
+            self.console.print(f'PRE-PROCESSOR PROMPT:\n{prompt}\n\n',
+                                style=f'color({self.opts.color})', highlight=False)
+        try:
+            content = self.pre_llm.invoke(prompt).content
+            return [*documents['chat_history'][-4:], f'\n\nCHAT HISTORY SUMMARY:\n{content}', ]
+        except APITimeoutError:
+            return documents['chat_history']
 
     def handle_context(self, documents: dict,
                              direction='query')->tuple[dict[str,list], int]:
@@ -419,8 +458,7 @@ class ContextManager(PromptManager):
             documents['chat_history'] = self.get_chat_history(history[history.get('current',
                                                                                   'default')])
 
-            #documents['nsfw_content'] = (self.get_explicit() if documents['explicit'] else '')
-            documents['nsfw_content'] = self.get_explicit()
+            documents['additional_content'] = self.get_explicit()
 
             if self.opts.assistant_mode and not self.opts.no_rags:
                 return (documents, pre_tokens, post_tokens)
@@ -434,10 +472,14 @@ class ContextManager(PromptManager):
             documents['explicit'] = self.is_explicit(meta_tags)
 
             # grab entities and perform another tagging process (with character sheets)
-            documents['entities'] = '\n\n'.join(self.prompt_entities(meta_tags))
+            documents['entities'] = '---\n\n'.join(self.prompt_entities(meta_tags))
 
-            # Known characters the user has encountered during the story
-            # documents['known_characters'] = self.scene.render_known_characters_for_prompt()
+            if self.opts.one_shot:
+                documents['chat_history'] = self.summarize_history(documents)
+                if self.debug:
+                    self.console.print(f'SUMMARIZED:\n{documents["chat_history"]}\n\n',
+                                       style=f'color({self.opts.color})',
+                                       highlight=False)
 
             # Make all meta_tags available for prompt templating operations
             # Note: This *might* have the side-effect of breaking necessary keys, though rare.
@@ -492,7 +534,9 @@ class ContextManager(PromptManager):
                 documents[collection] = self.common.stringify_lists(documents[collection])
 
             # Stringify lists in chat_history
-            documents['chat_history'] = self.common.stringify_lists(documents['chat_history'])
+            documents['chat_history'] = (
+                '\n\n<END_TURN>\n# NEXT TURN: Begin fresh. Do not'
+                ' emulate previous output length or tone.'.join(documents['chat_history']))
             # Store the users query to their RAG, now that we are done pre-processing
             # (so as not to bring back identical information in their query)
             # A little unorthodox, but the first item in the list is the user's query

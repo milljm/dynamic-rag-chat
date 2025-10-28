@@ -1,36 +1,29 @@
-You are to create a grounded character sheet for exactly ONE character: {{character_name}}.
-You are to create a grounded character sheet for exactly ONE character: {{character_name}}.
-The story uses DIEGETIC NARRATION: first-person ("I / my / me") always refers to {{user_name}},
-the protagonist narrator, never to {{character_name}} unless within quoted speech attributed
-to {{character_name}}.
+You are an expert character sheet creator, using information from CHAT_HISTORY and CHARACTER_SHEETS to generate a character sheet for only ONE individual: {{character_name}}.
 
+# CORE RULES (STRICT)
+- Output ONLY the character sheet. No prose, no comments, no trailing text.
+- You will use information from CHAT_HISTORY to connect information and populate the character sheet with correct values.
+- If {{character_name}} has a character sheet already listed in CHARACTER_SHEETS, you will COPY the information from CHARACTER_SHEETS and then ADD more details if possible. You will therefore **NEVER** change a known value to 'unknown'.
+- You will never respond with a summary, or an apology that you couldn't comply, or offer other useful advice.
+- Your task is to **only** produce a character sheet if you can-**Do nothing, say nothing if you cannot.**
+- You will always and only populate the fields: Name, Gender, and Appearance.
+- Output only plain text. No JSON, or data.
+- Do not invent information.
+
+# Known Character Sheets:
+<<CHARACTER_SHEETS_START>>
+{{entities}}
+<<CHARACTER_SHEETS_END>>
+
+# Chat History:
 <<CHAT_HISTORY_START>>
 {{chat_history}}
 <<CHAT_HISTORY_END>>
 
-### Identity & POV Rules (STRICT)
-- Treat “I / my / me” and first-person sensory lines as {{user_name}} only, NOT {{character_name}}.
-- Use only sentences that mention {{character_name}} by NAME or unambiguous PRONOUNS tied to
-  {{character_name}} (he/him, she/her, they/them) in third person.
-- Ignore any traits/clothing/locations that belong to {{user_name}} (e.g., cabin, nightgown) or to
-  unnamed narrators.
-- If a detail cannot be confidently linked to {{character_name}}, omit it.
+**Now, finish creating a character sheet for {{character_name}} filling in all the information below:**
 
-### Gender Rule
-- Determine "sex" ONLY from explicit pronouns/descriptors applying to {{character_name}}.
-- If none exist, set "sex": "unknown". Do NOT guess.
-
-### Content Rules
-- No invented lore/classes/titles/factions. Do not copy {{user_name}}’s roles (shadowdancer,
-  assassin, Tears of Night) to other characters.
-- Be compact; keep each field a single short sentence.
-
-### Output Format
-<<OUTPUT_FORMAT_START>>
-Name: {{character_name}}
-Sex: male|female
-Appearance: visual traits for {{character_name}} only
-Personality: one short sentence
-Voice: speech/manner, one short sentence
+## About {{character_name}}
+Name:
+Gender:
+Appearance:
 ---
-<<OUTPUT_FORMAT_END>>

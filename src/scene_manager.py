@@ -384,35 +384,38 @@ class SceneManager:
         moved = hits >= 1
         return hits, score, matches, moved
 
-    def is_new_character(self, character: str) -> bool:
+    def is_npc(self, character: str) -> bool:
         """
-        Return True if a new, non-ignored character is discovered
-        and append it to known_characters.
+        Return True if character is a valid NPC/named character
         """
-        if self.debug:
-            self.console.print(f'KNOWS:\n{self.scene["known_characters"]}\n\n',
-                style=f'color({self.opts.color})', highlight=False)
-        # Combine all the "ignore me" categories into one set
-        ignored = PRONOUNS | PRONOUN_ALIASES | GENERIC_HEAD_WORDS
-
         entry = (character or "").strip().lower()
-        if not entry or entry in ignored:
-            if self.debug:
-                self.console.print('IGNORE TRIGGERED',
-                    style=f'color({self.opts.color})', highlight=False)
+
+        # character *is* the player, and not an NPC
+        if entry == self.opts.user_name.lower() or self.opts.user_name.lower() in entry:
             return False
 
-        # Catch edge case by silly LLM 'first woman', 'second intruder'
+        # Combine all the "ignore me" categories into one set
+        ignored = PRONOUNS | PRONOUN_ALIASES | GENERIC_HEAD_WORDS
+        if not entry or entry in ignored:
+            return False
         for _ignore in GENERIC_HEAD_WORDS:
             if entry.find(_ignore) != -1:
-                if self.debug:
-                    self.console.print(f'EDGE CASE TRIGGERED: {_ignore} {entry.find(_ignore)}',
-                        style=f'color({self.opts.color})', highlight=False)
                 return False
+        return True
+
+    def is_new_character(self, character: str) -> bool:
+        """
+        Return True and add to growing list of NPCs, if a new NPC is discovered
+        """
+        entry = (character or "").strip().lower()
+        if not self.is_npc(character):
+            return False
 
         if self.debug:
-            self.console.print(f'ENTITY: {entry} NOT IN KNOWN: {entry not in (c.lower() for c in self.scene["known_characters"])}',
-                style=f'color({self.opts.color})', highlight=False)
+            self.console.print(f'ENTITY: {entry} NOT IN KNOWN: '
+                        f'{entry not in (c.lower() for c in self.scene["known_characters"])}',
+                        style=f'color({self.opts.color})', highlight=False)
+
         if entry not in (c.lower() for c in self.scene['known_characters']):
             self.scene['known_characters'].append(entry)
             self.save_scene()

@@ -1,1 +1,0 @@
-Create tags suitable for storing in a RAG using the following content

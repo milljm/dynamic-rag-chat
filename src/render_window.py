@@ -113,6 +113,7 @@ class RenderWindow(PromptManager):
         self.common = common
         self.opts = args
         self.thinking_chunk = ''
+        self.ooc_response = ''
 
         # populate dataclasses, setup
         self._load_states(current_dir, context, args)
@@ -124,9 +125,11 @@ class RenderWindow(PromptManager):
                                     temperature=0.6 if self.state.assistant_mode
                                                     else args.temperature,
                                     top_p=args.top_p,
-                                    frequency_penalty=args.repetition_penalty,
+                                    frequency_penalty=args.frequency_penalty,
+                                    presence_penalty=args.presence_penalty,
                                     streaming=True,
                                     max_completion_tokens=self.state.completion_tokens,
+                                    stop_sequences=["<END_BEAT>", "<END_TURN>"],
                                     api_key=self.state.api_key),
 
                 'nsfw' : ChatOpenAI(base_url=self.state.host,
@@ -134,9 +137,11 @@ class RenderWindow(PromptManager):
                                     temperature=0.6 if self.state.assistant_mode
                                                     else args.temperature,
                                     top_p=args.top_p,
-                                    frequency_penalty=args.repetition_penalty,
+                                    frequency_penalty=args.frequency_penalty,
+                                    presence_penalty=args.presence_penalty,
                                     streaming=True,
                                     max_completion_tokens=self.state.completion_tokens,
+                                    stop_sequences=["<END_BEAT>", "<END_TURN>"],
                                     api_key=self.state.api_key),
             }
 
@@ -201,7 +206,7 @@ class RenderWindow(PromptManager):
         label = 'nsfw' if is_nsfw else 'sfw'
         matches = self.common.regex.model_re.findall(model)[:2]
         model_short = '-'.join(matches)
-        return f'{label}-{model_short}'
+        return f'{label}-{model_short[:10]}'
 
     def _pulse_emoji(self) -> str:
         stream = self.state.stream
@@ -406,6 +411,14 @@ class RenderWindow(PromptManager):
     def get_messages(self, documents: dict)->list[Document]:
         """ return formatted message to be sent to LLM stream """
         prompts = self.prompts
+
+        # One shot OOC population
+        diag = (self.ooc_response or '').strip()
+        documents['ooc_diagnostics'] = diag
+        documents['ooc_diagnostics_bool'] = 'TRUE' if diag else 'FALSE'
+        documents['ooc_mode_bool'] = documents['user_query'].strip().lower().startswith("ooc:")
+        self.ooc_response = ''
+
         # pylint: disable=no-member # dynamic prompts (see self.__build_prompts)
         system_prompt = (prompts.get_prompt(f'{prompts.plot_prompt_file}_system.md')
                      if self.debug or self.opts.prompts_debug else prompts.plot_prompt_system)
@@ -475,10 +488,12 @@ class RenderWindow(PromptManager):
         token_savings = kwargs['token_savings']
         pre_processing_time = kwargs['pre_process_time']
         rating = kwargs['content_rating']
+        turn = kwargs['turn_count']
 
         foot_color = self.state.color - 6 if self.state.light_mode else self.state.color
 
-        footer = Text('\n', style=f'color({foot_color})')
+        footer = Text('\nTurn:', style=f'color({foot_color})')
+        footer.append(f'{turn} ', style='color(123)')
         footer.append(self._format_model_name(rating), style='color(202)')
         footer.append(self._pulse_emoji(), style=f'color({12 if self.state.light_mode else 51})')
         footer.append(f'{time_taken:.2f}', style='color(94)')
@@ -526,8 +541,8 @@ class RenderWindow(PromptManager):
                        'cleaned_color'   : documents['cleaned_color'],
                        'pre_process_time': documents['pre_process_time'],
                        'token_count'     : 0,
-                       'content_rating'  : documents['explicit']}
-
+                       'content_rating'  : documents['explicit'],
+                       'turn_count'      : len(history[history.get('current', 'default')])+1}
         start_time = 0
         color = self.state.color-5 if self.state.light_mode else self.state.color
         _rag = '' if not self.state.no_rags and self.state.assistant_mode else 'RAG+'
@@ -576,6 +591,18 @@ class RenderWindow(PromptManager):
             self.console.print(f'DEBUG: storing meta\n{stream.meta_capture}\n\n',
                                 style=f'color({self.state.color})',highlight=False)
         # current_response += f'\n\n{stream.meta_capture}'
+
+        # Attache OOC's response for next system/human prompt message usage
+        ooc_prefix = self.common.regex.ooc_prefix  # shorthand
+        if ooc_prefix.search(current_response) or ooc_prefix.search(documents['user_query']):
+            if not ooc_prefix.search(current_response):
+                self.console.print(
+                    '\nNOTE:\tBad LLM response. LLM ignored OOC request. This turn not saved.',
+                    style=f'color({self.state.color})', highlight=False)
+                return
+            self.ooc_response = current_response
+            return
+
         documents['llm_response'] = current_response
         if self.state.assistant_mode:
             history[history.get('current', 'default')].append(
