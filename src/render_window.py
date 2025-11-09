@@ -414,9 +414,12 @@ class RenderWindow(PromptManager):
 
         # One shot OOC population
         diag = (self.ooc_response or '').strip()
-        documents['ooc_diagnostics'] = diag
+        documents['ooc_diagnostics'] = (
+            'CRITICAL: Previous turn generated invalid output. You are to study the previous turn'
+            f' and and understand your folly/error, and follow these correction rules:\n{diag}')
         documents['ooc_diagnostics_bool'] = 'TRUE' if diag else 'FALSE'
-        documents['ooc_mode_bool'] = documents['user_query'].strip().lower().startswith("ooc:")
+        documents['ooc_mode_bool'] = (
+            'TRUE' if documents['user_query'].strip().lower().startswith("ooc:") else 'FALSE')
         self.ooc_response = ''
 
         # pylint: disable=no-member # dynamic prompts (see self.__build_prompts)

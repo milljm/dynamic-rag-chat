@@ -169,7 +169,7 @@ class ContextManager(PromptManager):
         # Swap rolls, feeding the LLM's response back at the pre-processor for tagging
         response = documents['llm_response']
         roll_reversal = {'user_query'   : documents['llm_response'],
-                         'chat_history' : history[history.get('current', 'default')][-5:],
+                         'chat_history' : documents['chat_history'],
                          'user_name'    : documents['user_name']}
         if self.debug:
             self.console.print(f'ROLL REVERSAL PRE-PROCESSOR:\n{roll_reversal}\n\n',
@@ -416,6 +416,15 @@ class ContextManager(PromptManager):
                 return f.read()
         return ''
 
+    def get_ooc(self)->str:
+        """ read and return ooc_default_system.md """
+        # this is temporary until I develop a separate OOC LLM calling method
+        ooc_file = os.path.join(self.current_dir, 'prompts', 'ooc_default_system.md')
+        if os.path.exists(ooc_file):
+            with open(ooc_file, 'r', encoding='utf-8') as f:
+                return f.read()
+        return ''
+
     def summarize_history(self, documents)->list:
         """ return summarized history + very last two unmolested turns """
         prompts = self.prompts
@@ -437,7 +446,8 @@ class ContextManager(PromptManager):
                                 style=f'color({self.opts.color})', highlight=False)
         try:
             content = self.pre_llm.invoke(prompt).content
-            return [*documents['chat_history'][-4:], f'\n\nCHAT HISTORY SUMMARY:\n{content}', ]
+            return [*documents['chat_history'][-3:],
+                    f'\n\nBEGIN: CHAT_HISTORY_SUMMARY\n{content}\nEND: CHAT_HISTORY_SUMMARY', ]
         except APITimeoutError:
             return documents['chat_history']
 
@@ -459,6 +469,7 @@ class ContextManager(PromptManager):
                                                                                   'default')])
 
             documents['additional_content'] = self.get_explicit()
+            documents['ooc_system'] = self.get_ooc()
 
             if self.opts.assistant_mode and not self.opts.no_rags:
                 return (documents, pre_tokens, post_tokens)

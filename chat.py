@@ -30,6 +30,8 @@ import base64
 import argparse
 import datetime
 import mimetypes
+import shutil
+import glob
 from dataclasses import dataclass, asdict
 from copy import deepcopy
 from typing import Dict, Any, List, Optional
@@ -550,6 +552,12 @@ class Chat():
                                 break
                             if arg == branch and arg != 'current':
                                 history.pop(arg)
+                                for path in glob.glob(
+                                    f'{self.opts.vector_dir}{os.path.sep}{arg}*'):
+                                    if os.path.isdir(path):
+                                        console.print(
+                                            f'[green]Deleting:[/green] {path}')
+                                        shutil.rmtree(path)
                                 self.session.common.save_chat()
                                 console.print(f"[green]Deleted: [/green]{arg}", highlight=False)
                                 break
