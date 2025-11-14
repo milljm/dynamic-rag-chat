@@ -23,9 +23,9 @@ You are an expert metadata extractor reading input being generated as a story un
   }
 }
 
-<<INPUT_TEXT_START>>
+<INPUT_TEXT>
 {{ user_query }}
-<<INPUT_TEXT_END>>
+<END INPUT_TEXT>
 
 # INSTRUCTIONS
 - **Never** use pro-nouns. Pro-nouns are **bad**. Pro-nouns are **useless** in the JSON object-therefor you will not add them.

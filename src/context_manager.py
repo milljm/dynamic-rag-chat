@@ -42,13 +42,23 @@ class ContextManager(PromptManager):
                                      current_dir,
                                      args,
                                      prompt_model=args.preconditioner)
+
         self.pre_llm = ChatOpenAI(base_url=args.pre_host,
                                   model=args.preconditioner,
+                                  temperature=0.4,
+                                  streaming=False,
+                                  max_tokens=4096,
+                                  api_key=args.api_key,
+                                  request_timeout=150)
+
+        self.entity_llm = ChatOpenAI(base_url=args.entity_host,
+                                  model=args.entity_llm,
                                   temperature=0.3,
                                   streaming=False,
                                   max_tokens=4096,
                                   api_key=args.api_key,
-                                  request_timeout=15)
+                                  request_timeout=150)
+
         self.filter_builder = FilterBuilder()
         self.prompts.build_prompts()
 
@@ -207,7 +217,7 @@ class ContextManager(PromptManager):
         rag.store_data(response, tags_metadata=list_rag_tags, collection=collection)
 
     def create_character(self, char: str, documents: dict)->None:
-        """ Query the LLM to generate a character file based on chat_history """
+        """ Query the Entity LLM to generate a character file based on chat_history """
         if not os.path.exists(os.path.join(self.opts.vector_dir, 'entities')):
             os.makedirs(os.path.join(self.opts.vector_dir, 'entities'))
 
@@ -236,16 +246,16 @@ class ContextManager(PromptManager):
 
         prompt = prompt_template.format_messages(**populated)
         if self.debug:
-            self.console.print(f'PRE-PROCESSOR ENTITY PROMPT:\n{prompt}\n\n',
+            self.console.print(f'ENTITY-PROCESSOR PROMPT:\n{prompt}\n\n',
                                 style=f'color({self.opts.color})', highlight=False)
         try:
-            content = self.pre_llm.invoke(prompt).content
+            content = self.entity_llm.invoke(prompt).content
         except APITimeoutError:
-            self.console.print('PRE-PROCESSOR ENTITY API ERROR\n\n',
+            self.console.print('ENTITY-PROCESSOR API ERROR\n\n',
                                 style=f'color({self.opts.color})', highlight=False)
             return
         if self.debug:
-            self.console.print(f'PRE-PROCESSOR ENTITY RESPONSE:\n{content}\n\n',
+            self.console.print(f'ENTITY-PROCESSOR RESPONSE:\n{content}\n\n',
                                 style=f'color({self.opts.color})', highlight=False)
 
         with open(os.path.join(self.opts.vector_dir,
@@ -309,6 +319,11 @@ class ContextManager(PromptManager):
                 return list[Document]
         """
         storage = []
+
+        # Perhaps the user does not want to use RAG
+        if self.opts.matches == 0:
+            return storage
+
         # Return immediately if we somehow have no topic field available
         topic_field = [x for x in meta_tags if x.tag == field]
         if not topic_field:
@@ -426,7 +441,7 @@ class ContextManager(PromptManager):
         return ''
 
     def summarize_history(self, documents)->list:
-        """ return summarized history + very last two unmolested turns """
+        """ return last 4 unmolested turns plus a summarization of story """
         prompts = self.prompts
         summarizing = {'chat_history'    : documents['chat_history'],
                        'character_sheet' : documents['character_sheet'],
@@ -446,9 +461,13 @@ class ContextManager(PromptManager):
                                 style=f'color({self.opts.color})', highlight=False)
         try:
             content = self.pre_llm.invoke(prompt).content
-            return [*documents['chat_history'][-3:],
-                    f'\n\nBEGIN: CHAT_HISTORY_SUMMARY\n{content}\nEND: CHAT_HISTORY_SUMMARY', ]
+            return ['BEGIN: CHAT_HISTORY: chronological (newest last):\n',
+                    *documents['chat_history'][-4:],
+                    'END: CHAT_HISTORY\n\n<STORY_SUMMARY - THE STORY SUMMARIZED THUS FAR>'
+                    f'\n{content}<END STORY_SUMMARY>', ]
         except APITimeoutError:
+            self.console.print('PRE-PROCESSOR PROMPT API ERROR\n',
+                                style=f'color({self.opts.color})', highlight=False)
             return documents['chat_history']
 
     def handle_context(self, documents: dict,
@@ -484,8 +503,11 @@ class ContextManager(PromptManager):
 
             # grab entities and perform another tagging process (with character sheets)
             documents['entities'] = '---\n\n'.join(self.prompt_entities(meta_tags))
+            documents['known_characters'] = ','.join(
+                           self.scene.get_scene().get('known_characters', [])
+                       )
 
-            if self.opts.one_shot:
+            if self.opts.one_shot and len(documents['chat_history']) > 3:
                 documents['chat_history'] = self.summarize_history(documents)
                 if self.debug:
                     self.console.print(f'SUMMARIZED:\n{documents["chat_history"]}\n\n',
@@ -545,9 +567,10 @@ class ContextManager(PromptManager):
                 documents[collection] = self.common.stringify_lists(documents[collection])
 
             # Stringify lists in chat_history
-            documents['chat_history'] = (
-                '\n\n<END_TURN>\n# NEXT TURN: Begin fresh. Do not'
-                ' emulate previous output length or tone.'.join(documents['chat_history']))
+            #documents['chat_history'] = (
+            #    '\n\n<END_TURN>\n# NEXT TURN: Begin fresh. Do not'
+            #    ' emulate previous output length or tone.'.join(documents['chat_history']))
+            documents['chat_history'] = '\n'.join(documents['chat_history'])
             # Store the users query to their RAG, now that we are done pre-processing
             # (so as not to bring back identical information in their query)
             # A little unorthodox, but the first item in the list is the user's query

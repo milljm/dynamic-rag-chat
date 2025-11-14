@@ -126,6 +126,8 @@ class RAG():
         """
         Return matching documents
         """
+        if not matches:
+            return []
         parent_retriever = self.parent_retriever(collection)
         vector_store = self.vector_store(collection)
 

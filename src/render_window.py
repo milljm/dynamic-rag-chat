@@ -221,6 +221,10 @@ class RenderWindow(PromptManager):
     def _color_for_completion(self, token_count: int) -> int:
         return [v for k, v in self.common.heat_map.items() if token_count * 4 >= k][-1]
 
+    def clear_ooc(self):
+        """ clear the OOC Response """
+        self.ooc_response = ''
+
     @staticmethod
     def response_count(response)->int:
         """
