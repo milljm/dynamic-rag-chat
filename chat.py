@@ -331,7 +331,7 @@ class Chat():
             performance_summary += f'{k}:{v}\n'
         performance = (f'Total Tokens: {prompt_tokens}\n'
                        f'Duplicate Tokens removed: {max(0, pre_t - post_t)}\n'
-                       'My maximum Context Window size: '
+                       'Maximum response length: '
                        f'{self.opts.completion_tokens}')
 
         # pylint: disable=consider-using-f-string  # no, {:.f} this is how it is done
@@ -513,6 +513,7 @@ class Chat():
                         try:
                             _ = history[self.chat_branch].pop()
                             self.session.common.save_chat()
+                            self.session.renderer.clear_ooc()
                             console.print("[green]Deleted last.[/green]", highlight=False)
                         except IndexError:
                             console.print("[yellow]History empty.[/yellow]")
@@ -537,6 +538,7 @@ class Chat():
                             if history[self.chat_branch]:
                                 print(f"\n⬇ CURRENT (TURN {len(history[self.chat_branch])}) ⬇\n"
                                     f"{history[self.chat_branch][-1]}")
+                            self.session.renderer.clear_ooc()
                         except ValueError:
                             console.print("[red]usage: \\rewind N[/red]")
                         continue
@@ -631,6 +633,7 @@ class Chat():
                         history['current'] = name
                         self.chat_branch = name
                         self.session.common.save_chat()
+                        self.session.renderer.clear_ooc()
                         # ---------------- RAG sync for the new branch ----------------
                         try:
                             if cut is None:
@@ -731,7 +734,10 @@ def _add_arguments(parser: argparse.ArgumentParser, defaults, *, use_defaults: b
                         help='NSFW LLM Model (default: %(default)s)')
     parser.add_argument('--pre-llm', metavar='', dest='preconditioner',
                         default=D('preconditioner'),
-                        type=str, help='pre-processor LLM (default: %(default)s)')
+                        type=str, help='Summarizer/Tagging Preconditioner LLM (default: %(default)s)')
+    parser.add_argument('--entity-llm', metavar='', dest='entity_llm',
+                        default=D('entity_llm'),
+                        type=str, help='Entity/Character Sheet LLM (default: %(default)s)')
     parser.add_argument('--embedding-llm', metavar='', dest='embeddings',
                         default=D('embeddings'),
                         type=str, help='LM embedding model (default: %(default)s)')
@@ -740,6 +746,8 @@ def _add_arguments(parser: argparse.ArgumentParser, defaults, *, use_defaults: b
     parser.add_argument('--llm-server', metavar='', dest='host', default=D('host'),
                         type=str, help='OpenAI API server address (default: %(default)s)')
     parser.add_argument('--pre-server', metavar='', dest='pre_host', default=D('pre_host'),
+                        type=str, help='OpenAI API server address (default: %(default)s)')
+    parser.add_argument('--entity-server', metavar='', dest='entity_host', default=D('entity_host'),
                         type=str, help='OpenAI API server address (default: %(default)s)')
     parser.add_argument('--embedding-server', metavar='', dest='emb_host', default=D('emb_host'),
                         type=str, help='OpenAI API server address (default: %(default)s)')

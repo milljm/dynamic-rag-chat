@@ -63,9 +63,11 @@ class ChatOptions:
 
     # ---------- RAG / pre‑ & post‑processing ----------
     preconditioner: str = 'gemma3:1b'
+    entity_llm: str = 'gemma3:1b'
     embeddings: str = 'nomic-embed-text'
     pre_host: str = 'http://localhost:11434/v1'
     emb_host: str = 'http://localhost:11434/v1'
+    entity_host: str = 'http://localhost:11434/v1'
     vector_dir: str = field(default_factory=lambda: str(Path.cwd() / 'vector_data'))
     matches: int = 20
 
@@ -99,6 +101,7 @@ class ChatOptions:
         'embedding_llm':             'embeddings',
         'pre_server':                'pre_host',
         'embedding_server':          'emb_host',
+        'entity_server':             'entity_host',
         'history_dir':               'vector_dir',
         'history_matches':           'matches',
         'history_max':               'chat_history',

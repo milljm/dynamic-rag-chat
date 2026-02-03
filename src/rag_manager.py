@@ -188,6 +188,8 @@ class RAG():
                 collection: str  # the RAG collection to draw from
                 metadatas: dict  # if set, will perform field-filtering match
         """
+        if self.opts.matches == 0:
+            return []
         if not metadatas:
             metadatas = None
         try:
