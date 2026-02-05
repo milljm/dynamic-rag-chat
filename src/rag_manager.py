@@ -65,7 +65,8 @@ class RAG():
         else:
             self.embeddings = OpenAIEmbeddings(base_url=self.opts.emb_host,
                                                model=self.opts.embeddings,
-                                               api_key=self.opts.api_key)
+                                               api_key=self.opts.api_key,
+                                               check_embedding_ctx_length=False)
 
         self.parent_splitter = RecursiveCharacterTextSplitter(chunk_size=1000,
                                                               chunk_overlap=500,

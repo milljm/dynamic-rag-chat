@@ -462,7 +462,7 @@ class ContextManager(PromptManager):
         try:
             content = self.pre_llm.invoke(prompt).content
             return ['BEGIN: CHAT_HISTORY: chronological (newest last):\n',
-                    *documents['chat_history'][-4:],
+                    *documents['chat_history'][-2:],
                     'END: CHAT_HISTORY\n\n<STORY_SUMMARY - THE STORY SUMMARIZED THUS FAR>'
                     f'\n{content}<END STORY_SUMMARY>', ]
         except APITimeoutError:
@@ -507,7 +507,7 @@ class ContextManager(PromptManager):
                            self.scene.get_scene().get('known_characters', [])
                        )
 
-            if self.opts.one_shot and len(documents['chat_history']) > 3:
+            if self.opts.one_shot and len(documents['chat_history']) > 1:
                 documents['chat_history'] = self.summarize_history(documents)
                 if self.debug:
                     self.console.print(f'SUMMARIZED:\n{documents["chat_history"]}\n\n',
