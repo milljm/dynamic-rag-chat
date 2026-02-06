@@ -37,6 +37,7 @@ class RenderWindowState:
     debug: bool
     verbose: bool
     assistant_mode: bool
+    disable_thinking: bool
     no_rags: bool
     light_mode: bool
     model: str
@@ -118,6 +119,9 @@ class RenderWindow(PromptManager):
         # populate dataclasses, setup
         self._load_states(current_dir, context, args)
 
+        disable_thinking = self.state.disable_thinking
+        think = not disable_thinking
+
         # Our heavy-weight LLMs
         self.llm = {
                 'sfw'  : ChatOpenAI(base_url=self.state.host,
@@ -130,7 +134,16 @@ class RenderWindow(PromptManager):
                                     streaming=True,
                                     max_completion_tokens=self.state.completion_tokens,
                                     stop_sequences=["<END_BEAT>", "<END_TURN>"],
-                                    api_key=self.state.api_key),
+                                    api_key=self.state.api_key,
+                                    extra_body = {
+                                      "thinking": {"type": "disabled" if not think else "enabled"},
+                                      "chat_template_kwargs": {
+                                        "enable_thinking": think,
+                                        "include_reasoning": think,
+                                        "think": think,
+                                      }
+                                    },
+                                    ),
 
                 'nsfw' : ChatOpenAI(base_url=self.state.host,
                                     model=self.state.nsfw_model,
@@ -142,7 +155,16 @@ class RenderWindow(PromptManager):
                                     streaming=True,
                                     max_completion_tokens=self.state.completion_tokens,
                                     stop_sequences=["<END_BEAT>", "<END_TURN>"],
-                                    api_key=self.state.api_key),
+                                    api_key=self.state.api_key,
+                                    extra_body = {
+                                      "thinking": {"type": "disabled" if not think else "enabled"},
+                                      "chat_template_kwargs": {
+                                        "enable_thinking": think,
+                                        "include_reasoning": think,
+                                        "think": think,
+                                      }
+                                    },
+                                    ),
             }
 
         # Prompts
@@ -165,6 +187,7 @@ class RenderWindow(PromptManager):
             debug = args.debug,
             verbose = args.verbose,
             assistant_mode = args.assistant_mode,
+            disable_thinking = args.disable_thinking,
             no_rags=args.no_rags,
             light_mode = args.light_mode,
             model = args.model,
@@ -425,6 +448,9 @@ class RenderWindow(PromptManager):
         documents['ooc_mode_bool'] = (
             'TRUE' if documents['user_query'].strip().lower().startswith("ooc:") else 'FALSE')
         self.ooc_response = ''
+
+        if self.state.disable_thinking:
+            documents['user_query'] = f'{documents["user_query"]}</think>'
 
         # pylint: disable=no-member # dynamic prompts (see self.__build_prompts)
         system_prompt = (prompts.get_prompt(f'{prompts.plot_prompt_file}_system.md')

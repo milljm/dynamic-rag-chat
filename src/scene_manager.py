@@ -73,7 +73,7 @@ class SceneManager:
     def _no_scene(self)->dict:
         return {
             'entity'           : [self.opts.user_name.lower()],
-            'audience'         : [self.opts.user_name.lower()],
+            'audience'         : [],
             'known_characters' : [self.opts.user_name.lower()],
             'plots'            : {},
             'location'         : '',

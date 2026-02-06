@@ -797,6 +797,8 @@ def _add_arguments(parser: argparse.ArgumentParser, defaults, *, use_defaults: b
     parser.add_argument('--assistant-mode', action='store_true', default=D('assistant_mode'),
                         help='Do not utilize story-telling mode prompts or the RAGs. Do not save '
                         'chat history to disk')
+    parser.add_argument('--disable-thinking', action='store_true', default=D('disable_thinking'),
+                        help='Do not utilize reasoning, even if the model supports it')
     parser.add_argument('--one-shot', action='store_true', default=D('one_shot'),
                         help='summarize history for one-shot type LLMs')
     parser.add_argument('--use-rags', action='store_true', default=D('no_rags'),

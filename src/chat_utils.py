@@ -39,7 +39,7 @@ class ChatOptions:
     host: str = 'http://localhost:11434/v1'
     model: str = 'gemma3:27b'
     nsfw_model: Optional[str] = None
-    completion_tokens: int = 1000
+    completion_tokens: int = 4000
     time_zone: str = 'GMT'
     api_key: str = 'none'
     assistant_mode: bool = False
@@ -49,6 +49,7 @@ class ChatOptions:
     light_mode: bool = False
     prompts_debug: bool = False
     one_shot: bool = False
+    disable_thinking: bool = False
     name: str = 'assistant'
     user_name: str = 'John'
     temperature: float = 0.5
