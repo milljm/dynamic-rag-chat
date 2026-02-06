@@ -35,6 +35,7 @@ class PromptManager():
             'pre_prompt'    :f'pre_conditioner_prompt_{self.model}',
             'tag_prompt'    :f'tagging_prompt_{self.model}',
             'plot_prompt'   :f'plot_prompt_{self.model}',
+            'polish_prompt' :f'polish_prompt_{self.model}',
             'entity_prompt' :f'entity_prompt_{self.model}',
         }
         for prompt_key, prompt_base in prompt_files.items():

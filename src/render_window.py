@@ -41,6 +41,7 @@ class RenderWindowState:
     no_rags: bool
     light_mode: bool
     model: str
+    polisher: str
     nsfw_model: str
     host: str
     api_key: str
@@ -121,6 +122,14 @@ class RenderWindow(PromptManager):
 
         disable_thinking = self.state.disable_thinking
         think = not disable_thinking
+        extra_body = {
+                       "thinking": {"type": "disabled" if not think else "enabled"},
+                       "chat_template_kwargs": {
+                         "enable_thinking": think,
+                         "include_reasoning": think,
+                         "think": think,
+                       }
+                     }
 
         # Our heavy-weight LLMs
         self.llm = {
@@ -135,14 +144,7 @@ class RenderWindow(PromptManager):
                                     max_completion_tokens=self.state.completion_tokens,
                                     stop_sequences=["<END_BEAT>", "<END_TURN>"],
                                     api_key=self.state.api_key,
-                                    extra_body = {
-                                      "thinking": {"type": "disabled" if not think else "enabled"},
-                                      "chat_template_kwargs": {
-                                        "enable_thinking": think,
-                                        "include_reasoning": think,
-                                        "think": think,
-                                      }
-                                    },
+                                    extra_body = extra_body,
                                     ),
 
                 'nsfw' : ChatOpenAI(base_url=self.state.host,
@@ -156,15 +158,21 @@ class RenderWindow(PromptManager):
                                     max_completion_tokens=self.state.completion_tokens,
                                     stop_sequences=["<END_BEAT>", "<END_TURN>"],
                                     api_key=self.state.api_key,
-                                    extra_body = {
-                                      "thinking": {"type": "disabled" if not think else "enabled"},
-                                      "chat_template_kwargs": {
-                                        "enable_thinking": think,
-                                        "include_reasoning": think,
-                                        "think": think,
-                                      }
-                                    },
+                                    extra_body = extra_body,
                                     ),
+                'polish' : ChatOpenAI(base_url=self.state.host,
+                                      model=self.state.polisher,
+                                      temperature=0.9 if self.state.assistant_mode
+                                                        else args.temperature,
+                                      top_p=args.top_p,
+                                      frequency_penalty=args.frequency_penalty,
+                                      presence_penalty=args.presence_penalty,
+                                      streaming=True,
+                                      max_completion_tokens=self.state.completion_tokens,
+                                      stop_sequences=["<END_BEAT>", "<END_TURN>"],
+                                      api_key=self.state.api_key,
+                                      extra_body = extra_body,
+                                      ),
             }
 
         # Prompts
@@ -191,6 +199,7 @@ class RenderWindow(PromptManager):
             no_rags=args.no_rags,
             light_mode = args.light_mode,
             model = args.model,
+            polisher = args.polisher,
             nsfw_model = args.nsfw_model,
             host = args.host,
             api_key = args.api_key,
@@ -435,7 +444,7 @@ class RenderWindow(PromptManager):
                     break  # Only handle first HumanMessage
         return messages
 
-    def get_messages(self, documents: dict)->list[Document]:
+    def get_messages(self, documents: dict, polish: bool = False)->list[Document]:
         """ return formatted message to be sent to LLM stream """
         prompts = self.prompts
 
@@ -449,15 +458,22 @@ class RenderWindow(PromptManager):
             'TRUE' if documents['user_query'].strip().lower().startswith("ooc:") else 'FALSE')
         self.ooc_response = ''
 
-        if self.state.disable_thinking:
-            documents['user_query'] = f'{documents["user_query"]}</think>'
+        if self.state.disable_thinking and not polish:
+            documents['user_query'] = f'{documents["user_query"]} </think> </think> '
 
         # pylint: disable=no-member # dynamic prompts (see self.__build_prompts)
-        system_prompt = (prompts.get_prompt(f'{prompts.plot_prompt_file}_system.md')
-                     if self.debug or self.opts.prompts_debug else prompts.plot_prompt_system)
+        if polish:
+            system_prompt = (prompts.get_prompt(f'{prompts.polish_prompt_file}_system.md')
+                        if self.debug or self.opts.prompts_debug else prompts.polish_prompt_system)
 
-        human_prompt = (prompts.get_prompt(f'{prompts.plot_prompt_file}_human.md')
-                     if self.debug or self.opts.prompts_debug else prompts.plot_prompt_human)
+            human_prompt = (prompts.get_prompt(f'{prompts.polish_prompt_file}_human.md')
+                        if self.debug or self.opts.prompts_debug else prompts.polish_prompt_human)
+        else:
+            system_prompt = (prompts.get_prompt(f'{prompts.plot_prompt_file}_system.md')
+                        if self.debug or self.opts.prompts_debug else prompts.plot_prompt_system)
+
+            human_prompt = (prompts.get_prompt(f'{prompts.plot_prompt_file}_human.md')
+                        if self.debug or self.opts.prompts_debug else prompts.plot_prompt_human)
         # pylint: enable=no-member
 
         # Prompt conversions/templates
@@ -469,13 +485,20 @@ class RenderWindow(PromptManager):
         system_msg = SystemMessagePromptTemplate(prompt=system_tmpl)
         human_msg  = HumanMessagePromptTemplate(prompt=human_tmpl)
 
-        prompt_template = ChatPromptTemplate.from_messages([
-            system_msg,
-            human_msg
-        ])
+        if polish or self.opts.assistant_mode:
+            prompt_template = ChatPromptTemplate.from_messages([
+                human_msg
+            ])
+        else:
+            prompt_template = ChatPromptTemplate.from_messages([
+                system_msg,
+                human_msg
+            ])
 
         # Does this post require SFW, or NSFW
         llm = 'nsfw' if documents['explicit'] else 'sfw'
+        if polish:
+            llm = 'polish'
 
         if self.debug:
             self.console.print(f'LLM DOCUMENTS: {documents.keys()}\n'
@@ -505,9 +528,10 @@ class RenderWindow(PromptManager):
         return messages
 
     # Stream response as chunks
-    def stream_response(self, documents: dict, messages: Document):
+    def stream_response(self, documents: dict, messages: Document, polish: bool = False):
         """ Parse LLM Prompt """
         llm = 'nsfw' if documents['explicit'] else 'sfw'
+        llm = 'polish' if polish else llm
         for chunk in self.llm[llm].stream(messages):
             chunk = self.reveal_thinking(chunk, self.state.verbose)
             chunk = self.if_metatags(chunk, self.state.verbose)
@@ -580,13 +604,13 @@ class RenderWindow(PromptManager):
         color = self.state.color-5 if self.state.light_mode else self.state.color
         _rag = '' if not self.state.no_rags and self.state.assistant_mode else 'RAG+'
         self.renderable.header = Text(f'Submitting relevant {_rag}History tokens: '
-                                f'{footer_meta["prompt_tokens"]} '
-                                f'(took {footer_meta["pre_process_time"]})...'
-                                f'{documents.get("in_line_commands", "")}',
-                                style=f'color({color})')
+                                      f'{footer_meta["prompt_tokens"]} '
+                                      f'(took {footer_meta["pre_process_time"]})...'
+                                      f'{documents.get("in_line_commands", "")}',
+                                      style=f'color({color})')
         self.renderable.query = Markdown(f'**You:** {documents["user_query"]}')
         self.renderable.assistant = Text(documents["name"], style='bold color(208)')
-        self.renderable.response = Text('Thinking/Server loading model...', style=f'color({color}')
+        self.renderable.response = Text('Inference/Loading...', style=f'color({color}')
         self.renderable.footer = self.render_footer(0.0, **footer_meta)
 
         with Live(refresh_per_second=20, console=self.console) as live:
@@ -598,7 +622,11 @@ class RenderWindow(PromptManager):
                     start_time = time.time()
                 current_response += piece.content
                 footer_meta['token_count'] += self.response_count(piece.content)
-                self.renderable.response = self.build_content(current_response)
+                if self.state.polisher == 'None' or documents['user_query'].find('OOC:') != -1:
+                    self.renderable.response = self.build_content(current_response)
+                else:
+                    self.renderable.response = Text('Receiving message to polish...',
+                                                     style=f'color({color}')
                 self.renderable.footer = self.render_footer(time.time()-start_time, **footer_meta)
                 # replace 'thinking' output with Model's Markdown response
                 if isinstance(self.renderable.response, Markdown) and stream.do_once:
@@ -609,6 +637,27 @@ class RenderWindow(PromptManager):
                 self.renderable.assistant = Text(documents["name"],
                                                  style=f'bold color({name_color})')
                 self.render_chat(live)
+
+            # Second Pass (polisher)
+            if self.state.polisher != 'None' and documents['user_query'].find('OOC:') == -1:
+                self.renderable.response = Text('Inference/Loading Polisher...',
+                                                style=f'color({color}')
+                self.render_chat(live)
+                user_query = str(documents['user_query'])
+                documents['user_query'] = str(current_response)
+                messages = self.get_messages(documents, polish=True)
+                documents['user_query'] = user_query
+                current_response = ''
+                for piece in self.stream_response(documents, messages, polish=True):
+                    current_response += piece.content
+                    footer_meta['token_count'] += self.response_count(piece.content)
+                    self.renderable.response = self.build_content(current_response)
+                    self.renderable.footer = self.render_footer(time.time()-start_time,
+                                                                **footer_meta)
+                    name_color = self.state.pulse_colors[self.state.pulse_color_index]
+                    self.renderable.assistant = Text(documents["name"],
+                                                    style=f'bold color({name_color})')
+                    self.render_chat(live)
 
             self.stop_namepulse()
             if not current_response or current_response == ' ':
@@ -651,6 +700,8 @@ class RenderWindow(PromptManager):
         current_response = self.common.sanitize_response(current_response)
         self.common.write_debug('sanitized', current_response)
 
+        if self.state.disable_thinking:
+            documents["user_query"] = documents["user_query"].replace('</think>', '')
         history[history.get('current', 'default')].append(
             f'\nUSER: {documents["user_query"]}\n\n'
             f'AI: {current_response}')

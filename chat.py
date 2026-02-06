@@ -730,6 +730,10 @@ def _add_arguments(parser: argparse.ArgumentParser, defaults, *, use_defaults: b
 
     parser.add_argument('--model', metavar='', default=D('model'),
                         help='LLM Model (default: %(default)s)')
+    parser.add_argument('--polisher', metavar='', default=D('polisher'),
+                        help='Polisher LLM Model (default: %(default)s)'
+                        ' (optional, used to "polish" the final output, with something like'
+                        ' Midnight Miqu)')
     parser.add_argument('--nsfw-model', metavar='', default=D('nsfw_model'),
                         help='NSFW LLM Model (default: %(default)s)')
     parser.add_argument('--pre-llm', metavar='', dest='preconditioner',
@@ -798,7 +802,8 @@ def _add_arguments(parser: argparse.ArgumentParser, defaults, *, use_defaults: b
                         help='Do not utilize story-telling mode prompts or the RAGs. Do not save '
                         'chat history to disk')
     parser.add_argument('--disable-thinking', action='store_true', default=D('disable_thinking'),
-                        help='Do not utilize reasoning, even if the model supports it')
+                        help='Do not utilize reasoning, even if the model supports it '
+                        '(default: %(default)s)')
     parser.add_argument('--one-shot', action='store_true', default=D('one_shot'),
                         help='summarize history for one-shot type LLMs')
     parser.add_argument('--use-rags', action='store_true', default=D('no_rags'),

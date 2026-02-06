@@ -63,6 +63,7 @@ class ChatOptions:
     character_sheet: str = ''
 
     # ---------- RAG / pre‑ & post‑processing ----------
+    polisher: str = 'None'
     preconditioner: str = 'gemma3:1b'
     entity_llm: str = 'gemma3:1b'
     embeddings: str = 'nomic-embed-text'

@@ -13,9 +13,9 @@ You are an expert NPC character sheet creator, using information from CHAT_HISTO
 - Do not invent information. Describe only what can be reliably inferred to persist over time.
 - You will NEVER use {{user_name}}. {{user_name}} ALREADY HAS A CHARACTER SHEET. Never use the name: {{user_name}} in any way.
 
-BEGIN: CHAT_HISTORY
+<CHAT_HISTORY - USE FOR CHARACTER IDENTIFICATION FACTS>
 {{chat_history}}
-END: CHAT_HISTORY
+<END CHAT_HISTORY>
 
 Using the above CHAT_HISTORY as reference only, create ONE JSON Character Sheet, and ONLY for the following individual: {{character_name}}
 
