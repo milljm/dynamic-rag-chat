@@ -349,8 +349,6 @@ class CommonUtils():
 
     def save_chat(self)->None:
         """ Persist chat history (save) """
-        if self.opts.assistant_mode and not self.opts.no_rags:
-            return
         if self.opts.continue_from != -1:
             if self.opts.debug:
                 self.console.print('CONTINUE_FROM Enabled. Not saving chat',
@@ -366,9 +364,8 @@ class CommonUtils():
     def load_chat(self)->dict:
         """ Persist chat history (load) """
         loaded_dict = {'default': [],
+                       'assistant': [],
                        'current': 'default'}
-        if self.opts.assistant_mode and not self.opts.no_rags:
-            return loaded_dict | self.chat_history_session
         history_file = os.path.join(self.opts.vector_dir, 'chat_history.pkl')
         try:
             with open(history_file, "rb") as f:

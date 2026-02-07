@@ -345,7 +345,7 @@ class RenderWindow(PromptManager):
         Intercept <think> tags in streamed content and optionally hide or reveal them.
 
         If `show` is True, actual thinking content is shown.
-        If `show` is False, replaces it with 'AI thinking...' at start, then hides remaining.
+        If `show` is False, replaces it with '' at start, then hides remaining.
         """
         stream = self.state.stream
         content = str(chunk.content)
@@ -364,7 +364,7 @@ class RenderWindow(PromptManager):
             stream.thinking = True
             stream.do_once = True
             self.start_thinking()
-            chunk.content = 'AI thinking...'
+            chunk.content = ''
             return chunk
 
         # Middle of thinking stream
@@ -687,9 +687,10 @@ class RenderWindow(PromptManager):
 
         documents['llm_response'] = current_response
         if self.state.assistant_mode:
-            history[history.get('current', 'default')].append(
+            history['assistant'].append(
                 f'\nUSER: {documents["user_query"]}\n\n'
                 f'AI: {current_response}')
+            self.common.save_chat()
             return
         stream.meta_capture = ''
         if self.debug:

@@ -205,7 +205,10 @@ class Chat():
         self.opts: ChatOptions = _args
         self.session: SessionContext = o_session
 
-        self.chat_branch = self.session.common.chat_history_session['current']
+        if _args.assistant_mode:
+            self.chat_branch = 'assistant'
+        else:
+            self.chat_branch = self.session.common.chat_history_session['current']
         self._initialize_startup_tasks()
 
     def _initialize_startup_tasks(self):
@@ -547,10 +550,16 @@ class Chat():
                             if branch == 'current':
                                 continue
                             if arg == self.chat_branch:
-                                console.print("[red]Cannot delete current branch you are on[/red]")
+                                console.print("[red]Cannot delete current branch you are on. "
+                                              "Use '/rewind 1', '/delete-last' instead[/red]")
                                 break
                             if arg == 'default':
-                                console.print("[red]Cannot delete default branch[/red]")
+                                console.print("[red]Cannot delete default branch. "
+                                              "Use '/rewind 1', '/delete-last' instead[/red]")
+                                break
+                            if arg == 'assistant':
+                                console.print("[red]Cannot delete assistant branch. "
+                                              "Use '/rewind 1', '/delete-last' instead[/red]")
                                 break
                             if arg == branch and arg != 'current':
                                 history.pop(arg)
@@ -596,7 +605,11 @@ class Chat():
                         # parse "name@N" to branch from first N turns of current branch
                         # examples: "\branch testing@5" or just "\branch testing"
                         raw = arg.strip()
-                        if raw == "current" or raw == "":  # guard reserved/empty
+                        if self.opts.assistant_mode:
+                            console.print("[red]Not allowed while in assistant mode.[/red]",
+                                          highlight=False)
+                            continue
+                        if raw == "current" or raw == "" or raw == "assistant":  # guard
                             console.print("[red]Invalid branch name.[/red]", highlight=False)
                             continue
 
@@ -702,6 +715,7 @@ class Chat():
                     inc_docs = self.load_content_as_context(
                         " ".join(f"{{{{{x}}}}}" for x in parsed.includes))
                     documents.update(inc_docs)
+                    documents['user_query'] = f'{raw} \n\nattachments:{documents["user_query"]}'
 
                 # Inject NOW addendum if armed
                 sys_addon = now_addendum(self.session.scene.get_scene())
