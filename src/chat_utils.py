@@ -28,7 +28,8 @@ class StandardAttributes:
     def attributes(cls)->'StandardAttributes':
         """ return project attributes shared throughout project """
         return cls(collections={'user' : 'user_documents',
-                                'ai'   : 'ai_documents'}
+                                'ai'   : 'ai_documents',
+                                'gold' : 'gold_documents'}
                    )
 
 # pylint: disable=too-many-instance-attributes  # thats what dataclasses are for

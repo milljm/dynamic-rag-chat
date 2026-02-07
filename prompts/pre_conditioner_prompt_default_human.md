@@ -4,8 +4,9 @@ You are a story summarizer that compresses a long, multi-turn chat into a single
 <PROTAGONIST - CHARACTER SHEET FOR USER>
 {{character_sheet}}
 <END PROTAGONIST>
-- CHAT_HISTORY (verbatim, newest last):
+<CHAT_HISTORY - CHAT_HISTORY (verbatim, newest last)>
 {{chat_history}}
+<END CHAT_HISTORY>
 
 # GOAL
 Produce a compact "session state" that preserves facts, decisions, intent, constraints, and active goals—while removing repetition, filler, and small talk.

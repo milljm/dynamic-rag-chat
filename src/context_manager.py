@@ -197,16 +197,22 @@ class ContextManager(PromptManager):
                                 style=f'color({self.opts.color})', highlight=False)
                 self.create_character(char, roll_reversal)
 
-        self.scene.finalize_turn(response)
-        self.scene.save_scene()
+        if not self.opts.assistant_mode:
+            self.scene.finalize_turn(response)
+            self.scene.save_scene()
 
         collections = self.common.attributes.collections  # short hand
         # protect against empty or gold RAG (read-only) collections
         if not collection or collection == collections['gold']:
             collection = collections['ai']
-        collection = f'{history.get("current", "default")}_{collection}'
+        if self.opts.assistant_mode:
+            branch = 'assistant'
+        else:
+            branch = history.get('current', 'default')
+        collection = f'{branch}_{collection}'
         # list_rag_tags: list[RAGTag] = self.common.get_tags(response)
-        self.scene.ground_scene(list_rag_tags, response)
+        if not self.opts.assistant_mode:
+            self.scene.ground_scene(list_rag_tags, response)
         if self.debug:
             self.console.print(f'THREADED META TAGS PARSED: {list_rag_tags}',
                                style=f'color({self.opts.color})',
@@ -218,6 +224,8 @@ class ContextManager(PromptManager):
 
     def create_character(self, char: str, documents: dict)->None:
         """ Query the Entity LLM to generate a character file based on chat_history """
+        if self.opts.assistant_mode:
+            return
         if not os.path.exists(os.path.join(self.opts.vector_dir, 'entities')):
             os.makedirs(os.path.join(self.opts.vector_dir, 'entities'))
 
@@ -478,14 +486,16 @@ class ContextManager(PromptManager):
             pre_tokens = 0
             post_tokens = 0
             history = documents['history'] # shorthand
-            branch = history.get('current', 'default')
-            collection_list = [f'{branch}_{self.common.attributes.collections[x]}' for
+            if self.opts.assistant_mode:
+                branch = 'assistant'
+            else:
+                branch = history.get('current', 'default')
+            collection_list = [self.common.attributes.collections[x] for
                                 x in self.common.attributes.collections]
             collection_list.append('gold_documents')
 
             # populate chat history
-            documents['chat_history'] = self.get_chat_history(history[history.get('current',
-                                                                                  'default')])
+            documents['chat_history'] = self.get_chat_history(history[branch])
 
             documents['additional_content'] = self.get_explicit()
             documents['ooc_system'] = self.get_ooc()
@@ -532,19 +542,27 @@ class ContextManager(PromptManager):
                                     highlight=False)
 
             for collection in collection_list:
+                if self.opts.assistant_mode:
+                    g_branch = 'assistant_'
+                else:
+                    g_branch = f'{branch}_'
+
+                if collection == 'gold_documents':
+                    g_branch = ''
+
                 if self.debug:
-                    self.console.print(f'Collection: {collection}',
+                    self.console.print(f'Collection: {g_branch}{collection}',
                                        style=f'color({self.opts.color})',
                                        highlight=False)
                 storage = []
                 # field-filtering RAG retrieval specific for document_topics
                 storage.extend(self.handle_topics(meta_tags,
                                                   query,
-                                                  collection,
+                                                  f'{g_branch}{collection}',
                                                   self.mode))
 
                 # general retrieval
-                _retrieved = self.rag.retrieve(query, collection)
+                _retrieved = self.rag.retrieve(query, f'{g_branch}{collection}')
                 if self.debug:
                     self.console.print(f'Data:\n{_retrieved}\n\n',
                                        style=f'color({self.opts.color})',
@@ -576,8 +594,7 @@ class ContextManager(PromptManager):
             # A little unorthodox, but the first item in the list is the user's query
             self.rag.store_data(query,
                                 tags_metadata=meta_tags,
-                                collection=f'{history.get("current", "default")}_'
-                                f'{self.common.attributes.collections["user"]}')
+                                collection=f'{branch}_{self.common.attributes.collections["user"]}')
             # Return data collected
             return (documents, pre_tokens, post_tokens)
 

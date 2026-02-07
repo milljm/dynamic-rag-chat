@@ -593,13 +593,17 @@ class RenderWindow(PromptManager):
         for message in messages:
             token_total += context.token_retriever(message.content)
         current_response = ''
+        if self.opts.assistant_mode:
+            branch = 'assistant'
+        else:
+            branch = history.get('current', 'default')
         footer_meta = {'token_savings'   : documents['token_savings'],
                        'prompt_tokens'   : token_total,
                        'cleaned_color'   : documents['cleaned_color'],
                        'pre_process_time': documents['pre_process_time'],
                        'token_count'     : 0,
                        'content_rating'  : documents['explicit'],
-                       'turn_count'      : len(history[history.get('current', 'default')])+1}
+                       'turn_count'      : len(history[branch])+1}
         start_time = 0
         color = self.state.color-5 if self.state.light_mode else self.state.color
         _rag = '' if not self.state.no_rags and self.state.assistant_mode else 'RAG+'
@@ -686,12 +690,6 @@ class RenderWindow(PromptManager):
             return
 
         documents['llm_response'] = current_response
-        if self.state.assistant_mode:
-            history['assistant'].append(
-                f'\nUSER: {documents["user_query"]}\n\n'
-                f'AI: {current_response}')
-            self.common.save_chat()
-            return
         stream.meta_capture = ''
         if self.debug:
             self.console.print('DEBUG: saving to RAG...',
@@ -703,7 +701,11 @@ class RenderWindow(PromptManager):
 
         if self.state.disable_thinking:
             documents["user_query"] = documents["user_query"].replace('</think>', '')
-        history[history.get('current', 'default')].append(
+        if self.opts.assistant_mode:
+            branch = 'assistant'
+        else:
+            branch = history.get('current', 'default')
+        history[branch].append(
             f'\nUSER: {documents["user_query"]}\n\n'
             f'AI: {current_response}')
         self.common.save_chat()

@@ -297,7 +297,7 @@ class Chat():
         documents = dict()
         pre_process_time = time.time()
         history = self.session.common.chat_history_session  # shorthand
-        previous = history[history.get('current', 'default')][-2:-1:]
+        previous = history[self.chat_branch][-2:-1:]
         documents.update(
             {'user_query'         : user_input,
              'dynamic_files'      : '',
@@ -486,6 +486,9 @@ class Chat():
         c_session = PromptSession()
         kb = KeyBindings()
         history = self.session.common.chat_history_session # shorthand
+        if self.opts.assistant_mode and len(history[self.chat_branch]) == 0:
+            self.session.rag.clone_collection('default', 'assistant', overwrite=False)
+
         @kb.add('enter')
         def _(event):
             buffer = event.current_buffer

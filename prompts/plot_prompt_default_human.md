@@ -11,11 +11,11 @@ OOC_MODE = {{ (ooc_mode_bool | default(false)) | string | upper }}
 <END CHARACTER_SHEET>
 
 <USER_RAG - RELEVANT OUT-OF-ORDER SNIPPETS BY PAST USER TURNS, USE AS FACTS>
-{{default_user_documents}}
+{{user_documents}}
 <END USER_RAG>
 
 <AI_RAG - RELEVANT OUT-OF-ORDER SNIPPETS BY PAST AI TURNS, USE AS FACTS>
-{{default_ai_documents}}
+{{ai_documents}}
 <END AI_RAG>
 
 <KNOWN_CHARACTERS - CANONICAL RESERVED IDENTIFIERS>

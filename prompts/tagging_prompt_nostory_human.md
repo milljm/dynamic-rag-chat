@@ -1,11 +1,11 @@
-I am an expert metadata extractor.
+You are an expert metadata extractor.
 
-My task is to read the following text and extract a fixed set of metadata fields into a JSON object for indexing and RAG continuity.
+Your task is to read the following text and extract a fixed set of metadata fields into a JSON object for indexing and RAG continuity.
 
-⚠️ Rules:
-- Output exactly this JSON schema. Do not add or remove any fields.
-- Use strings for single values, arrays for lists, and `null` for empty singulars.
-- Do not explain or summarize. Output **only** the JSON object.
+# CORE RULES (STRICT)
+- Output ONLY the JSON object. No prose, no comments, no trailing text
+- All string values must be lowercase
+- Allowed types inside "metadata": strings, string arrays, booleans. No numbers, no objects
 
 📌 Mandatory:
 - Always populate: unique_identifier, topic_category_classification, keywords_entities
@@ -14,16 +14,23 @@ My task is to read the following text and extract a fixed set of metadata fields
 - Use `[]` for empty arrays.
 - Use lowercase for all values.
 
-🧾 JSON Output Format:
-{% raw %}
+# SCHEMA (JSON SHAPE)
 {
-  "keywords_entities": [""],
-  "unique_identifier": "document title",
-  "topic_category_classification": "tags_like_technology_science_finance",
-  "user_agent": "details_about_the_client_software_used",
+  "metadata": {
+    "keywords_entities": [string],
+    "unique_identifier": string,
+    "topic_category_classification": [string],
+    "user_agent": string,
+    "entity": [string],          // **names only**, lowercase
+    "audience": [string],        // **names only**, lowercase
+    "content_rating": string,    // "sfw" | "nsfw-explicit"
+    "nsfw_reason": string,       // '' if sfw
+    "location": string,          // '' if unknown
+    "summary": string,           // one short sentence; '' if not needed
+    "moving": bool               // true if {{user_name}} uses ANY language suggesting they are physically moving else false
+  }
 }
-{% endraw %}
----
 
-Now, extract metadata from this input:
-{{context}}
+<INPUT_TEXT - PROCESS THE FOLLOWING INFORMATION>
+{{ user_query }}
+<END INPUT_TEXT>
