@@ -486,9 +486,6 @@ class Chat():
         c_session = PromptSession()
         kb = KeyBindings()
         history = self.session.common.chat_history_session # shorthand
-        if self.opts.assistant_mode and len(history[self.chat_branch]) == 0:
-            self.session.rag.clone_collection('default', 'assistant', overwrite=False)
-
         @kb.add('enter')
         def _(event):
             buffer = event.current_buffer
@@ -570,6 +567,15 @@ class Chat():
                                         console.print(
                                             f'[green]Deleting:[/green] {path}')
                                         shutil.rmtree(path)
+
+                                # Delete Chroma collection corresponding to branch name
+                                c_names = self.session.common.attributes.collections # Shorthand
+                                collection_list = [c_names[x] for x in c_names]
+                                for collection in collection_list:
+                                    if collection == 'gold_documents':
+                                        continue
+                                    self.session.rag.delete_collection(f'{arg}_{collection}')
+
                                 self.session.common.save_chat()
                                 console.print(f"[green]Deleted: [/green]{arg}", highlight=False)
                                 break

@@ -252,6 +252,20 @@ class RAG():
                   'Check for malformed TAGS (no list items is usually the culprit)')
         # pylint: enable=bare-except
 
+    def delete_collection(self, collection: str)->None:
+        """
+        Docstring for delete_collection
+
+        :param self: Description
+        :param collection: Description
+        :type collection: str
+        """
+        src_vs = self._vector_store(collection)
+        # pylint: disable=protected-access
+        client = src_vs._client
+        # pylint: enable=protected-access
+        client.delete_collection(collection)
+
     def clone_collection(self, source: str, target: str, *, overwrite: bool = False) -> None:
         """
         Clone Chroma contents (documents/metadatas/embeddings if present) from `source` -> `target`,
