@@ -252,7 +252,7 @@ class RAG():
                   'Check for malformed TAGS (no list items is usually the culprit)')
         # pylint: enable=bare-except
 
-    def delete_collection(self, collection: str)->None:
+    def delete_collection(self, source: str)->None:
         """
         Docstring for delete_collection
 
@@ -260,11 +260,22 @@ class RAG():
         :param collection: Description
         :type collection: str
         """
-        src_vs = self._vector_store(collection)
-        # pylint: disable=protected-access
-        client = src_vs._client
-        # pylint: enable=protected-access
-        client.delete_collection(collection)
+        collection_list = [self.common.attributes.collections[x]
+                           for x in self.common.attributes.collections]
+        for collection in collection_list:
+            if collection == 'gold_documents':
+                continue
+            f_source = f'{source}_{collection}'
+            if self.opts.debug:
+                self.console.print(f'\nSOURCE COLLECTION >>>{f_source}<<<\n',
+                                    style=f'color({self.opts.color})',
+                                    highlight=False)
+
+            src_vs = self._vector_store(f_source)
+            # pylint: disable=protected-access
+            client = src_vs._client
+            # pylint: enable=protected-access
+            client.delete_collection(f_source)
 
     def clone_collection(self, source: str, target: str, *, overwrite: bool = False) -> None:
         """

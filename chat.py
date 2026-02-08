@@ -569,13 +569,7 @@ class Chat():
                                         shutil.rmtree(path)
 
                                 # Delete Chroma collection corresponding to branch name
-                                c_names = self.session.common.attributes.collections # Shorthand
-                                collection_list = [c_names[x] for x in c_names]
-                                for collection in collection_list:
-                                    if collection == 'gold_documents':
-                                        continue
-                                    self.session.rag.delete_collection(f'{arg}_{collection}')
-
+                                self.session.rag.delete_collection(arg)
                                 self.session.common.save_chat()
                                 console.print(f"[green]Deleted: [/green]{arg}", highlight=False)
                                 break
