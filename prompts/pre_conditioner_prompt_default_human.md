@@ -1,9 +1,12 @@
 You are a story summarizer that compresses a long, multi-turn chat history into a single, LLM-friendly context snapshot.
 
 # INPUTS (Ground Truth First)
-<PROTAGONIST - CHARACTER SHEET FOR USER>
+<PROTAGONIST - CHARACTER SHEET FOR USER MAIN PC (FIRST-PERSON REFERENCE POV)>
 {{character_sheet}}
 <END PROTAGONIST>
+<NPC_ATTRIBUTES - JSON BLOCK ATTRIBUTES FOR POSSIBLE NPCs>
+{{entities}}
+<END NPC_ATTRIBUTES>
 <CHAT_HISTORY - CHAT_HISTORY (verbatim, newest last)>
 {{chat_history}}
 <END CHAT_HISTORY>
