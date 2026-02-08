@@ -557,12 +557,10 @@ class Chat():
                                               "Use '/rewind 1', '/delete-last' instead[/red]")
                                 break
                             if arg == 'default':
-                                console.print("[red]Cannot delete default branch. "
-                                              "Use '/rewind 1', '/delete-last' instead[/red]")
+                                console.print("[red]Cannot delete default branch.[/red]")
                                 break
                             if arg == 'assistant':
-                                console.print("[red]Cannot delete assistant branch. "
-                                              "Use '/rewind 1', '/delete-last' instead[/red]")
+                                console.print("[red]Cannot delete assistant branch.[/red]")
                                 break
                             if arg == branch and arg != 'current':
                                 history.pop(arg)
@@ -753,9 +751,9 @@ def _add_arguments(parser: argparse.ArgumentParser, defaults, *, use_defaults: b
                         ' Midnight Miqu)')
     parser.add_argument('--nsfw-model', metavar='', default=D('nsfw_model'),
                         help='NSFW LLM Model (default: %(default)s)')
-    parser.add_argument('--pre-llm', metavar='', dest='preconditioner',
-                        default=D('preconditioner'),
-                        type=str, help='Summarizer/Tagging Preconditioner LLM (default: %(default)s)')
+    parser.add_argument('--pre-llm', metavar='', dest='preconditioner', default=D('preconditioner'),
+                        type=str, help='Summarizer/Tagging Preconditioner LLM '
+                        '(default: %(default)s)')
     parser.add_argument('--entity-llm', metavar='', dest='entity_llm',
                         default=D('entity_llm'),
                         type=str, help='Entity/Character Sheet LLM (default: %(default)s)')
@@ -779,27 +777,26 @@ def _add_arguments(parser: argparse.ArgumentParser, defaults, *, use_defaults: b
     parser.add_argument('--user-name', metavar='', default=D('user_name'),
                         type=str, help='Your characters name (default: %(default)s)')
     parser.add_argument('--sex', metavar='', default=D('sex'),
-                        type=str, help='Your characters sex (default: %(default)s)')
+                        type=str, help='Your characters sex (helps with pro-nouns)'
+                        ' (default: %(default)s)')
     parser.add_argument('--character-sheet', metavar='', default=D('character_sheet'),
-                        type=str, help='Your characters sex (default: %(default)s)')
+                        type=str, help='Your character sheet (default: %(default)s)')
     parser.add_argument('--time-zone', metavar='', default=D('time_zone'),
                         type=str, help='your assistants name (default: %(default)s)')
-    parser.add_argument('--history-matches', metavar='', dest='matches',
-                        default=D('matches'), type=int,
-                        help='Number of results to pull from each RAG (default: %(default)s)')
-    parser.add_argument('--history-sessions', metavar='', default=D('history_sessions'),
-                        type=int, help='Chat history responses available in context '
-                        '(default: %(default)s)')
-    parser.add_argument('--history-max', metavar='', dest='chat_max', default=D('chat_history'),
-                        type=int, help='Chat history responses to save to disk '
-                        '(default: %(default)s)')
-    parser.add_argument('--completion-tokens', metavar='', dest='completion_tokens',
-                        default=D('completion_tokens'), type=int,
-                        help='The maximum tokens the LLM can respond with (default: %(default)s)')
-    parser.add_argument('--syntax-style', metavar='', dest='syntax_theme',
-                        default=D('syntax_theme'), type=str,
-                        help=('Your desired syntax-highlight theme (default: %(default)s). '
-                              'See https://pygments.org/styles/ for available themes'))
+
+    # Chat History/RAG matches
+    parser.add_argument('--rag-matches', metavar='', dest='matches', default=D('matches'), type=int,
+                        help='Number of results to pull from *each* RAG (there are 3 RAGs)'
+                        ' (default: %(default)s)')
+    parser.add_argument('--history-sessions', metavar='', default=D('history_sessions'), type=int,
+                        help='Chat history responses available in context (overridden by'
+                        ' --one-shot if enabled) (default: %(default)s)')
+    parser.add_argument('--one-shot', action='store_true', default=D('one_shot'),
+                        help='Summarize --history-sessions into single message for one-shot type'
+                        ' LLMs.')
+    parser.add_argument('--one-shot-history', metavar='', default=D('one_shot_history'), type=int,
+                        help='Chat history responses available in context when --one-shot'
+                        ' is enabled (default: %(default)s)')
 
     # imports
     parser.add_argument('--import-pdf', metavar='', type=str,
@@ -821,8 +818,6 @@ def _add_arguments(parser: argparse.ArgumentParser, defaults, *, use_defaults: b
     parser.add_argument('--disable-thinking', action='store_true', default=D('disable_thinking'),
                         help='Do not utilize reasoning, even if the model supports it '
                         '(default: %(default)s)')
-    parser.add_argument('--one-shot', action='store_true', default=D('one_shot'),
-                        help='summarize history for one-shot type LLMs')
     parser.add_argument('--use-rags', action='store_true', default=D('no_rags'),
                         help='Use RAGs regardless of assistant-mode (no effect when not also using '
                         'assistant-mode)')
@@ -833,7 +828,9 @@ def _add_arguments(parser: argparse.ArgumentParser, defaults, *, use_defaults: b
                         'thinking)')
     parser.add_argument('--prompts-debug', action='store_true', default=D('prompts_debug'),
                         help='re-read the prompt files every turn')
-
+    parser.add_argument('--no-think-tag', action='store_true', default=D('no_think_tag'),
+                        help='Use this if your model fails to produce a <think> tag before it'
+                        ' begins reasoning')
 
     parser.add_argument('--temperature', metavar='', type=float, default=D('temperature'),
                         help='Model temperature (default: %(default)s)')
@@ -854,6 +851,14 @@ def _add_arguments(parser: argparse.ArgumentParser, defaults, *, use_defaults: b
                         help=('Does nothing, except to beautify the color map of "context". '
                               'Input here, what your max context window is being set on the server '
                               '(default: %(default)s)'))
+
+    parser.add_argument('--completion-tokens', metavar='', dest='completion_tokens',
+                        default=D('completion_tokens'), type=int,
+                        help='The maximum tokens the LLM can respond with (default: %(default)s)')
+    parser.add_argument('--syntax-style', metavar='', dest='syntax_theme',
+                        default=D('syntax_theme'), type=str,
+                        help=('Your desired syntax-highlight theme (default: %(default)s). '
+                              'See https://pygments.org/styles/ for available themes'))
 
 def parse_args(argv, yaml_opts):
     """Two-stage parse so help shows effective defaults: CLI > YAML > dataclass."""

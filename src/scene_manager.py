@@ -4,8 +4,7 @@ import json
 import re
 from typing import Iterable, Optional, Any, Tuple, List
 from collections import namedtuple
-from .ragtag_manager import RAGTag
-from .chat_utils import CommonUtils, ChatOptions
+from .chat_utils import CommonUtils, ChatOptions, RAGTag
 
 PRONOUNS = {'i', 'you', 'we', 'him', 'her', 'she', 'teller',
             'they', 'user', 'them', 'me', 'reader', 'asker', 'liability'}

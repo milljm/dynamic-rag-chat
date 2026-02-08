@@ -11,6 +11,9 @@ Rules:
 - If a passage is already clear, leave it as-is
 
 Your goal is polishing, not expanding. Think "editor" not "writer."
+<CHARACTER_SHEET - USE FOR FACTS ONLY, WHEN PROCESSING ROUGH_DRAFT. DO NOT USE FOR TONE OR STYLE>
+{{character_sheet}}
+<END CHARACTER_SHEET>
 
 <ROUGH_DRAFT - PROCESS THE FOLLOWING INFORMATION AND MODIFY KEEPING THE SAME LENGTH>
 {{user_query}}

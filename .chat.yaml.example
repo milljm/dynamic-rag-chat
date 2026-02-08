@@ -14,7 +14,7 @@ chat:
   pre_llm: gemma3:1b                      (light-weight LLM, used for metadata tagging)
   embedding_llm: nomic-embed-text         (embeddings for RAG vector database work)
   history_dir:                            /some/writable/path or leave blank for default
-  history_matches: 5                      (how many matches to allow from the RAG: 5 from user's RAG and 5 from AIs)
+  rag_matches: 5                          (how many matches to allow from the RAG: 5 from user's RAG and 5 from AIs)
   history_session: 5                      (how many turns of history to provide. Thats 15 from all sources by default)
   llm_server: https://api.openai.com/v1   (an OpenAI compatible API server address. If using Ollama locally that would be: http://localhost:11434/v1)
   pre_server:                             (the server for which is hosting the pre_llm model. If using Ollama locally that would be: http://localhost:11434/v1)

@@ -50,7 +50,9 @@ class ChatOptions:
     light_mode: bool = False
     prompts_debug: bool = False
     one_shot: bool = False
+    one_shot_history: int = 2
     disable_thinking: bool = False
+    no_think_tag: bool = False
     name: str = 'assistant'
     user_name: str = 'John'
     temperature: float = 0.5
@@ -106,7 +108,7 @@ class ChatOptions:
         'embedding_server':          'emb_host',
         'entity_server':             'entity_host',
         'history_dir':               'vector_dir',
-        'history_matches':           'matches',
+        'rag_matches':               'matches',
         'history_max':               'chat_history',
         'chat_max':                  'chat_history',
         'use_rags':                   'no_rags',

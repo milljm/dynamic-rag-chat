@@ -27,6 +27,7 @@ class StreamState:
     meta_hide_attempt_count: int = 0
     meta_hiding: bool = False
     thinking: bool = False
+    no_think_bug: bool = False
     do_once: bool = False
     pulse_index: int = 0
     pulsing_chars: list[str] = field(default_factory=lambda: ["⠇", "⠋", "⠙", "⠸", "⠴", "⠦"])
@@ -40,6 +41,7 @@ class RenderWindowState:
     disable_thinking: bool
     no_rags: bool
     light_mode: bool
+    no_think_tag: bool
     model: str
     polisher: str
     nsfw_model: str
@@ -198,6 +200,7 @@ class RenderWindow(PromptManager):
             disable_thinking = args.disable_thinking,
             no_rags=args.no_rags,
             light_mode = args.light_mode,
+            no_think_tag = args.no_think_tag,
             model = args.model,
             polisher = args.polisher,
             nsfw_model = args.nsfw_model,
@@ -349,9 +352,10 @@ class RenderWindow(PromptManager):
         """
         stream = self.state.stream
         content = str(chunk.content)
+        # print(f'DEBUG: {stream.thinking} TOK:>{content}<')
 
         # End of <think> block
-        if stream.thinking and '</think>' in content:
+        if stream.thinking and ('</think>' in content or '</thinking>' in content):
             self.common.save_thinking(self.thinking_chunk)
             self.thinking_chunk = ''
             stream.thinking = False
@@ -360,7 +364,10 @@ class RenderWindow(PromptManager):
             return chunk
 
         # Start of <think> block
-        if not stream.thinking and '<think>' in content:
+        if not stream.thinking and ('<think>' in content
+                                    or '<thinking>' in content
+                                    or stream.no_think_bug):
+            stream.no_think_bug = False
             stream.thinking = True
             stream.do_once = True
             self.start_thinking()
@@ -587,6 +594,12 @@ class RenderWindow(PromptManager):
         """ Handle the Rich Live updating process """
         stream = self.state.stream   # shorthand
         context = self.state.context # shorthand
+
+        # pesky LLMs that have reasoning and don't generate a <think> token,
+        # yet generate an ending </think> token!
+        if self.opts.no_think_tag:
+            stream.no_think_bug = True
+
         history = self.common.chat_history_session # shorthand
         messages = self.get_messages(documents)
         token_total = documents['prompt_tokens']
@@ -626,7 +639,9 @@ class RenderWindow(PromptManager):
                     start_time = time.time()
                 current_response += piece.content
                 footer_meta['token_count'] += self.response_count(piece.content)
-                if self.state.polisher == 'None' or documents['user_query'].find('OOC:') != -1:
+                if (self.state.polisher == 'None'
+                     or documents['user_query'].find('OOC:') != -1
+                     or self.opts.assistant_mode):
                     self.renderable.response = self.build_content(current_response)
                 else:
                     self.renderable.response = Text('Receiving message to polish...',
@@ -643,7 +658,9 @@ class RenderWindow(PromptManager):
                 self.render_chat(live)
 
             # Second Pass (polisher)
-            if self.state.polisher != 'None' and documents['user_query'].find('OOC:') == -1:
+            if (self.state.polisher != 'None'
+                and documents['user_query'].find('OOC:') == -1
+                and not self.opts.assistant_mode):
                 self.renderable.response = Text('Inference/Loading Polisher...',
                                                 style=f'color({color}')
                 self.render_chat(live)

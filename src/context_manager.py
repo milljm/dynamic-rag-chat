@@ -64,21 +64,39 @@ class ContextManager(PromptManager):
 
     # pylint: enable=too-many-positional-arguments,too-many-arguments
     def deduplication(self, base_reference: list[str],
-                            response_list: list[str],
-                            threshold: float = 0.92) -> list[str]:
+                            response_list: list[str]) -> list[str]:
         """
-        Deduplicate response_list using semantic similarity against base_reference.
+        Deduplicate response_list by checking for overlap containment.
         Returns cleaned RAG chunks.
         """
-        def is_similar(a: str, b: str) -> bool:
-            return SequenceMatcher(None,
-                                   a.lower().strip(),
-                                   b.lower().strip()).ratio() > threshold
+        def is_overlap_duplicate(a: str, b: str) -> bool:
+            """Checks if one string is mostly contained within the other."""
+            # Ensure we're always checking the shorter string against the longer one
+            s, l = (a, b) if len(a) < len(b) else (b, a)
+
+            # If the shorter string is empty or whitespace, it's not a duplicate
+            if not s.strip():
+                return False
+
+            matcher = SequenceMatcher(None, s, l)
+            # Find the longest common block of text
+            match = matcher.find_longest_match(0, len(s), 0, len(l))
+
+            # What percentage of the SHORTER string is this match?
+            # If it's very high, one chunk is likely just an overlap of the other.
+            containment_ratio = match.size / len(s)
+
+            # You can tune this threshold. 0.85 means 85% of the shorter
+            # chunk must be identical to a block in the longer one.
+            return containment_ratio > 0.65
+
         cleaned_chunks = []
         for chunk in response_list:
-            if any(is_similar(chunk, base) for base in base_reference):
+            # Check against the original reference (base_reference)
+            if any(is_overlap_duplicate(chunk, base) for base in base_reference):
                 continue
-            if any(is_similar(chunk, prior) for prior in cleaned_chunks):
+            # Check against what we've already kept (cleaned_chunks)
+            if any(is_overlap_duplicate(chunk, prior) for prior in cleaned_chunks):
                 continue
             cleaned_chunks.append(chunk)
         return cleaned_chunks
@@ -201,15 +219,13 @@ class ContextManager(PromptManager):
             self.scene.finalize_turn(response)
             self.scene.save_scene()
 
-        collections = self.common.attributes.collections  # short hand
         # protect against empty or gold RAG (read-only) collections
-        if not collection or collection == collections['gold']:
-            collection = collections['ai']
         if self.opts.assistant_mode:
             branch = 'assistant'
         else:
             branch = history.get('current', 'default')
         collection = f'{branch}_{collection}'
+
         # list_rag_tags: list[RAGTag] = self.common.get_tags(response)
         if not self.opts.assistant_mode:
             self.scene.ground_scene(list_rag_tags, response)
@@ -449,7 +465,7 @@ class ContextManager(PromptManager):
         return ''
 
     def summarize_history(self, documents)->list:
-        """ return last 4 unmolested turns plus a summarization of story """
+        """ return last 2 unmolested turns plus a summarization of story """
         prompts = self.prompts
         summarizing = {'chat_history'    : documents['chat_history'],
                        'character_sheet' : documents['character_sheet'],
@@ -469,9 +485,8 @@ class ContextManager(PromptManager):
                                 style=f'color({self.opts.color})', highlight=False)
         try:
             content = self.pre_llm.invoke(prompt).content
-            return ['BEGIN: CHAT_HISTORY: chronological (newest last):\n',
-                    *documents['chat_history'][-2:],
-                    'END: CHAT_HISTORY\n\n<STORY_SUMMARY - THE STORY SUMMARIZED THUS FAR>'
+            return [*documents['chat_history'][-self.opts.one_shot_history:],
+                    '\n\n<STORY_SUMMARY - THE STORY SUMMARIZED THUS FAR>'
                     f'\n{content}<END STORY_SUMMARY>', ]
         except APITimeoutError:
             self.console.print('PRE-PROCESSOR PROMPT API ERROR\n',
@@ -517,7 +532,7 @@ class ContextManager(PromptManager):
                            self.scene.get_scene().get('known_characters', [])
                        )
 
-            if self.opts.one_shot and len(documents['chat_history']) > 1:
+            if self.opts.one_shot and len(documents['chat_history']) >= self.opts.one_shot_history:
                 documents['chat_history'] = self.summarize_history(documents)
                 if self.debug:
                     self.console.print(f'SUMMARIZED:\n{documents["chat_history"]}\n\n',
