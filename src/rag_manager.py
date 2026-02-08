@@ -261,64 +261,78 @@ class RAG():
             raise ValueError("clone_collection: source/target must be different, non-empty names.")
 
         # Vector stores
-        src_vs = self._vector_store(source)
-        dst_vs = self._vector_store(target)
-        # pylint: disable=protected-access
-        src_col = src_vs._collection
-        dst_col = dst_vs._collection
-        # pylint: enable=protected-access
+        collection_list = [self.common.attributes.collections[x]
+                           for x in self.common.attributes.collections]
+        for collection in collection_list:
+            if collection == 'gold_documents':
+                continue
+            f_source = f'{source}_{collection}'
+            f_target = f'{target}_{collection}'
+            if self.opts.debug:
+                self.console.print(f'\nSOURCE COLLECTION >>>{source}_{collection}<<<\n'
+                                    f'TARGET COLLECTION: >>>{target}_{collection}<<<',
+                                    style=f'color({self.opts.color})',
+                                    highlight=False)
 
-        # Optionally clear target before cloning
-        if overwrite:
+            src_vs = self._vector_store(f_source)
+            dst_vs = self._vector_store(f_target)
+            # pylint: disable=protected-access
+            src_col = src_vs._collection
+            dst_col = dst_vs._collection
+            # pylint: enable=protected-access
+
+            # Optionally clear f_target before cloning
+            if overwrite:
+                try:
+                    existing = dst_col.get()  # returns {"ids":[...], ...}
+                    ids = existing.get("ids") or []
+                    if ids:
+                        dst_col.delete(ids=ids)
+                except (ValueError, RuntimeError, OSError):
+                    pass
+
+            # Pull everything from f_source (Chroma returns ids even if not requested)
             try:
-                existing = dst_col.get()  # returns {"ids":[...], ...}
-                ids = existing.get("ids") or []
+                payload = src_col.get(include=["documents", "metadatas", "embeddings"])
+            except (ValueError, RuntimeError, OSError) as e:
+                raise RuntimeError(f"Failed to read f_source collection '{f_source}': {e}") from e
+
+            ids   = payload.get("ids") or []
+            docs  = payload.get("documents") or [None] * len(ids)
+            metas = payload.get("metadatas") or [{} for _ in ids]
+            embs  = payload.get("embeddings")  # may be None if an embedding function is used
+
+            # Re-id for f_target (safe even if collections are separate)
+            new_ids = [f"{f_target}_{i}_{uuid4().hex}" for i, _ in enumerate(ids)]
+            try:
                 if ids:
-                    dst_col.delete(ids=ids)
-            except (ValueError, RuntimeError, OSError):
-                pass
+                    if embs is not None:
+                        dst_col.add(ids=new_ids, documents=docs, metadatas=metas, embeddings=embs)
+                    else:
+                        dst_col.add(ids=new_ids, documents=docs, metadatas=metas)
+            except (ValueError, RuntimeError, OSError) as e:
+                raise RuntimeError(f"Failed to write f_target collection '{f_target}': {e}") from e
 
-        # Pull everything from source (Chroma returns ids even if not requested)
-        try:
-            payload = src_col.get(include=["documents", "metadatas", "embeddings"])
-        except (ValueError, RuntimeError, OSError) as e:
-            raise RuntimeError(f"Failed to read source collection '{source}': {e}") from e
-
-        ids   = payload.get("ids") or []
-        docs  = payload.get("documents") or [None] * len(ids)
-        metas = payload.get("metadatas") or [{} for _ in ids]
-        embs  = payload.get("embeddings")  # may be None if an embedding function is used
-
-        # Re-id for target (safe even if collections are separate)
-        new_ids = [f"{target}_{i}_{uuid4().hex}" for i, _ in enumerate(ids)]
-        try:
-            if ids:
-                if embs is not None:
-                    dst_col.add(ids=new_ids, documents=docs, metadatas=metas, embeddings=embs)
+            # Clone docstore directory used by ParentDocumentRetriever
+            src_store_dir = os.path.join(self.opts.vector_dir, f_source)
+            dst_store_dir = os.path.join(self.opts.vector_dir, f_target)
+            try:
+                if os.path.exists(dst_store_dir):
+                    if overwrite:
+                        shutil.rmtree(dst_store_dir)
+                    # if not overwriting, keep existing contents and merge
+                if os.path.exists(src_store_dir):
+                    shutil.copytree(src_store_dir, dst_store_dir, dirs_exist_ok=True)
                 else:
-                    dst_col.add(ids=new_ids, documents=docs, metadatas=metas)
-        except (ValueError, RuntimeError, OSError) as e:
-            raise RuntimeError(f"Failed to write target collection '{target}': {e}") from e
+                    os.makedirs(dst_store_dir, exist_ok=True)  # ensure f_target exists
+            except (OSError, PermissionError) as e:
+                raise RuntimeError(f"Failed cloning docstore '{src_store_dir}' -> "
+                                f"'{dst_store_dir}': {e}") from e
 
-        # Clone docstore directory used by ParentDocumentRetriever
-        src_store_dir = os.path.join(self.opts.vector_dir, source)
-        dst_store_dir = os.path.join(self.opts.vector_dir, target)
-        try:
-            if os.path.exists(dst_store_dir):
-                if overwrite:
-                    shutil.rmtree(dst_store_dir)
-                # if not overwriting, keep existing contents and merge
-            if os.path.exists(src_store_dir):
-                shutil.copytree(src_store_dir, dst_store_dir, dirs_exist_ok=True)
-            else:
-                os.makedirs(dst_store_dir, exist_ok=True)  # ensure target exists
-        except (OSError, PermissionError) as e:
-            raise RuntimeError(f"Failed cloning docstore '{src_store_dir}' -> "
-                               f"'{dst_store_dir}': {e}") from e
-
-        if getattr(self.opts, "debug", False):
-            self.console.print(f"[green]Cloned RAG collection[/green] '{source}' ➜ '{target}'",
-                                highlight=False)
+            if getattr(self.opts, "debug", False):
+                self.console.print(f"[green]Cloned RAG collection[/green] '{f_source}' "
+                                   f"➜ '{f_target}'",
+                                    highlight=False)
 
 
     def build_collection_from_texts(self,
@@ -330,56 +344,67 @@ class RAG():
         """
         if not target:
             raise ValueError("build_collection_from_texts: target name cannot be empty.")
+        collection_list = [self.common.attributes.collections[x]
+                           for x in self.common.attributes.collections]
+        for collection in collection_list:
+            if collection == 'gold_documents':
+                continue
+            if self.opts.debug:
+                self.console.print(f'TARGET COLLECTION: >>>{target}_{collection}<<<',
+                                   style=f'color({self.opts.color})',
+                                   highlight=False)
+            f_target = f'{target}_{collection}'
+            vs = self._vector_store(f_target)
+            # pylint: disable=protected-access
+            col = vs._collection
+            # pylint: enable=protected-access
 
-        vs = self._vector_store(target)
-        # pylint: disable=protected-access
-        col = vs._collection
-        # pylint: enable=protected-access
+            # Clear f_target collection (ids are always returned with .get())
+            if overwrite:
+                try:
+                    existing = col.get()
+                    old_ids = existing.get("ids") or []
+                    if old_ids:
+                        col.delete(ids=old_ids)
+                except (ValueError, RuntimeError, OSError):
+                    pass
 
-        # Clear target collection (ids are always returned with .get())
-        if overwrite:
+            # Reset docstore path
+            store_dir = os.path.join(self.opts.vector_dir, f_target)
             try:
-                existing = col.get()
-                old_ids = existing.get("ids") or []
-                if old_ids:
-                    col.delete(ids=old_ids)
-            except (ValueError, RuntimeError, OSError):
-                pass
-
-        # Reset docstore path
-        store_dir = os.path.join(self.opts.vector_dir, target)
-        try:
-            if overwrite and os.path.exists(store_dir):
-                shutil.rmtree(store_dir)
-            os.makedirs(store_dir, exist_ok=True)
-        except (OSError, PermissionError) as e:
-            raise RuntimeError(f"Failed to prepare docstore '{store_dir}': {e}") from e
-
-        # Add texts
-        ids, docs, metas = [], [], []
-        for i, text in enumerate(texts, start=1):
-            doc_id = f"{target}_{i}_{uuid4().hex}"
-            ids.append(doc_id)
-            docs.append(text)
-            metas.append({"turn": i})
-            # (optional) persist each turn into the docstore for ParentDocumentRetriever parity
-            try:
-                with open(os.path.join(store_dir,
-                                       f"{i:05d}_{doc_id}.txt"),
-                                       "w", encoding="utf-8") as f:
-                    f.write(text)
+                if overwrite and os.path.exists(store_dir):
+                    shutil.rmtree(store_dir)
+                os.makedirs(store_dir, exist_ok=True)
             except (OSError, PermissionError) as e:
-                raise RuntimeError(f"Failed writing turn {i} to docstore '{store_dir}': {e}") from e
+                raise RuntimeError(f"Failed to prepare docstore '{store_dir}': {e}") from e
 
-        if ids:
-            try:
-                # Let Chroma embed via the collection's embedding function; don't pass embeddings.
-                col.add(ids=ids, documents=docs, metadatas=metas)
-            except (ValueError, RuntimeError, OSError) as e:
-                raise RuntimeError(f"Failed adding documents to '{target}': {e}") from e
+            # Add texts
+            ids, docs, metas = [], [], []
+            for i, text in enumerate(texts, start=1):
+                doc_id = f"{f_target}_{i}_{uuid4().hex}"
+                ids.append(doc_id)
+                docs.append(text)
+                metas.append({"turn": i})
+                # (optional) persist each turn into the docstore for ParentDocumentRetriever parity
+                try:
+                    with open(os.path.join(store_dir,
+                                        f"{i:05d}_{doc_id}.txt"),
+                                        "w", encoding="utf-8") as f:
+                        f.write(text)
+                except (OSError, PermissionError) as e:
+                    raise RuntimeError(f"Failed writing turn {i} to "
+                                       f"docstore '{store_dir}': {e}") from e
 
-        if getattr(self.opts, "debug", False):
-            self.console.print(
-                f"[green]Built RAG collection '{target}' from {len(texts)} texts.[/green]",
-                highlight=False
-            )
+            if ids:
+                try:
+                    # Let Chroma embed via the collection's embedding
+                    # function; don't pass embeddings.
+                    col.add(ids=ids, documents=docs, metadatas=metas)
+                except (ValueError, RuntimeError, OSError) as e:
+                    raise RuntimeError(f"Failed adding documents to '{f_target}': {e}") from e
+
+            if getattr(self.opts, "debug", False):
+                self.console.print(
+                    f"[green]Built RAG collection '{f_target}' from {len(texts)} texts.[/green]",
+                    highlight=False
+                )

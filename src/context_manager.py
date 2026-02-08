@@ -193,6 +193,8 @@ class ContextManager(PromptManager):
         """
         # Handle Scene State
         history = documents['history'] # shorthand
+        if not collection:
+            collection = self.common.attributes.collections['ai']
 
         # Swap rolls, feeding the LLM's response back at the pre-processor for tagging
         response = documents['llm_response']
