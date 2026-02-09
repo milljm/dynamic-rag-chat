@@ -28,14 +28,12 @@ import sys
 import time
 import base64
 import argparse
-import datetime
 import mimetypes
 import shutil
 import glob
 from dataclasses import dataclass, asdict
 from copy import deepcopy
 from typing import Dict, Any, List, Optional
-import pytz
 import requests
 from rich.console import Console
 from rich.theme import Theme
@@ -72,6 +70,7 @@ HELP_TEXT = (
     "\t\\dbranch NAME                - delete chat history branch\n"
     "\t\\seed N                      - set RNG seed (or omit to clear)\n"
     "\t\\history [N]                 - show last N user inputs (default 5)\n"
+    "\t\\include branch              - include branch as attachment\n"
     "\n[bold]context injection[/bold]\n"
     "    {{/absolute/path/to/file}}       - include a file as context\n"
     "    {{https://somewebsite.com/}}     - include URL as context\n"
@@ -242,16 +241,6 @@ class Chat():
         return ''
 
     @staticmethod
-    def get_time(tzone: str)->str:
-        """ return the time """
-        mdt_timezone = pytz.timezone(tzone)
-        my_time = datetime.datetime.now(mdt_timezone)
-        _str_fmt = (f'{my_time.year}-{my_time.month}-{my_time.day}'
-                   f':{my_time.hour}:{my_time.minute}:{my_time.second}'
-                   f' {"AM" if my_time.hour < 12 else "PM"}')
-        return _str_fmt
-
-    @staticmethod
     def set_lightmode_aware(light: bool)->str:
         """ inject a light-mode aware prompt command """
         if light:
@@ -301,7 +290,9 @@ class Chat():
         documents.update(
             {'user_query'         : user_input,
              'dynamic_files'      : '',
+             'include_branch'     : '',
              'dynamic_images'     : [],
+             'turn_num'           : len(history[self.chat_branch])+1,
              'history_sessions'   : self.opts.history_sessions,
              'name'               : self.opts.name,
              'user_name'          : self.opts.user_name,
@@ -310,7 +301,7 @@ class Chat():
              'possessive_adj'     : 'his' if self.opts.sex == 'male' else 'her',
              'possessive_pronoun' : 'his' if self.opts.sex == 'male' else 'hers',
              'character_sheet'    : self.get_character_sheet(),
-             'date_time'          : self.get_time(self.opts.time_zone),
+             'date_time'          : self.session.common.get_time(self.opts.time_zone),
              'pre_process_time'   : pre_process_time,
              'light_mode'         : self.set_lightmode_aware(self.opts.light_mode),
              'previous'           : previous,
@@ -447,6 +438,7 @@ class Chat():
         """ perform search without any context involved """
         prompt_tokens = self.session.context.token_retriever(user_input) # short hand
         collections = self.session.common.attributes.collections # short hand
+        history = self.session.common.chat_history_session # shorthand
         self.session.common.heat_map = self.session.common.create_heatmap(prompt_tokens,
                                                             reverse=True)
         cleaned_color = [v for k,v in
@@ -459,7 +451,9 @@ class Chat():
                      'chat_history'             : '',
                      'previous'                 : '',
                      'dynamic_files'            : '',
+                     'include_branch'           : '',
                      'dynamic_images'           : [],
+                     'turn_num'                 : len(history[self.chat_branch])+1,
                      'history_sessions'         : self.opts.history_sessions,
                      collections['ai']          : '',
                      collections['user']        : '',
@@ -468,7 +462,7 @@ class Chat():
                      'context'                  : '',
                      'explicit'                 : False,
                      'additional_content'       : '',
-                     'date_time'                : self.get_time(self.opts.time_zone),
+                     'date_time'                : self.session.common.get_time(self.opts.time_zone),
                      'completion_tokens'        : self.opts.completion_tokens,
                      'pre_process_time'         : '{:.1f}s'.format(0),
                      'performance'              : '',
@@ -506,7 +500,6 @@ class Chat():
                 if raw == r'\?':
                     console.print(HELP_TEXT)
                     continue
-
                 parsed = parse_user_input(raw)
 
                 # Global commands that do not call the model:
@@ -588,7 +581,8 @@ class Chat():
                                 preview = ""
                                 if count > 0:
                                     last = history[name][-1].replace("\n", " ")
-                                    preview = last[:40] + ("…" if len(last) > 40 else "")
+                                    user = last.find('USER:')
+                                    preview = last[user:40+user] + ("…" if len(last) > 40 else "")
                                     preview = f"[dim]{preview}[/dim]"  # <= dim effect
 
                                 if name == self.chat_branch:
@@ -688,12 +682,17 @@ class Chat():
                         turns = history[self.chat_branch][-n:]
                         total = len(history[self.chat_branch])
                         start = total - len(turns)
-                        for i, v in enumerate(turns, start=start+1):
-                            print(f'\n\n⬇ TURN {i} ⬇\n{v}')
+                        for _, v in enumerate(turns, start=start+1):
+                            print(f'\n\n{v}')
                         continue
-                    elif cmd == "no-context":
+                    elif cmd == "no-context" or cmd == "include":
+                        if not self.opts.assistant_mode:
+                            console.print("[red]Only available while in assistant mode.[/red]")
+                            continue
                         # fall-thru to model call but bypass normal context build
+                        # pylint: disable=unnecessary-pass
                         pass
+                        # pylint: enable=unnecessary-pass
                     else:
                         console.print(f"[red]Unknown command:[/red] \\{cmd}")
                         continue
@@ -710,6 +709,15 @@ class Chat():
                 else:
                     user_payload = parsed.clean_text
                     documents = self.get_documents(user_payload)
+
+                if parsed.command == "include":
+                    val = parsed.args
+                    if val in history:
+                        include_branch = ' '.join(history[val][-self.opts.history_sessions:])
+                    else:
+                        console.print(f"[red]Unknown branch[/red] \\{val}")
+                        continue
+                    documents['include_branch'] = str(include_branch)
 
                 # Add any inline includes as context (files/URLs)
                 if parsed.includes:

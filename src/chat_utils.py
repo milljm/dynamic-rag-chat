@@ -5,6 +5,8 @@ import re
 import sys
 import pickle
 import json
+import datetime
+import pytz
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping, Optional
@@ -436,3 +438,14 @@ class CommonUtils():
         with open(os.path.join(self.opts.vector_dir, f'{sanitized}_debug.log'),
                   'w', encoding='utf-8') as f:
             f.write(str(message))
+
+    @staticmethod
+    def get_time(tzone: str)->str:
+        """ return the time """
+        mdt_timezone = pytz.timezone(tzone)
+        my_time = datetime.datetime.now(mdt_timezone)
+        _str_fmt = (f'{my_time.year}-{my_time.month}-{my_time.day}'
+                   f':{my_time.hour}:{my_time.minute}:{my_time.second}'
+                   f' {"AM" if my_time.hour < 12 else "PM"}')
+        return _str_fmt
+

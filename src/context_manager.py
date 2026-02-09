@@ -487,9 +487,14 @@ class ContextManager(PromptManager):
                                 style=f'color({self.opts.color})', highlight=False)
         try:
             content = self.pre_llm.invoke(prompt).content
-            return [*documents['chat_history'][-self.opts.one_shot_history:],
-                    '\n\n<STORY_SUMMARY - THE STORY SUMMARIZED THUS FAR>'
-                    f'\n{content}<END STORY_SUMMARY>', ]
+            if self.opts.assistant_mode:
+                return [*documents['chat_history'][-self.opts.one_shot_history:],
+                        '\n\n<CHAT_HISTORY_SUMMARY - THE HISTORY SUMMARIZED THUS FAR>'
+                        f'\n{content}<END CHAT_HISTORY_SUMMARY>', ]
+            else:
+                return [*documents['chat_history'][-self.opts.one_shot_history:],
+                        '\n\n<STORY_SUMMARY - THE STORY SUMMARIZED THUS FAR>'
+                        f'\n{content}<END STORY_SUMMARY>', ]
         except APITimeoutError:
             self.console.print('PRE-PROCESSOR PROMPT API ERROR\n',
                                 style=f'color({self.opts.color})', highlight=False)

@@ -723,7 +723,9 @@ class RenderWindow(PromptManager):
         else:
             branch = history.get('current', 'default')
         history[branch].append(
-            f'\nUSER: {documents["user_query"]}\n\n'
+            f'\n⬇  TURN {len(history[branch])+1}  ⬇\n'
+            f'TIMESTAMP: {self.common.get_time(self.opts.time_zone)}\n'
+            f'USER: {documents["user_query"]}\n\n'
             f'AI: {current_response}')
         self.common.save_chat()
 
