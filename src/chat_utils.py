@@ -183,7 +183,9 @@ class CommonUtils():
                 sys.exit(1)
 
         # Session's Chat History dictionary
-        self.chat_history_session = {}
+        self.chat_history_session = {'default': [],
+                                    'assistant': [],
+                                    'current': 'default'}
         self.chat_history_session = self.load_chat()
 
         # Heat Map
@@ -368,13 +370,10 @@ class CommonUtils():
 
     def load_chat(self)->dict:
         """ Persist chat history (load) """
-        loaded_dict = {'default': [],
-                       'assistant': [],
-                       'current': 'default'}
         history_file = os.path.join(self.opts.vector_dir, 'chat_history.pkl')
         try:
             with open(history_file, "rb") as f:
-                loaded_dict = pickle.load(f)
+                self.chat_history_session = pickle.load(f)
         except FileNotFoundError:
             pass
         except pickle.UnpicklingError as e:
@@ -383,7 +382,7 @@ class CommonUtils():
         # pylint: disable=broad-exception-caught  # so many ways to fail, catch them all
         except Exception as e:
             print(f'Warning: Error loading chat: {e}')
-        return loaded_dict
+        return self.chat_history_session
 
     def save_thinking(self, thinking_str: str)->None:
         """ Save Thinking """

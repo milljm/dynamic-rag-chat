@@ -286,7 +286,7 @@ class Chat():
         """
         documents = dict()
         pre_process_time = time.time()
-        history = self.session.common.chat_history_session  # shorthand
+        history = self.session.common.chat_history_session # shorthand
         previous = history[self.chat_branch][-2:-1:]
         documents.update(
             {'user_query'         : user_input,
@@ -480,7 +480,6 @@ class Chat():
         """ Prompt the User for questions, and begin! """
         c_session = PromptSession()
         kb = KeyBindings()
-        history = self.session.common.chat_history_session # shorthand
         @kb.add('enter')
         def _(event):
             buffer = event.current_buffer
@@ -501,8 +500,10 @@ class Chat():
                 if raw == r'\?':
                     console.print(HELP_TEXT)
                     continue
+                self.session.common.load_chat()
+                history = self.session.common.chat_history_session # shorthand
                 parsed = parse_user_input(raw)
-
+                self.session.common.load_chat()
                 # Global commands that do not call the model:
                 if parsed.command:
                     cmd, arg = parsed.command, parsed.args
@@ -698,7 +699,7 @@ class Chat():
                         for _, v in enumerate(turns, start=start+1):
                             print(f'\n\n{v}')
                         continue
-                    elif cmd == "no-context" or cmd == "include":
+                    elif cmd in ("no-context", "include"):
                         if not self.opts.assistant_mode:
                             console.print("[red]Only available while in assistant mode.[/red]")
                             continue
