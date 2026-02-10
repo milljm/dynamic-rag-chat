@@ -71,6 +71,7 @@ HELP_TEXT = (
     "\t\\seed N                      - set RNG seed (or omit to clear)\n"
     "\t\\history [N]                 - show last N user inputs (default 5)\n"
     "\t\\include branch              - include branch as attachment\n"
+    "\t\\reset                       - resets history/RAG for current branch\n"
     "\n[bold]context injection[/bold]\n"
     "    {{/absolute/path/to/file}}       - include a file as context\n"
     "    {{https://somewebsite.com/}}     - include URL as context\n"
@@ -544,7 +545,7 @@ class Chat():
                                 continue
                             if arg == self.chat_branch:
                                 console.print("[red]Cannot delete current branch you are on. "
-                                              "Use '/rewind 1', '/delete-last' instead[/red]")
+                                              "Use '/reset' instead")
                                 break
                             if arg == 'default':
                                 console.print("[red]Cannot delete default branch.[/red]")
@@ -566,6 +567,18 @@ class Chat():
                                 self.session.common.save_chat()
                                 console.print(f"[green]Deleted: [/green]{arg}", highlight=False)
                                 break
+                        continue
+                    elif cmd == "reset":
+                        self.session.rag.delete_collection(self.chat_branch)
+                        history[self.chat_branch] = []
+                        for path in glob.glob(
+                            f'{self.opts.vector_dir}{os.path.sep}{self.chat_branch}*'):
+                            if os.path.isdir(path):
+                                console.print(f'[green]Deleting:[/green] {path}')
+                                shutil.rmtree(path)
+                        console.print(f"[green]Reset: [/green]{self.chat_branch}",
+                                      highlight=False)
+                        self.session.common.save_chat()
                         continue
                     elif cmd == "branch":
                         if not arg:
