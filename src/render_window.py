@@ -600,7 +600,7 @@ class RenderWindow(PromptManager):
         if self.opts.no_think_tag:
             stream.no_think_bug = True
 
-        history = self.common.chat_history_session # shorthand
+        history = self.common.load_chat()
         messages = self.get_messages(documents)
         token_total = documents['prompt_tokens']
         for message in messages:
@@ -718,16 +718,13 @@ class RenderWindow(PromptManager):
 
         if self.state.disable_thinking:
             documents["user_query"] = documents["user_query"].replace('</think>', '')
-        if self.opts.assistant_mode:
-            branch = 'assistant'
-        else:
-            branch = history.get('current', 'default')
+
         history[branch].append(
             f'\n⬇  TURN {len(history[branch])+1}  ⬇\n'
             f'TIMESTAMP: {self.common.get_time(self.opts.time_zone)}\n'
             f'USER: {documents["user_query"]}\n\n'
             f'AI: {current_response}')
-        self.common.save_chat()
+        self.common.save_chat(history)
 
         if self.debug:
             self.console.print('DEBUG: live finished',

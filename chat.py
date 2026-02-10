@@ -208,7 +208,7 @@ class Chat():
         if _args.assistant_mode:
             self.chat_branch = 'assistant'
         else:
-            self.chat_branch = self.session.common.chat_history_session['current']
+            self.chat_branch = self.session.common.load_chat()['current']
         self._initialize_startup_tasks()
 
     def _initialize_startup_tasks(self):
@@ -286,7 +286,7 @@ class Chat():
         """
         documents = dict()
         pre_process_time = time.time()
-        history = self.session.common.chat_history_session # shorthand
+        history = self.session.common.load_chat()
         previous = history[self.chat_branch][-2:-1:]
         documents.update(
             {'user_query'         : user_input,
@@ -369,7 +369,7 @@ class Chat():
                 if icon == "🖼️":  # Image
                     documents['dynamic_images'].append(data)
                 else:
-                    documents['dynamic_files'] += f'{data}\n\n'
+                    documents['dynamic_files'] += f'\n=== {_file} ===\n{data}\n\n'
 
             else:
                 documents['user_query'] = documents['user_query'].replace(included_file,
@@ -439,7 +439,7 @@ class Chat():
         """ perform search without any context involved """
         prompt_tokens = self.session.context.token_retriever(user_input) # short hand
         collections = self.session.common.attributes.collections # short hand
-        history = self.session.common.chat_history_session # shorthand
+        history = self.session.common.load_chat()
         self.session.common.heat_map = self.session.common.create_heatmap(prompt_tokens,
                                                             reverse=True)
         cleaned_color = [v for k,v in
@@ -500,17 +500,15 @@ class Chat():
                 if raw == r'\?':
                     console.print(HELP_TEXT)
                     continue
-                self.session.common.load_chat()
-                history = self.session.common.chat_history_session # shorthand
+                history = self.session.common.load_chat()
                 parsed = parse_user_input(raw)
-                self.session.common.load_chat()
                 # Global commands that do not call the model:
                 if parsed.command:
                     cmd, arg = parsed.command, parsed.args
                     if cmd == "delete-last":
                         try:
                             _ = history[self.chat_branch].pop()
-                            self.session.common.save_chat()
+                            self.session.common.save_chat(history)
                             self.session.renderer.clear_ooc()
                             console.print("[green]Deleted last.[/green]", highlight=False)
                         except IndexError:
@@ -529,7 +527,7 @@ class Chat():
                                 continue
                             # keep the first n turns (1-based absolute index)
                             history[self.chat_branch] = cur[:n]
-                            self.session.common.save_chat()
+                            self.session.common.save_chat(history)
                             console.print(f"[green]Rewound to turn {n} of {total}.[/green]",
                                            highlight=False)
 
@@ -565,7 +563,7 @@ class Chat():
 
                                 # Delete Chroma collection corresponding to branch name
                                 self.session.rag.delete_collection(arg)
-                                self.session.common.save_chat()
+                                self.session.common.save_chat(history)
                                 console.print(f"[green]Deleted: [/green]{arg}", highlight=False)
                                 break
                         continue
@@ -579,7 +577,7 @@ class Chat():
                                 shutil.rmtree(path)
                         console.print(f"[green]Reset: [/green]{self.chat_branch}",
                                       highlight=False)
-                        self.session.common.save_chat()
+                        self.session.common.save_chat(history)
                         continue
                     elif cmd == "branch":
                         if not arg:
@@ -643,7 +641,7 @@ class Chat():
                                 history['current'] = name
                                 console.print(f"[green]Switched to :[/green] {name}",
                                                highlight=False)
-                            self.session.common.save_chat()
+                            self.session.common.save_chat(history)
                             continue
 
                         # create new branch from current
@@ -654,7 +652,7 @@ class Chat():
                         history[name] = new_list
                         history['current'] = name
                         self.chat_branch = name
-                        self.session.common.save_chat()
+                        self.session.common.save_chat(history)
                         self.session.renderer.clear_ooc()
                         # ---------------- RAG sync for the new branch ----------------
                         try:

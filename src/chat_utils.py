@@ -354,7 +354,7 @@ class CommonUtils():
             heat[x] = colors[i]
         return heat
 
-    def save_chat(self)->None:
+    def save_chat(self, history)->None:
         """ Persist chat history (save) """
         if self.opts.continue_from != -1:
             if self.opts.debug:
@@ -364,7 +364,7 @@ class CommonUtils():
         history_file = os.path.join(self.opts.vector_dir, 'chat_history.pkl')
         try:
             with open(history_file, "wb") as f:
-                pickle.dump(self.chat_history_session, f)
+                pickle.dump(history, f)
         except FileNotFoundError as e:
             print(f'Error saving chat. Check --history-dir\n{e}')
 
