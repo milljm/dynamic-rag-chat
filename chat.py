@@ -539,6 +539,9 @@ class Chat():
                             console.print("[red]usage: \\rewind N[/red]")
                         continue
                     elif cmd == "dbranch":
+                        if self.opts.assistant_mode:
+                            console.print("[red]Cannot manage branches in assistant mode[/red]")
+                            continue
                         for branch in history.keys():
                             if branch == 'current':
                                 continue
@@ -769,6 +772,9 @@ def _add_arguments(parser: argparse.ArgumentParser, defaults, *, use_defaults: b
                         help='Polisher LLM Model (default: %(default)s)'
                         ' (optional, used to "polish" the final output, with something like'
                         ' Midnight Miqu)')
+    parser.add_argument('--polisher-cnt', metavar='', default=D('polisher_cnt'),
+                        help='The number passes to polish final content (default: %(default)s)'
+                        ' Warning: Models tend to ballon out of proportions. Start low.')
     parser.add_argument('--nsfw-model', metavar='', default=D('nsfw_model'),
                         help='NSFW LLM Model (default: %(default)s)')
     parser.add_argument('--pre-llm', metavar='', dest='preconditioner', default=D('preconditioner'),

@@ -53,6 +53,7 @@ class ChatOptions:
     prompts_debug: bool = False
     one_shot: bool = False
     one_shot_history: int = 2
+    polisher_cnt: int = 1
     disable_thinking: bool = False
     no_think_tag: bool = False
     name: str = 'assistant'

@@ -44,6 +44,7 @@ class RenderWindowState:
     no_think_tag: bool
     model: str
     polisher: str
+    polisher_cnt: int
     nsfw_model: str
     host: str
     api_key: str
@@ -203,6 +204,7 @@ class RenderWindow(PromptManager):
             no_think_tag = args.no_think_tag,
             model = args.model,
             polisher = args.polisher,
+            polisher_cnt = args.polisher_cnt,
             nsfw_model = args.nsfw_model,
             host = args.host,
             api_key = args.api_key,
@@ -657,28 +659,36 @@ class RenderWindow(PromptManager):
                                                  style=f'bold color({name_color})')
                 self.render_chat(live)
 
-            # Second Pass (polisher)
+            # Polisher + polishing cnt
             if (self.state.polisher != 'None'
-                and documents['user_query'].find('OOC:') == -1
-                and not self.opts.assistant_mode):
-                self.renderable.response = Text('Inference/Loading Polisher...',
-                                                style=f'color({color}')
+                    and documents['user_query'].find('OOC:') == -1
+                    and not self.opts.assistant_mode):
+                self.renderable.response = Text('Loading Polisher...',
+                                                     style=f'color({color}')
                 self.render_chat(live)
-                user_query = str(documents['user_query'])
-                documents['user_query'] = str(current_response)
-                messages = self.get_messages(documents, polish=True)
-                documents['user_query'] = user_query
-                current_response = ''
-                for piece in self.stream_response(documents, messages, polish=True):
-                    current_response += piece.content
-                    footer_meta['token_count'] += self.response_count(piece.content)
-                    self.renderable.response = self.build_content(current_response)
-                    self.renderable.footer = self.render_footer(time.time()-start_time,
-                                                                **footer_meta)
-                    name_color = self.state.pulse_colors[self.state.pulse_color_index]
-                    self.renderable.assistant = Text(documents["name"],
+                documents['llm_response'] = current_response
+                for pass_num in range(int(self.state.polisher_cnt)):
+                    documents['llm_response'] = current_response
+                    messages = self.get_messages(documents, polish=True)
+                    current_response = ''
+                    for piece in self.stream_response(documents, messages, polish=True):
+                        if start_time == 0:
+                            start_time = time.time()
+                        current_response += piece.content
+                        footer_meta['token_count'] += self.response_count(piece.content)
+                        if int(self.state.polisher_cnt) == pass_num+1:
+                            self.renderable.response = self.build_content(current_response)
+                        else:
+                            self.renderable.response = Text(
+                                f'Polishing pass {pass_num+1} of'
+                                f' {int(self.state.polisher_cnt)-1} before final...',
+                                style=f'color({color}')
+                        self.renderable.footer = self.render_footer(time.time()-start_time,
+                                                                     **footer_meta)
+                        name_color = self.state.pulse_colors[self.state.pulse_color_index]
+                        self.renderable.assistant = Text(documents["name"],
                                                     style=f'bold color({name_color})')
-                    self.render_chat(live)
+                        self.render_chat(live)
 
             self.stop_namepulse()
             if not current_response or current_response == ' ':
