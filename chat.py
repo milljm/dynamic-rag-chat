@@ -221,8 +221,8 @@ class Chat():
             console.print('[italic dim grey30]prompts-debug enabled. I will re-read the '
                                'prompt files each time.[/]')
         if opts.assistant_mode and not opts.no_rags:
-            console.print('[italic dim grey30]Assistant mode enabled. RAGs disabled, Chat '
-                               'History will not persist.[/]')
+            console.print('[italic dim grey30]Assistant mode enabled. RAGs disabled'
+                          ' (--use-rags to enable).[/]')
         elif opts.no_rags and opts.assistant_mode:
             console.print('[italic dim grey30]Assistant mode enabled.[/]')
 
@@ -480,14 +480,18 @@ class Chat():
         """ Prompt the User for questions, and begin! """
         c_session = PromptSession()
         kb = KeyBindings()
+        @kb.add('escape', 'enter')
+        def _(event):
+            buffer = event.current_buffer
+            buffer.validate_and_handle()
         @kb.add('enter')
         def _(event):
             buffer = event.current_buffer
             buffer.insert_text('\n')
 
-        console.print('💬 Press [italic red]Esc+Enter[/italic red] to send (multi-line), '
-                    r'[red]\? Esc+Enter[/red] for help, '
-                    '[italic red]Ctrl+C[/italic red] to quit.\n')
+        console.print('💬 Type message then press [italic red]Esc+Enter[/italic red] to send '
+                      r'(multi-line), [red]\? Esc+Enter[/red] for help, '
+                      '[italic red]Ctrl+C[/italic red] to quit.\n')
 
         try:
             while True:
@@ -826,14 +830,18 @@ def _add_arguments(parser: argparse.ArgumentParser, defaults, *, use_defaults: b
 
     # imports
     parser.add_argument('--import-pdf', metavar='', type=str,
-                        help='Path to pdf to pre-populate main RAG')
+                        help='Path to pdf to pre-populate GOLD RAG (--assistant-mode to populate '
+                        'assistant GOLD RAG)')
     parser.add_argument('--import-txt', metavar='', type=str,
-                        help='Path to txt to pre-populate main RAG')
+                        help='Path to txt to pre-populate GOLD RAG (--assistant-mode to populate '
+                        'assistant GOLD RAG)')
     parser.add_argument('--import-web', metavar='', type=str,
-                        help='URL to pre-populate main RAG')
+                        help='URL to pre-populate GOLD RAG (--assistant-mode to populate '
+                        'assistant GOLD RAG)')
     parser.add_argument('--import-dir', metavar='', type=str,
                         help=('Path to recursively find and import assorted files (*.md *.html, '
-                              '*.txt, *.pdf)'))
+                              '*.txt, *.pdf, *.py) (--assistant-mode to populate assistant GOLD '
+                              'RAG with *.* file patterns)'))
 
     # flags (bools)
     parser.add_argument('--light-mode', action='store_true', default=D('light_mode'),

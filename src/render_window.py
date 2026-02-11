@@ -494,7 +494,7 @@ class RenderWindow(PromptManager):
         system_msg = SystemMessagePromptTemplate(prompt=system_tmpl)
         human_msg  = HumanMessagePromptTemplate(prompt=human_tmpl)
 
-        if polish or self.opts.assistant_mode:
+        if polish:
             prompt_template = ChatPromptTemplate.from_messages([
                 human_msg
             ])

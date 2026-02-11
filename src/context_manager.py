@@ -514,7 +514,6 @@ class ContextManager(PromptManager):
                 branch = history.get('current', 'default')
             collection_list = [self.common.attributes.collections[x] for
                                 x in self.common.attributes.collections]
-            collection_list.append('gold_documents')
 
             # populate chat history
             documents['chat_history'] = self.get_chat_history(history[branch])
@@ -569,7 +568,7 @@ class ContextManager(PromptManager):
                 else:
                     g_branch = f'{branch}_'
 
-                if collection == 'gold_documents':
+                if not self.opts.assistant_mode and collection == 'gold_documents':
                     g_branch = ''
 
                 if self.debug:

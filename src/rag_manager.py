@@ -68,12 +68,22 @@ class RAG():
                                                api_key=self.opts.api_key,
                                                check_embedding_ctx_length=False)
 
-        self.parent_splitter = RecursiveCharacterTextSplitter(chunk_size=1000,
-                                                              chunk_overlap=500,
-                                                              separators=['\n\n'])
-        self.child_splitter = RecursiveCharacterTextSplitter(chunk_size=100,
-                                                             chunk_overlap=50,
-                                                             separators=['.'])
+        p_chunk_size = 1000
+        p_chunk_overlap = 500
+        p_separators = ['\n\n']
+        c_chunk_size = 100
+        c_chunk_overlap = 50
+        c_separators = ['.']
+        if self.opts.assistant_mode:
+            p_separators = ['\n\n']
+            c_separators = ['\n']
+
+        self.parent_splitter = RecursiveCharacterTextSplitter(chunk_size=p_chunk_size,
+                                                              chunk_overlap=p_chunk_overlap,
+                                                              separators=p_separators)
+        self.child_splitter = RecursiveCharacterTextSplitter(chunk_size=c_chunk_size,
+                                                             chunk_overlap=c_chunk_overlap,
+                                                             separators=c_separators)
 
     @staticmethod
     def _normalize_collection_name(name: str,

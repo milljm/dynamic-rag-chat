@@ -22,6 +22,11 @@ class ImportData:
         self.live = None   # rich live object
         self.parent_splitter = self.d_session.rag.parent_splitter
         self.child_splitter = self.d_session.rag.child_splitter
+
+        self.g_branch = self.d_session.common.attributes.collections['gold']
+        if self.d_session.common.opts.assistant_mode:
+            self.g_branch = f'assistant_{self.d_session.common.attributes.collections["gold"]}'
+
         try:
             # pylint: disable=protected-access  # protected by try
             self.parent_split = (f'Parent=[bold]{self.parent_splitter._chunk_size}[/]'
@@ -151,7 +156,6 @@ class ImportData:
             .. code-block:: python
                 return (bool, '')
         """
-        collections = self.d_session.common.attributes.collections  # short hand
         split_docs = self.parent_splitter.split_text(data)
         meta_tags = []
         for cnt, split_doc in enumerate(split_docs):
@@ -177,7 +181,7 @@ class ImportData:
                     _normal = self.d_session.common.normalize_for_dedup(split_doc)
                     self.d_session.rag.store_data(_normal,
                                                   tags_metadata=meta_tags,
-                                                  collection=collections['gold'])
+                                                  collection=self.g_branch)
                     break
                 # pylint: disable=broad-exception-caught  # handling lots of possibilities here
                 except Exception as e:
@@ -232,7 +236,6 @@ class ImportData:
         _meta = list(meta_tags)
         _contents = []
         mode = 'document_topics' if self.d_session.common.opts.assistant_mode else 'entity'
-        collections = self.d_session.common.attributes.collections  # short hand
         keyword_contents = [x for x in _meta if x.tag == mode]
         if keyword_contents:
             _meta.remove(keyword_contents[0])
@@ -248,7 +251,7 @@ class ImportData:
                 _tmp_meta = [RAGTag(mode, content), *_meta]
                 self.d_session.rag.store_data(child_doc,
                                               tags_metadata=_tmp_meta,
-                                              collection=collections['gold'])
+                                              collection=self.g_branch)
                 if self.live and self.state is not None:
                     self.state['chunk_panel'] = self.make_status_table(
                                         (parent_state[0], parent_state[1], _tmp_meta),
@@ -292,6 +295,8 @@ class ImportData:
 
         Currently supports loading: `*.md *.html *.txt *.pdf *.template`
 
+        If --assistant-mode enabled, will read and import all files found.
+
         *Key init args:*
             .. code-block:: python
                 directory: '/path/to/directory'
@@ -300,10 +305,16 @@ class ImportData:
                 sys.exit()
         """
         files_to_process = []
+        text_chars = bytearray({7,8,9,10,12,13,27} | set(range(0x20, 0x100)) - {0x7f})
+        is_binary_string = lambda bytes: bool(bytes.translate(None, text_chars))
         for fdir, _, files in os.walk(directory):
             for file in files:
-                if file.endswith(('.md', '.html', '.txt', '.pdf', '.template')):
+                if (not self.d_session.common.opts.assistant_mode
+                    and file.endswith(('.md', '.html', '.txt', '.pdf', '.template'))):
                     files_to_process.append((fdir, file))
+                elif self.d_session.common.opts.assistant_mode:
+                    if not is_binary_string(open(os.path.join(fdir, file), 'rb').read(1024)):
+                        files_to_process.append((fdir, file))
 
         self.state = {
             'file_idx': 0,

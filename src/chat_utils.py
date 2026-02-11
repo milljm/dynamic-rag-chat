@@ -279,6 +279,8 @@ class CommonUtils():
     def get_tags(self, response: str)->list[RAGTag]:
         """ Extract tags in JSON and meta_tag format from the LLM's response """
         _tags = []
+        # Sometimes LLMs prioritize Markdown over JSON output, even when you ask for only JSON.
+        response = response.replace('\\_', '_')
         try:
             # JSON-style block. Attempt several kinds of matching, break on the first
             # successful json.loads()
@@ -286,7 +288,6 @@ class CommonUtils():
                           self.regex.json_malformed.search(response),
                           self.regex.curly_match.search(response)]:
                 if match:
-
                     json_str = match.group(1)
                     # print('DEBUG: sanitizing...')
                     # json_str = self.sanitize_response(json_str)
