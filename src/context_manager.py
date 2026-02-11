@@ -161,7 +161,7 @@ class ContextManager(PromptManager):
         # Parse tags (JSON) response from LLM
         tags = self.common.get_tags(content)
 
-        if do_scene:
+        if do_scene and not self.opts.assistant_mode:
             tags = self.scene.ground_scene(tags, query)
             if self.debug:
                 self.console.print(f'SCENE MANAGER OVERRIDE:\n{tags}\n\n',

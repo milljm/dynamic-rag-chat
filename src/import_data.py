@@ -246,20 +246,18 @@ class ImportData:
 
         # For each child document
         for c_cnt, child_doc in enumerate(child_docs):
-            # For each value in keywords, we write to the RAG with this one value
-            for k_cnt, content in enumerate(_contents):
-                _tmp_meta = [RAGTag(mode, content), *_meta]
-                self.d_session.rag.store_data(child_doc,
-                                              tags_metadata=_tmp_meta,
-                                              collection=self.g_branch)
-                if self.live and self.state is not None:
-                    self.state['chunk_panel'] = self.make_status_table(
-                                        (parent_state[0], parent_state[1], _tmp_meta),
-                                        (c_cnt+1, len(child_docs), k_cnt, len(_contents)),
-                                        file_path,
-                                        storing=True
-                                        )
-                    self.live.update(self.make_full_status())
+            _tmp_meta = [RAGTag(mode, _contents), *_meta]
+            self.d_session.rag.store_data(child_doc,
+                                            tags_metadata=_tmp_meta,
+                                            collection=self.g_branch)
+            if self.live and self.state is not None:
+                self.state['chunk_panel'] = self.make_status_table(
+                                    (parent_state[0], parent_state[1], _tmp_meta),
+                                    (c_cnt+1, len(child_docs), k_cnt, len(_contents)),
+                                    file_path,
+                                    storing=True
+                                    )
+                self.live.update(self.make_full_status())
 
         # Finish up by triggering one last uptime to the Rich Panel
         if self.live and child_docs:

@@ -75,8 +75,10 @@ class RAG():
         c_chunk_overlap = 50
         c_separators = ['.']
         if self.opts.assistant_mode:
-            p_separators = ['\n\n']
-            c_separators = ['\n']
+            p_chunk_size = 2000
+            p_chunk_overlap = 1000
+            c_chunk_size = 1000
+            c_chunk_overlap = 500
 
         self.parent_splitter = RecursiveCharacterTextSplitter(chunk_size=p_chunk_size,
                                                               chunk_overlap=p_chunk_overlap,
@@ -224,13 +226,6 @@ class RAG():
             # grab parent document
             documents.extend(self._parent_retriever(collection).invoke(query))
         except ValueError:
-            self.console.print('Pardon the interruption, we had a rare error while attempting ',
-                               'to retrieve RAG data using the following filter search:',
-                               f'\n{metadatas}\n\n',
-                               'Attempting to run search again, but without meta_data ',
-                               '(similarity only search)',
-                               style=f'color({self.opts.color})',
-                               highlight=False)
             return self.retrieve(query, collection)
 
         return documents
