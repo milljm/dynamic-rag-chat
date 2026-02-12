@@ -40,9 +40,29 @@ class ChatOptions:
     """ Chat arguments dataclass """
     # ---------- “core” options ----------
     host: str = 'http://localhost:11434/v1'
+    pre_host: str = host
+    emb_host: str = host
+    entity_host: str = host
+
+    # ---------- models
     model: str = 'gemma3:27b'
+    polisher: str = 'None'
+    preconditioner: str = 'gemma3:1b'
+    entity_llm: str = 'gemma3:1b'
+    embeddings: str = 'nomic-embed-text'
     nsfw_model: Optional[str] = None
+
+    # ---------- model settings
     completion_tokens: int = 4000
+    temperature: float = 0.5
+    top_p: float = 0.95
+    repeat_penalty: float = 1.10
+    frequency_penalty: float = 0.4
+    presence_penalty: float = 0.2
+    context_window: int = 32768
+    disable_thinking: bool = False
+    no_think_tag: bool = False
+
     time_zone: str = 'GMT'
     api_key: str = 'none'
     assistant_mode: bool = False
@@ -51,37 +71,22 @@ class ChatOptions:
     verbose: bool = False
     light_mode: bool = False
     prompts_debug: bool = False
-    one_shot: bool = False
-    one_shot_history: int = 2
-    polisher_cnt: int = 1
-    disable_thinking: bool = False
-    no_think_tag: bool = False
+
+
     name: str = 'assistant'
     user_name: str = 'John'
-    temperature: float = 0.5
-    top_p: float = 0.95
-    repeat_penalty: float = 1.10
-    frequency_penalty: float = 0.4
-    presence_penalty: float = 0.2
-    context_window: int = 32768
     continue_from: int = -1
     sex: str = 'male'
     character_sheet: str = ''
 
-    # ---------- RAG / pre‑ & post‑processing ----------
-    polisher: str = 'None'
-    preconditioner: str = 'gemma3:1b'
-    entity_llm: str = 'gemma3:1b'
-    embeddings: str = 'nomic-embed-text'
-    pre_host: str = 'http://localhost:11434/v1'
-    emb_host: str = 'http://localhost:11434/v1'
-    entity_host: str = 'http://localhost:11434/v1'
+    # ---------- Context / RAG / pre‑ & post‑processing ----------
     vector_dir: str = field(default_factory=lambda: str(Path.cwd() / 'vector_data'))
     matches: int = 20
-
-    # ---------- history ----------
     chat_history: int = 10000
     history_sessions: int = 5
+    one_shot: bool = False
+    one_shot_history: int = 2
+    polisher_cnt: int = 1
 
     # ---------- UI ----------
     syntax_theme: str = 'fruity'
