@@ -438,14 +438,14 @@ class Chat():
         """ perform search without any context involved """
         prompt_tokens = self.session.context.token_retriever(user_input) # short hand
         collections = self.session.common.attributes.collections # short hand
-        history = self.session.common.load_chat()
         self.session.common.heat_map = self.session.common.create_heatmap(prompt_tokens,
                                                             reverse=True)
         cleaned_color = [v for k,v in
                          self.session.common.create_heatmap(prompt_tokens / 2).items()
                          if k<=0][-1:][0]
         # pylint: disable=consider-using-f-string  # no, this is how it is done
-        documents = {'user_query'               : user_input,
+        documents = {'no_context'               : True,
+                     'user_query'               : user_input,
                      'name'                     : self.opts.name,
                      'user_name'                : self.opts.user_name,
                      'chat_history'             : '',
@@ -453,8 +453,8 @@ class Chat():
                      'dynamic_files'            : '',
                      'include_branch'           : '',
                      'dynamic_images'           : [],
-                     'turn_num'                 : len(history[self.chat_branch])+1,
-                     'history_sessions'         : self.opts.history_sessions,
+                     'turn_num'                 : 0,
+                     'history_sessions'         : 0,
                      collections['ai']          : '',
                      collections['user']        : '',
                      collections['gold']        : '',

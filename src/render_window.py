@@ -717,6 +717,10 @@ class RenderWindow(PromptManager):
             self.renderable.assistant = Text(documents["name"], style='bold color(208)')
             self.render_chat(live)
 
+        # Do not save any output if \no-context was used
+        if documents.get('no_context', False):
+            return
+
         # Finish by saving chat history, finding and storing new RAG/Tags or
         # llm_prompt changes, then reset it.
         if self.debug and self.state.no_rags and self.state.assistant_mode:
