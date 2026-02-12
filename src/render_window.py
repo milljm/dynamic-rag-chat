@@ -8,7 +8,8 @@ from rich.syntax import Syntax
 from rich.text import Text
 from rich.align import Align
 from rich.console import Group
-from langchain.prompts import ChatPromptTemplate, PromptTemplate
+from langchain.prompts import ChatPromptTemplate, PromptTemplate, MessagesPlaceholder
+from langchain.agents import create_openai_tools_agent, AgentExecutor
 from langchain.schema.messages import HumanMessage
 from langchain.schema import BaseMessage, Document   # For Type Hinting
 from langchain_core.prompts import HumanMessagePromptTemplate, SystemMessagePromptTemplate
@@ -16,6 +17,7 @@ from langchain_openai import ChatOpenAI
 from .prompt_manager import PromptManager
 from .context_manager import ContextManager # For Type Hinting
 from .chat_utils import CommonUtils, ChatOptions # For Type Hinting
+from .agent_tools import DuckDuckGoSearchTool
 
 # pylint: disable=too-many-instance-attributes  # this is what a dataclass is for
 @dataclass
@@ -178,6 +180,12 @@ class RenderWindow(PromptManager):
                                       ),
             }
 
+        # Agent Prompt
+        self.agent_prompt = ChatPromptTemplate.from_messages([
+            ("system", """You are a helpful assistant."""),
+            ("user", "{input}"),
+            MessagesPlaceholder(variable_name="agent_scratchpad"),
+            ])
         # Prompts
         self.prompts = PromptManager(
             console,
@@ -191,6 +199,7 @@ class RenderWindow(PromptManager):
         self.thinking_thread = Thread(target=self.animate_thinking)
         self.namepulse_active: bool = False
         self.namepulse_thread = Thread(target=self.animate_namepulse)
+        self.agent_tools = [DuckDuckGoSearchTool()]
 
     def _load_states(self, current_dir, context, args):
         """ Load the assorted dataclass objects in use throughout this module """
@@ -501,7 +510,7 @@ class RenderWindow(PromptManager):
         else:
             prompt_template = ChatPromptTemplate.from_messages([
                 system_msg,
-                human_msg
+                human_msg,
             ])
 
         # Does this post require SFW, or NSFW
@@ -534,6 +543,16 @@ class RenderWindow(PromptManager):
                           style=f'color({self.state.color})',
                           highlight=False)
         self.common.write_debug(self.llm[llm].model_name, formatted_messages)
+        if documents.get('use_agent', False) and not documents.get('agent_ran', False):
+            # Let LangChain create the proper prompt template for the agent
+            agent = create_openai_tools_agent(self.llm[llm], self.agent_tools, self.agent_prompt)
+            documents['agent_ran'] = True
+            agent_executor = AgentExecutor(agent=agent, tools=self.agent_tools, verbose=False)
+            self.console.print('Agent Tool running...', style=f'color({self.state.color})',
+                                highlight=False)
+            result = agent_executor.invoke({"input": documents['user_query']})
+            documents['dynamic_files'] += f'\n=== AGENT_TOOL_RESULT ===\n{result}\n\n'
+            return self.get_messages(documents, polish=polish)
         return messages
 
     # Stream response as chunks

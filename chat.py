@@ -19,6 +19,7 @@
 #     "beautifulsoup4",
 #     "pygments",
 #     "jinja2",
+#     "duckduckgo-search",
 # ]
 # ///
 import os
@@ -51,9 +52,6 @@ from src import SceneManager
 console = Console(highlight=True)
 current_dir = os.path.dirname(os.path.abspath(__file__))
 
-
-
-
 CMD_LINE = re.compile(r"^[ \t]*\\(?P<cmd>[A-Za-z0-9_\-\?]+)(?:[ \t]+(?P<args>.*))?$")
 RARE_TOKENS = (r"[RARE NOW]", r"[RARE USED]", r"[RARE RESET]", r"[SAFE MODE]")
 RARE_TOKENS_RE = re.compile("|".join(re.escape(t) for t in RARE_TOKENS))
@@ -62,6 +60,7 @@ INCLUDE_RE = re.compile(r"\{\{([^}]+)\}\}")  # {{/path}} or {{https://url}}
 HELP_TEXT = (
     "in-command switches you can use:\n\n"
     "\t\\no-context msg              - perform a query with no context\n"
+    "\t\\agent msg                   - enable agent (web search)\n"
     "\t\\delete-last                 - delete last message from history\n"
     "\t\\turn                        - show turn/status\n"
     "\t\\rewind N                    - rewind to turn N (keep 0..N)\n"
@@ -704,7 +703,7 @@ class Chat():
                         for _, v in enumerate(turns, start=start+1):
                             print(f'\n\n{v}')
                         continue
-                    elif cmd in ("no-context", "include"):
+                    elif cmd in ("no-context", "include", "agent"):
                         if not self.opts.assistant_mode:
                             console.print("[red]Only available while in assistant mode.[/red]")
                             continue
@@ -737,6 +736,10 @@ class Chat():
                         console.print(f"[red]Unknown branch[/red] \\{val}")
                         continue
                     documents['include_branch'] = str(include_branch)
+
+                if parsed.command == "agent":
+                    documents['use_agent'] = True
+                    documents['agent_ran'] = False
 
                 # Add any inline includes as context (files/URLs)
                 if parsed.includes:

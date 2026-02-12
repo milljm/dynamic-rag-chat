@@ -6,11 +6,11 @@ import sys
 import pickle
 import json
 import datetime
-import pytz
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping, Optional
 from typing import NamedTuple
+import pytz
 import yaml
 
 class RAGTag(NamedTuple):

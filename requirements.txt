@@ -13,3 +13,4 @@ pillow
 requests
 beautifulsoup4
 rank_bm25
+duckduckgo-search
