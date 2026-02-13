@@ -40,17 +40,19 @@ class ChatOptions:
     """ Chat arguments dataclass """
     # ---------- “core” options ----------
     host: str = 'http://localhost:11434/v1'
-    pre_host: str = host
-    emb_host: str = host
-    entity_host: str = host
+    pre_host: Optional[str] = None
+    emb_host: Optional[str] = None
+    entity_host: Optional[str] = None
+    agent_host: Optional[str] = None
 
     # ---------- models
     model: str = 'gemma3:27b'
-    polisher: str = 'None'
-    preconditioner: str = 'gemma3:1b'
-    entity_llm: str = 'gemma3:1b'
-    embeddings: str = 'nomic-embed-text'
+    polisher: Optional[str] = None
+    preconditioner: Optional[str] = None
+    entity_llm: Optional[str] = None
+    embeddings: Optional[str] = None
     nsfw_model: Optional[str] = None
+    agent_model: Optional[str] = None
 
     # ---------- model settings
     completion_tokens: int = 4000
@@ -110,6 +112,7 @@ class ChatOptions:
     _ALIASES = {
         # YAML/config wording        # ChatOptions field
         'llm_server':                'host',
+        'agent_server':              'agent_host',
         'pre_llm':                   'preconditioner',
         'embedding_llm':             'embeddings',
         'pre_server':                'pre_host',
@@ -172,6 +175,7 @@ class RegExp:
     core = re.compile(r'[^a-z0-9._:-]+') # friendly token
     names = re.compile(r"([A-Za-z'-]+)")
     ooc_prefix = re.compile(r'^\s*(?:OOC:|SYSTEM:|OOC>)', re.I)
+    think_re = re.compile(r'<think>.*</think>(.*)', re.DOTALL)
     metadata_key = 'metadata'
 
 class CommonUtils():
@@ -286,6 +290,14 @@ class CommonUtils():
         _tags = []
         # Sometimes LLMs prioritize Markdown over JSON output, even when you ask for only JSON.
         response = response.replace('\\_', '_')
+        # We must remove the reasoning frame to capture the real JSON output block the model was
+        # trying to generate
+        think_frame = self.regex.think_re.findall(response)
+        if think_frame:
+            response = think_frame[0]
+            if self.opts.debug:
+                self.console.print(f'PRE-PROCESSOR REASONING REMOVED RESPONSE:\n{response}\n\n',
+                                style=f'color({self.opts.color})', highlight=False)
         try:
             # JSON-style block. Attempt several kinds of matching, break on the first
             # successful json.loads()

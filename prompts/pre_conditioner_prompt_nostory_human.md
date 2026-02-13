@@ -13,6 +13,7 @@ Produce a compact "session state" that preserves facts, decisions, intent, const
 - Highlight funny or important moments in <CHAT_HISTORY>.
 - Never introduce or invent outcomes, resolutions, or details that are not explicitly present in <CHAT_HISTORY>. If something is unknown, unresolved, or still in progress, state that it remains open rather than guessing.
 - Focus only on the current state at the end of <CHAT_HISTORY>; do not skip ahead or imagine future events.
+- Do not begin or end with `<|begin_of_box|>`,  `<|end_of_box|>` or any other sort of identifying tag.
 
 # LENGTH
 Generate a comprehensive summary between 500-800 words.

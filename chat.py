@@ -59,6 +59,7 @@ INCLUDE_RE = re.compile(r"\{\{([^}]+)\}\}")  # {{/path}} or {{https://url}}
 
 HELP_TEXT = (
     "in-command switches you can use:\n\n"
+    "\t\\regenerate                  - regenerate last turn\n"
     "\t\\no-context msg              - perform a query with no context\n"
     "\t\\agent msg                   - enable agent (web search)\n"
     "\t\\delete-last                 - delete last message from history\n"
@@ -707,10 +708,16 @@ class Chat():
                         if not self.opts.assistant_mode:
                             console.print("[red]Only available while in assistant mode.[/red]")
                             continue
-                        # fall-thru to model call but bypass normal context build
-                        # pylint: disable=unnecessary-pass
-                        pass
-                        # pylint: enable=unnecessary-pass
+                    elif cmd in ('regenerate'):
+                        try:
+                            last = history[self.chat_branch].pop()
+                            match = re.findall(r'USER:(.*\n\n)', last)
+                            self.session.common.save_chat(history)
+                            parsed = parse_user_input(match[0])
+                            # pass
+                        except IndexError:
+                            console.print("[yellow]History empty.[/yellow]")
+                            continue
                     else:
                         console.print(f"[red]Unknown command:[/red] \\{cmd}")
                         continue
@@ -792,9 +799,14 @@ def _add_arguments(parser: argparse.ArgumentParser, defaults, *, use_defaults: b
                         type=str, help='Entity/Character Sheet LLM (default: %(default)s)')
     parser.add_argument('--embedding-llm', metavar='', dest='embeddings',
                         default=D('embeddings'),
-                        type=str, help='LM embedding model (default: %(default)s)')
+                        type=str, help='LLM Embedding Model (default: %(default)s)')
+    parser.add_argument('--agent-llm', metavar='', dest='agent_model',
+                        default=D('agent_model'),
+                        type=str, help='LLM Agent Tooling Model (default: %(default)s)')
+
     parser.add_argument('--history-dir', metavar='', dest='vector_dir', default=D('vector_dir'),
                         type=str, help='History directory (default: %(default)s)')
+
     parser.add_argument('--llm-server', metavar='', dest='host', default=D('host'),
                         type=str, help='OpenAI API server address (default: %(default)s)')
     parser.add_argument('--pre-server', metavar='', dest='pre_host', default=D('pre_host'),
@@ -803,6 +815,9 @@ def _add_arguments(parser: argparse.ArgumentParser, defaults, *, use_defaults: b
                         type=str, help='OpenAI API server address (default: %(default)s)')
     parser.add_argument('--embedding-server', metavar='', dest='emb_host', default=D('emb_host'),
                         type=str, help='OpenAI API server address (default: %(default)s)')
+    parser.add_argument('--agent-server', metavar='', dest='agent_host', default=D('agent_host'),
+                        type=str, help='OpenAI API server address (default: %(default)s)')
+
     parser.add_argument('--api-key', metavar='', default=D('api_key'),
                         type=str, help='You API Key (default: REDACTED)')
     parser.add_argument('--name', metavar='', default=D('name'),

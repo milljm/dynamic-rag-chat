@@ -45,6 +45,8 @@ class RenderWindowState:
     light_mode: bool
     no_think_tag: bool
     model: str
+    agent_model: str
+    agent_host: str
     polisher: str
     polisher_cnt: int
     nsfw_model: str
@@ -119,6 +121,7 @@ class RenderWindow(PromptManager):
         self.console = console
         self.common = common
         self.opts = args
+        self.think_once = True
         self.thinking_chunk = ''
         self.ooc_response = ''
 
@@ -166,7 +169,8 @@ class RenderWindow(PromptManager):
                                     extra_body = extra_body,
                                     ),
                 'polish' : ChatOpenAI(base_url=self.state.host,
-                                      model=self.state.polisher,
+                                      model=('None' if self.state.polisher is None
+                                             else self.state.polisher),
                                       temperature=0.9 if self.state.assistant_mode
                                                         else args.temperature,
                                       top_p=args.top_p,
@@ -177,6 +181,18 @@ class RenderWindow(PromptManager):
                                       stop_sequences=["<END_BEAT>", "<END_TURN>"],
                                       api_key=self.state.api_key,
                                       extra_body = extra_body,
+                                      ),
+                'tool' :    ChatOpenAI(base_url=self.state.agent_host,
+                                      model=('None' if self.state.agent_model is None
+                                             else self.state.agent_model),
+                                      temperature=0.4,
+                                      top_p=args.top_p,
+                                      frequency_penalty=args.frequency_penalty,
+                                      presence_penalty=args.presence_penalty,
+                                      streaming=False,
+                                      max_completion_tokens=self.state.completion_tokens,
+                                      stop_sequences=["<END_BEAT>", "<END_TURN>"],
+                                      api_key=self.state.api_key,
                                       ),
             }
 
@@ -212,6 +228,8 @@ class RenderWindow(PromptManager):
             light_mode = args.light_mode,
             no_think_tag = args.no_think_tag,
             model = args.model,
+            agent_model = args.agent_model,
+            agent_host = args.agent_host,
             polisher = args.polisher,
             polisher_cnt = args.polisher_cnt,
             nsfw_model = args.nsfw_model,
@@ -284,76 +302,6 @@ class RenderWindow(PromptManager):
             return len(response.split())
         return 1
 
-    def if_metatags(self, chunk: object, verbose: bool)->object:
-        """
-        Hide the LLM's response when performing <meta_tags operation
-        """
-        if verbose:
-            return chunk
-        content = str(chunk.content)
-        stream = self.state.stream  # shorthand
-
-        # print(f'DEBUG START>{content}<END')
-        # === CASE 1: Chunk has '{' – start buffering
-        if (content in ['```', 'json', '{'] or '{' in content) and not stream.meta_hiding:
-            # LLM trying to close json block
-            if '```' in content and stream.meta_capture:
-                stream.meta_capture += '\n```'
-                chunk.content = ''
-                return chunk
-            stream.partial_chunk += content
-            chunk.content = ''
-            return chunk
-
-        # === CASE 2: Continue a partial '{' segment
-        if stream.partial_chunk and not stream.meta_hiding:
-            stream.partial_chunk += content
-            stream.meta_hide_attempt_count += 1
-            combined = str(stream.partial_chunk) # shorthand
-            chunk.content = ''
-
-            if self.common.regex.meta_start_re.search(combined):
-                # print('DEBUG: Starting meta hiding block')
-                stream.meta_hide_attempt_count = 0
-                stream.partial_chunk = ''
-                stream.meta_capture = combined
-                stream.meta_hiding = True
-                stream.meta_brace_count = combined.count('{') - combined.count('}')
-                self.start_thinking()
-                return chunk
-
-            # To many iterations. Assume LLM is not trying to perform metadata operations
-            if stream.meta_hide_attempt_count > 5:
-                # print('DEBUG: Too many attempts, resuming normal operations')
-                stream.partial_chunk = ''
-                chunk.content = combined
-                stream.meta_hide_attempt_count = 0
-                return chunk
-
-        # === CASE 3: Already hiding, count braces
-        if stream.meta_hiding:
-            # print(f'DEBUG HIDING: still capturing metadata chunk: {content}')
-            stream.meta_capture += content
-            stream.meta_brace_count += content.count('{') - content.count('}')
-            # print(f'DEBUG BRACE COUNT: {stream.meta_brace_count}')
-
-            if stream.meta_brace_count <= 0:
-                # print('DEBUG: Completed metadata block.')
-                stream.meta_hiding = False
-                self.stop_thinking()
-            chunk.content = ''
-
-        # === CASE 4: Clean match for metadata block at once
-        if self.common.regex.meta_start_re.search(content):
-            # print('DEBUG: Matched meta block directly')
-            stream.meta_capture = content
-            stream.meta_hiding = True
-            stream.meta_brace_count = content.count('{') - content.count('}')
-            self.start_thinking()
-            chunk.content = ''
-
-        return chunk
-
     def reveal_thinking(self, chunk: object, show: bool = False)->object:
         """
         Intercept <think> tags in streamed content and optionally hide or reveal them.
@@ -363,13 +311,17 @@ class RenderWindow(PromptManager):
         """
         stream = self.state.stream
         content = str(chunk.content)
-        # print(f'DEBUG: {stream.thinking} TOK:>{content}<')
+        # Allow the model to print <think> </think> tags after it is finished reasoning
+        if self.think_once is False:
+            return chunk
+        # print(f'DEBUG: think_once: {self.think_once}, {stream.thinking} TOK:>{content}<')
 
         # End of <think> block
         if stream.thinking and ('</think>' in content or '</thinking>' in content):
             self.common.save_thinking(self.thinking_chunk)
             self.thinking_chunk = ''
             stream.thinking = False
+            self.think_once = False
             self.stop_thinking()
             chunk.content = ''
             return chunk
@@ -545,6 +497,7 @@ class RenderWindow(PromptManager):
         self.common.write_debug(self.llm[llm].model_name, formatted_messages)
         if documents.get('use_agent', False) and not documents.get('agent_ran', False):
             # Let LangChain create the proper prompt template for the agent
+            llm = 'tool' if self.state.agent_model is not None else llm
             agent = create_openai_tools_agent(self.llm[llm], self.agent_tools, self.agent_prompt)
             documents['agent_ran'] = True
             agent_executor = AgentExecutor(agent=agent, tools=self.agent_tools, verbose=False)
@@ -562,7 +515,7 @@ class RenderWindow(PromptManager):
         llm = 'polish' if polish else llm
         for chunk in self.llm[llm].stream(messages):
             chunk = self.reveal_thinking(chunk, self.state.verbose)
-            chunk = self.if_metatags(chunk, self.state.verbose)
+            # chunk = self.if_metatags(chunk, self.state.verbose)
             yield chunk
 
     def render_footer(self, time_taken: float = 0, **kwargs) -> Text:
@@ -615,6 +568,7 @@ class RenderWindow(PromptManager):
         """ Handle the Rich Live updating process """
         stream = self.state.stream   # shorthand
         context = self.state.context # shorthand
+        self.think_once = True
 
         # pesky LLMs that have reasoning and don't generate a <think> token,
         # yet generate an ending </think> token!
@@ -660,7 +614,7 @@ class RenderWindow(PromptManager):
                     start_time = time.time()
                 current_response += piece.content
                 footer_meta['token_count'] += self.response_count(piece.content)
-                if (self.state.polisher == 'None'
+                if (self.state.polisher is None
                      or documents['user_query'].find('OOC:') != -1
                      or self.opts.assistant_mode):
                     self.renderable.response = self.build_content(current_response)
@@ -679,7 +633,7 @@ class RenderWindow(PromptManager):
                 self.render_chat(live)
 
             # Polisher + polishing cnt
-            if (self.state.polisher != 'None'
+            if (self.state.polisher is not None
                     and documents['user_query'].find('OOC:') == -1
                     and not self.opts.assistant_mode):
                 self.renderable.response = Text('Loading Polisher...',
