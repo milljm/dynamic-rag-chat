@@ -47,13 +47,21 @@ class ContextManager(PromptManager):
                                   model=args.preconditioner,
                                   temperature=0.4,
                                   streaming=False,
-                                  max_tokens=4096,
+                                  max_tokens=8096,
                                   api_key=args.api_key,
                                   request_timeout=150)
 
         self.entity_llm = ChatOpenAI(base_url=args.entity_host,
                                   model=args.entity_llm,
                                   temperature=0.3,
+                                  streaming=False,
+                                  max_tokens=4096,
+                                  api_key=args.api_key,
+                                  request_timeout=150)
+
+        self.summarizer_llm = ChatOpenAI(base_url=args.summarizer_host,
+                                  model=args.summarizer_llm,
+                                  temperature=0.7,
                                   streaming=False,
                                   max_tokens=4096,
                                   api_key=args.api_key,
@@ -110,7 +118,7 @@ class ContextManager(PromptManager):
         if isinstance(context, list):
             for sentence in context:
                 if sentence is not None:
-                    _token_cnt += len(sentence.split())
+                    _token_cnt += len(str(sentence).split())
         else:
             _token_cnt += len(context.split(' '))
         return int(_token_cnt * 1.3)
@@ -319,7 +327,10 @@ class ContextManager(PromptManager):
         return sorted(set(indices))
 
     def get_chat_history(self, history_list)->list:
-        """ just return n previous turns """
+        """ return n previous turns """
+        if self.opts.one_shot:
+            summary_cnt = int(self.opts.history_sessions) + int(self.opts.one_shot_history)
+            return history_list[-(summary_cnt*2):]
         return history_list[-self.opts.history_sessions:]
 
     def handle_topics(self,
@@ -467,12 +478,39 @@ class ContextManager(PromptManager):
         return ''
 
     def summarize_history(self, documents)->list:
-        """ return last 2 unmolested turns plus a summarization of story """
+        """ return last *n* unmolested turns plus a summarization of story """
         prompts = self.prompts
-        summarizing = {'chat_history'    : documents['chat_history'],
-                       'character_sheet' : documents['character_sheet'],
-                       'entities'        : documents['entities'],
-                       'user_name'       : documents['user_name']}
+        # Get the full chat history we're working with
+        full_history = documents['chat_history']
+
+        # Calculate how many recent turns to leave unmolested
+        unmolested_count = self.opts.one_shot_history
+
+        # The history we can summarize is everything except the unmolested recent turns
+        if unmolested_count > 0:
+            summarizable_history = full_history[:-unmolested_count]
+        else:
+            summarizable_history = full_history
+
+        # Get stagger indices for the summarizable portion
+        if len(summarizable_history) > 0:
+            max_elements = min(self.opts.history_sessions, len(summarizable_history))
+            recent_tail = min(self.opts.one_shot_history, len(summarizable_history))
+
+            indices = self.stagger_history(len(summarizable_history), max_elements, recent_tail)
+
+            # Pull the actual chat turns using those indices
+            selected_turns = [summarizable_history[i] for i in indices]
+        else:
+            selected_turns = []
+
+        # Build the summarization payload with our staggered selection
+        summarizing = {
+            'chat_history'    : ' '.join(selected_turns),
+            'character_sheet' : documents['character_sheet'],
+            'entities'        : documents['entities'],
+            'user_name'       : documents['user_name']
+        }
         # pylint: disable=no-member # dynamic prompts (see self.__build_prompts)
         human_prompt = (prompts.get_prompt(f'{prompts.pre_prompt_file}_human.md')
                         if self.debug or self.opts.prompts_debug else prompts.pre_prompt_human)
@@ -486,7 +524,7 @@ class ContextManager(PromptManager):
             self.console.print(f'PRE-PROCESSOR PROMPT:\n{prompt}\n\n',
                                 style=f'color({self.opts.color})', highlight=False)
         try:
-            content = self.pre_llm.invoke(prompt).content
+            content = self.summarizer_llm.invoke(prompt).content
             think_frame = self.common.regex.think_re.findall(content)
             if think_frame:
                 content = think_frame[0]
@@ -494,11 +532,10 @@ class ContextManager(PromptManager):
                     self.console.print(f'PRE-PROCESSOR REASONING REMOVED RESPONSE:\n{content}\n\n',
                                 style=f'color({self.opts.color})', highlight=False)
             if self.opts.assistant_mode:
-                return [*documents['chat_history'][-self.opts.one_shot_history:],
-                        '\n\n<CHAT_HISTORY_SUMMARY - THE HISTORY SUMMARIZED THUS FAR>'
-                        f'\n{content}<END CHAT_HISTORY_SUMMARY>', ]
+                return [content, *documents['chat_history'][-self.opts.one_shot_history:], ]
             return [*documents['chat_history'][-self.opts.one_shot_history:],
-                    '\n\n<STORY_SUMMARY - THE STORY SUMMARIZED THUS FAR>'
+                    '\n\n<STORY_SUMMARY - THE STORY SUMMARIZED THUS FAR. USE THIS CONTENT TO STAY '
+                    'LORE GROUNDED>'
                     f'\n{content}<END STORY_SUMMARY>', ]
 
         except APITimeoutError:
@@ -533,6 +570,9 @@ class ContextManager(PromptManager):
             query = documents.get('user_query', '')
 
             # tag the users query
+            self.console.print('Processing query (meta tagging for RAG)...',
+                               style=f'color({self.opts.color})',
+                               highlight=False)
             (_, meta_tags, _) = self.pre_processor(query, documents)
 
             # Populate explicit content if triggered
@@ -544,7 +584,10 @@ class ContextManager(PromptManager):
                            self.scene.get_scene().get('known_characters', [])
                        )
 
-            if self.opts.one_shot and len(documents['chat_history']) >= self.opts.one_shot_history:
+            if self.opts.one_shot and len(documents['chat_history']) > self.opts.one_shot_history:
+                self.console.print('Summarizing Chat History (--one-shot enabled)...',
+                               style=f'color({self.opts.color})',
+                               highlight=False)
                 documents['chat_history'] = self.summarize_history(documents)
                 if self.debug:
                     self.console.print(f'SUMMARIZED:\n{documents["chat_history"]}\n\n',
@@ -568,6 +611,9 @@ class ContextManager(PromptManager):
                                     style=f'color({self.opts.color})',
                                     highlight=False)
 
+            self.console.print('Gathering RAG data...',
+                               style=f'color({self.opts.color})',
+                               highlight=False)
             for collection in collection_list:
                 if self.opts.assistant_mode:
                     g_branch = 'assistant_'
@@ -612,9 +658,6 @@ class ContextManager(PromptManager):
                 documents[collection] = self.common.stringify_lists(documents[collection])
 
             # Stringify lists in chat_history
-            #documents['chat_history'] = (
-            #    '\n\n<END_TURN>\n# NEXT TURN: Begin fresh. Do not'
-            #    ' emulate previous output length or tone.'.join(documents['chat_history']))
             documents['chat_history'] = '\n'.join(documents['chat_history'])
             # Store the users query to their RAG, now that we are done pre-processing
             # (so as not to bring back identical information in their query)

@@ -44,6 +44,7 @@ class ChatOptions:
     emb_host: Optional[str] = None
     entity_host: Optional[str] = None
     agent_host: Optional[str] = None
+    summarizer_host: Optional[str] = None
 
     # ---------- models
     model: str = 'gemma3:27b'
@@ -52,7 +53,8 @@ class ChatOptions:
     entity_llm: Optional[str] = None
     embeddings: Optional[str] = None
     nsfw_model: Optional[str] = None
-    agent_model: Optional[str] = None
+    agent_llm: Optional[str] = None
+    summarizer_llm: Optional[str] = None
 
     # ---------- model settings
     completion_tokens: int = 4000
@@ -113,6 +115,7 @@ class ChatOptions:
         # YAML/config wording        # ChatOptions field
         'llm_server':                'host',
         'agent_server':              'agent_host',
+        'summarizer_server':         'summarizer_host',
         'pre_llm':                   'preconditioner',
         'embedding_llm':             'embeddings',
         'pre_server':                'pre_host',

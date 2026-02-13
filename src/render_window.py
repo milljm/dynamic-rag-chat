@@ -45,7 +45,7 @@ class RenderWindowState:
     light_mode: bool
     no_think_tag: bool
     model: str
-    agent_model: str
+    agent_llm: str
     agent_host: str
     polisher: str
     polisher_cnt: int
@@ -183,9 +183,9 @@ class RenderWindow(PromptManager):
                                       extra_body = extra_body,
                                       ),
                 'tool' :    ChatOpenAI(base_url=self.state.agent_host,
-                                      model=('None' if self.state.agent_model is None
-                                             else self.state.agent_model),
-                                      temperature=0.4,
+                                      model=('None' if self.state.agent_llm is None
+                                             else self.state.agent_llm),
+                                      temperature=0.5,
                                       top_p=args.top_p,
                                       frequency_penalty=args.frequency_penalty,
                                       presence_penalty=args.presence_penalty,
@@ -228,7 +228,7 @@ class RenderWindow(PromptManager):
             light_mode = args.light_mode,
             no_think_tag = args.no_think_tag,
             model = args.model,
-            agent_model = args.agent_model,
+            agent_llm = args.agent_llm,
             agent_host = args.agent_host,
             polisher = args.polisher,
             polisher_cnt = args.polisher_cnt,
@@ -497,7 +497,7 @@ class RenderWindow(PromptManager):
         self.common.write_debug(self.llm[llm].model_name, formatted_messages)
         if documents.get('use_agent', False) and not documents.get('agent_ran', False):
             # Let LangChain create the proper prompt template for the agent
-            llm = 'tool' if self.state.agent_model is not None else llm
+            llm = 'tool' if self.state.agent_llm is not None else llm
             agent = create_openai_tools_agent(self.llm[llm], self.agent_tools, self.agent_prompt)
             documents['agent_ran'] = True
             agent_executor = AgentExecutor(agent=agent, tools=self.agent_tools, verbose=False)

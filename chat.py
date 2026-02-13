@@ -800,12 +800,12 @@ def _add_arguments(parser: argparse.ArgumentParser, defaults, *, use_defaults: b
     parser.add_argument('--embedding-llm', metavar='', dest='embeddings',
                         default=D('embeddings'),
                         type=str, help='LLM Embedding Model (default: %(default)s)')
-    parser.add_argument('--agent-llm', metavar='', dest='agent_model',
-                        default=D('agent_model'),
+    parser.add_argument('--agent-llm', metavar='', dest='agent_llm',
+                        default=D('agent_llm'),
                         type=str, help='LLM Agent Tooling Model (default: %(default)s)')
-
-    parser.add_argument('--history-dir', metavar='', dest='vector_dir', default=D('vector_dir'),
-                        type=str, help='History directory (default: %(default)s)')
+    parser.add_argument('--summarizer-llm', metavar='', dest='summarizer_llm',
+                        default=D('summarizer_llm'),
+                        type=str, help='LLM Agent Tooling Model (default: %(default)s)')
 
     parser.add_argument('--llm-server', metavar='', dest='host', default=D('host'),
                         type=str, help='OpenAI API server address (default: %(default)s)')
@@ -817,6 +817,10 @@ def _add_arguments(parser: argparse.ArgumentParser, defaults, *, use_defaults: b
                         type=str, help='OpenAI API server address (default: %(default)s)')
     parser.add_argument('--agent-server', metavar='', dest='agent_host', default=D('agent_host'),
                         type=str, help='OpenAI API server address (default: %(default)s)')
+    parser.add_argument('--summarizer-server', metavar='', dest='summarizer_host',
+                        default=D('summarizer_host'),
+                        type=str, help='OpenAI API server address (default: %(default)s)')
+
 
     parser.add_argument('--api-key', metavar='', default=D('api_key'),
                         type=str, help='You API Key (default: REDACTED)')
@@ -883,6 +887,9 @@ def _add_arguments(parser: argparse.ArgumentParser, defaults, *, use_defaults: b
     parser.add_argument('--no-think-tag', action='store_true', default=D('no_think_tag'),
                         help='Use this if your model fails to produce a <think> tag before it'
                         ' begins reasoning')
+
+    parser.add_argument('--history-dir', metavar='', dest='vector_dir', default=D('vector_dir'),
+                        type=str, help='History directory (default: %(default)s)')
 
     parser.add_argument('--temperature', metavar='', type=float, default=D('temperature'),
                         help='Model temperature (default: %(default)s)')
