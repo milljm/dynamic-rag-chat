@@ -162,6 +162,10 @@ class ContextManager(PromptManager):
             self.common.write_debug(self.pre_llm.model_name, content)
         except APITimeoutError:
             return ('APITimeoutError', [], False)
+        # pylint: disable-next=bare-except  # can't handle everything
+        except:
+            return('Failed Return', [], False)
+
         if self.debug:
             self.console.print(f'PRE-PROCESSOR RESPONSE:\n{content}\n\n',
                                 style=f'color({self.opts.color})', highlight=False)
@@ -212,7 +216,12 @@ class ContextManager(PromptManager):
         if self.debug:
             self.console.print(f'ROLL REVERSAL PRE-PROCESSOR:\n{roll_reversal}\n\n',
                 style=f'color({self.opts.color})', highlight=False)
-        (_, list_rag_tags, _) = self.pre_processor(response, roll_reversal)
+        (_, list_rag_tags, error) = self.pre_processor(response, roll_reversal)
+        if not error:
+            self.console.print('ERROR running pre-processor. Generated output not saved.'
+                               r' Advised to run `\regenerate` to try again.',
+                style=f'color({self.opts.color})', highlight=False)
+            return
 
         scene = dict(self.scene.get_scene())
         for char in scene['entity']:
@@ -558,6 +567,8 @@ class ContextManager(PromptManager):
             collection_list = [self.common.attributes.collections[x] for
                                 x in self.common.attributes.collections]
 
+            # column cnt
+            documents['terminal_width'] = int(os.get_terminal_size().columns) - 5
             # populate chat history
             documents['chat_history'] = self.get_chat_history(history[branch])
 
@@ -573,7 +584,9 @@ class ContextManager(PromptManager):
             self.console.print('Processing query (meta tagging for RAG)...',
                                style=f'color({self.opts.color})',
                                highlight=False)
-            (_, meta_tags, _) = self.pre_processor(query, documents)
+            (_, meta_tags, error) = self.pre_processor(query, documents)
+            if not error:
+                return ([],0,0)
 
             # Populate explicit content if triggered
             documents['explicit'] = self.is_explicit(meta_tags)

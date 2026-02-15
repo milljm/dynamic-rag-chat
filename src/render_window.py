@@ -47,6 +47,8 @@ class RenderWindowState:
     model: str
     agent_llm: str
     agent_host: str
+    vision_llm: str
+    vision_host: str
     polisher: str
     polisher_cnt: int
     nsfw_model: str
@@ -122,6 +124,7 @@ class RenderWindow(PromptManager):
         self.common = common
         self.opts = args
         self.think_once = True
+        self.use_vision = False
         self.thinking_chunk = ''
         self.ooc_response = ''
 
@@ -194,6 +197,18 @@ class RenderWindow(PromptManager):
                                       stop_sequences=["<END_BEAT>", "<END_TURN>"],
                                       api_key=self.state.api_key,
                                       ),
+                'vision' :  ChatOpenAI(base_url=self.state.vision_host,
+                                      model=('None' if self.state.vision_llm is None
+                                             else self.state.agent_llm),
+                                      temperature=0.5,
+                                      top_p=args.top_p,
+                                      frequency_penalty=args.frequency_penalty,
+                                      presence_penalty=args.presence_penalty,
+                                      streaming=False,
+                                      max_completion_tokens=self.state.completion_tokens,
+                                      stop_sequences=["<END_BEAT>", "<END_TURN>"],
+                                      api_key=self.state.api_key,
+                                      ),
             }
 
         # Agent Prompt
@@ -230,6 +245,8 @@ class RenderWindow(PromptManager):
             model = args.model,
             agent_llm = args.agent_llm,
             agent_host = args.agent_host,
+            vision_llm = args.vision_llm,
+            vision_host = args.vision_host,
             polisher = args.polisher,
             polisher_cnt = args.polisher_cnt,
             nsfw_model = args.nsfw_model,
@@ -479,6 +496,8 @@ class RenderWindow(PromptManager):
 
         # Format text messages from template
         images = documents.pop('dynamic_images', [])
+        if images:
+            self.use_vision = True
         formatted_messages = prompt_template.format_messages(**documents)
 
         # Optional: inject images into HumanMessage if present
@@ -511,11 +530,13 @@ class RenderWindow(PromptManager):
     # Stream response as chunks
     def stream_response(self, documents: dict, messages: Document, polish: bool = False):
         """ Parse LLM Prompt """
+        # Priorities of which model to use depending on the situation
+        # I feel this should be way more betterer
         llm = 'nsfw' if documents['explicit'] else 'sfw'
         llm = 'polish' if polish else llm
+        llm = 'vision' if self.use_vision else llm
         for chunk in self.llm[llm].stream(messages):
             chunk = self.reveal_thinking(chunk, self.state.verbose)
-            # chunk = self.if_metatags(chunk, self.state.verbose)
             yield chunk
 
     def render_footer(self, time_taken: float = 0, **kwargs) -> Text:
@@ -569,6 +590,7 @@ class RenderWindow(PromptManager):
         stream = self.state.stream   # shorthand
         context = self.state.context # shorthand
         self.think_once = True
+        self.use_vision = False
 
         # pesky LLMs that have reasoning and don't generate a <think> token,
         # yet generate an ending </think> token!

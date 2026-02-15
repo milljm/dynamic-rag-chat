@@ -290,6 +290,7 @@ class Chat():
         previous = history[self.chat_branch][-2:-1:]
         documents.update(
             {'user_query'         : user_input,
+             'model'              : self.opts.model,
              'dynamic_files'      : '',
              'include_branch'     : '',
              'dynamic_images'     : [],
@@ -449,6 +450,7 @@ class Chat():
                      'user_query'               : user_input,
                      'name'                     : self.opts.name,
                      'user_name'                : self.opts.user_name,
+                     'model'                    : self.opts.model,
                      'chat_history'             : '',
                      'previous'                 : '',
                      'dynamic_files'            : '',
@@ -734,6 +736,10 @@ class Chat():
                 else:
                     user_payload = parsed.clean_text
                     documents = self.get_documents(user_payload)
+                if not documents:
+                    console.print("[red]There was an error while running pre-processor work.[/red]"
+                                  "In many cases, re-submitting your query again solves the issue.")
+                    continue
 
                 if parsed.command == "include":
                     val = parsed.args
@@ -806,6 +812,9 @@ def _add_arguments(parser: argparse.ArgumentParser, defaults, *, use_defaults: b
     parser.add_argument('--summarizer-llm', metavar='', dest='summarizer_llm',
                         default=D('summarizer_llm'),
                         type=str, help='LLM Agent Tooling Model (default: %(default)s)')
+    parser.add_argument('--vision-llm', metavar='', dest='vision_llm',
+                        default=D('vision_llm'),
+                        type=str, help='LLM Vision Model (default: %(default)s)')
 
     parser.add_argument('--llm-server', metavar='', dest='host', default=D('host'),
                         type=str, help='OpenAI API server address (default: %(default)s)')
@@ -819,6 +828,9 @@ def _add_arguments(parser: argparse.ArgumentParser, defaults, *, use_defaults: b
                         type=str, help='OpenAI API server address (default: %(default)s)')
     parser.add_argument('--summarizer-server', metavar='', dest='summarizer_host',
                         default=D('summarizer_host'),
+                        type=str, help='OpenAI API server address (default: %(default)s)')
+    parser.add_argument('--vision-server', metavar='', dest='vision_host',
+                        default=D('vision_host'),
                         type=str, help='OpenAI API server address (default: %(default)s)')
 
 

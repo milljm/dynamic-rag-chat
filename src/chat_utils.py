@@ -45,6 +45,7 @@ class ChatOptions:
     entity_host: Optional[str] = None
     agent_host: Optional[str] = None
     summarizer_host: Optional[str] = None
+    vision_host: Optional[str] = None
 
     # ---------- models
     model: str = 'gemma3:27b'
@@ -55,6 +56,7 @@ class ChatOptions:
     nsfw_model: Optional[str] = None
     agent_llm: Optional[str] = None
     summarizer_llm: Optional[str] = None
+    vision_llm: Optional[str] = None
 
     # ---------- model settings
     completion_tokens: int = 4000
@@ -116,6 +118,7 @@ class ChatOptions:
         'llm_server':                'host',
         'agent_server':              'agent_host',
         'summarizer_server':         'summarizer_host',
+        'vision_server':             'vision_host',
         'pre_llm':                   'preconditioner',
         'embedding_llm':             'embeddings',
         'pre_server':                'pre_host',
