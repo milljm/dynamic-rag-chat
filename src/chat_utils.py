@@ -41,22 +41,22 @@ class ChatOptions:
     # ---------- “core” options ----------
     host: str = 'http://localhost:11434/v1'
     pre_host: Optional[str] = None
-    emb_host: Optional[str] = None
     entity_host: Optional[str] = None
     agent_host: Optional[str] = None
     summarizer_host: Optional[str] = None
     vision_host: Optional[str] = None
+    emb_host: Optional[str] = None
 
     # ---------- models
     model: str = 'gemma3:27b'
     polisher: Optional[str] = None
     preconditioner: Optional[str] = None
     entity_llm: Optional[str] = None
-    embeddings: Optional[str] = None
     nsfw_model: Optional[str] = None
     agent_llm: Optional[str] = None
     summarizer_llm: Optional[str] = None
     vision_llm: Optional[str] = None
+    embeddings: Optional[str] = None
 
     # ---------- model settings
     completion_tokens: int = 4000
