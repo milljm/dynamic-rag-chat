@@ -199,7 +199,7 @@ class RenderWindow(PromptManager):
                                       ),
                 'vision' :  ChatOpenAI(base_url=self.state.vision_host,
                                       model=('None' if self.state.vision_llm is None
-                                             else self.state.agent_llm),
+                                             else self.state.vision_llm),
                                       temperature=0.5,
                                       top_p=args.top_p,
                                       frequency_penalty=args.frequency_penalty,
