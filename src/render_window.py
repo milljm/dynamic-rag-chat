@@ -522,9 +522,16 @@ class RenderWindow(PromptManager):
             agent_executor = AgentExecutor(agent=agent, tools=self.agent_tools, verbose=False)
             self.console.print('Agent Tool running...', style=f'color({self.state.color})',
                                 highlight=False)
-            result = agent_executor.invoke({"input": documents['user_query']})
-            documents['dynamic_files'] += f'\n=== AGENT_TOOL_RESULT ===\n{result}\n\n'
-            return self.get_messages(documents, polish=polish)
+            try:
+                result = agent_executor.invoke({"input": documents['user_query']})
+                documents['dynamic_files'] += f'\n=== AGENT_TOOL_RESULT ===\n{result}\n\n'
+                return self.get_messages(documents, polish=polish)
+            # pylint: disable-next=bare-except # too many ways an LLM can go wrong
+            except:
+                self.console.print('Error running agent!', style=f'color({self.state.color})',
+                                highlight=False)
+                documents['dynamic_files'] += '\n=== AGENT_TOOL_RESULT ===\nERROR RUNNING AGENT\n\n'
+                return self.get_messages(documents, polish=polish)
         return messages
 
     # Stream response as chunks
@@ -546,6 +553,8 @@ class RenderWindow(PromptManager):
         cleaned_color = kwargs['cleaned_color']
         token_savings = kwargs['token_savings']
         pre_processing_time = kwargs['pre_process_time']
+        # pylint: disable-next=consider-using-f-string # no. this is how its done
+        formatted_time = '{:.1f}s'.format(pre_processing_time)
         rating = kwargs['content_rating']
         turn = kwargs['turn_count']
 
@@ -560,7 +569,7 @@ class RenderWindow(PromptManager):
         footer.append(f'{token_savings}', style=f'color({cleaned_color})')
         footer.append(' context:', style=f'color({foot_color})')
         footer.append(f'{prompt_tokens}', style=f'color({self._color_for_context(prompt_tokens)})')
-        footer.append(f':{pre_processing_time}', style=f'color({foot_color})')
+        footer.append(f':{formatted_time}', style=f'color({foot_color})')
         footer.append(' completion:', style=f'color({foot_color})')
         footer.append(f'{token_count}', style=f'color({self._color_for_completion(token_count)})')
         footer.append(f') {self._calc_tokens_per_sec(token_count, time_taken):.1f}T/s',
@@ -598,7 +607,10 @@ class RenderWindow(PromptManager):
             stream.no_think_bug = True
 
         history = self.common.load_chat()
+        pre_process_time = float(documents['pre_process_time'])
+        start_time = time.time()
         messages = self.get_messages(documents)
+        pre_process_time += time.time()-start_time
         token_total = documents['prompt_tokens']
         for message in messages:
             token_total += context.token_retriever(message.content)
@@ -610,23 +622,22 @@ class RenderWindow(PromptManager):
         footer_meta = {'token_savings'   : documents['token_savings'],
                        'prompt_tokens'   : token_total,
                        'cleaned_color'   : documents['cleaned_color'],
-                       'pre_process_time': documents['pre_process_time'],
+                       'pre_process_time': pre_process_time,
                        'token_count'     : 0,
                        'content_rating'  : documents['explicit'],
                        'turn_count'      : len(history[branch])+1}
-        start_time = 0
         color = self.state.color-5 if self.state.light_mode else self.state.color
         _rag = '' if not self.state.no_rags and self.state.assistant_mode else 'RAG+'
         self.renderable.header = Text(f'Submitting relevant {_rag}History tokens: '
                                       f'{footer_meta["prompt_tokens"]} '
-                                      f'(took {footer_meta["pre_process_time"]})...'
-                                      f'{documents.get("in_line_commands", "")}',
+                                      f'{documents.get("in_line_commands", "")} '
+                                      f"(took {'{:.1f}s'.format(pre_process_time)})...",
                                       style=f'color({color})')
         self.renderable.query = Markdown(f'**You:** {documents["user_query"]}')
         self.renderable.assistant = Text(documents["name"], style='bold color(208)')
         self.renderable.response = Text('Inference/Loading...', style=f'color({color}')
         self.renderable.footer = self.render_footer(0.0, **footer_meta)
-
+        start_time = 0
         with Live(refresh_per_second=20, console=self.console) as live:
             live.console.clear(home=True)
             self.render_chat(live)

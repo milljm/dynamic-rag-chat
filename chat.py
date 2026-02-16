@@ -330,8 +330,7 @@ class Chat():
                        'Maximum response length: '
                        f'{self.opts.completion_tokens}')
 
-        # pylint: disable=consider-using-f-string  # no, {:.f} this is how it is done
-        pre_process_time = '{:.1f}s'.format(time.time() - pre_process_time)
+        pre_process_time = (time.time() - pre_process_time)
 
         # Fill documents with other useful information used downstream. This is a bit dirty
         # but, some of this information may become useful to provide to the LLM itself.
@@ -728,14 +727,14 @@ class Chat():
                 apply_rare_controls(parsed.rare_controls, self.session.scene.get_scene())
 
                 # Build documents (with or without context)
-                if parsed.command == "no-context":
-                    documents = self.no_context(parsed.args or parsed.clean_text)
-                    documents['in_line_commands'] = 'Meta: [no-context]'
-                    # Use args+clean_text as the actual user content for this query
-                    user_payload = (parsed.args or parsed.clean_text)
+                if parsed.command in ('no-context', 'agent'):
+                    if parsed.command == 'no-context':
+                        documents = self.no_context(parsed.args or parsed.clean_text)
+                    else:
+                        documents = self.get_documents(parsed.args or parsed.clean_text)
+                    documents['in_line_commands'] = f'Meta: [{parsed.command}]'
                 else:
-                    user_payload = parsed.clean_text
-                    documents = self.get_documents(user_payload)
+                    documents = self.get_documents(parsed.clean_text)
                 if not documents:
                     console.print("[red]There was an error while running pre-processor work.[/red]"
                                   "In many cases, re-submitting your query again solves the issue.")
