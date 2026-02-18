@@ -20,6 +20,7 @@
 #     "pygments",
 #     "jinja2",
 #     "duckduckgo-search",
+#     "ddgs",
 # ]
 # ///
 import os
