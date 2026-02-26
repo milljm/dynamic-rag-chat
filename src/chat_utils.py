@@ -6,6 +6,7 @@ import sys
 import pickle
 import json
 import datetime
+import secrets
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping, Optional
@@ -40,23 +41,24 @@ class ChatOptions:
     """ Chat arguments dataclass """
     # ---------- “core” options ----------
     host: str = 'http://localhost:11434/v1'
-    pre_host: Optional[str] = None
-    entity_host: Optional[str] = None
-    agent_host: Optional[str] = None
-    summarizer_host: Optional[str] = None
-    vision_host: Optional[str] = None
-    emb_host: Optional[str] = None
+    pre_host: str = host
+    emb_host: str = host
+    polisher_host: str = host
+    entity_host: str = host
+    agent_host: str = host
+    summarizer_host: str = host
+    vision_host: str = host
 
     # ---------- models
-    model: str = 'gemma3:27b'
-    polisher: Optional[str] = None
-    preconditioner: Optional[str] = None
-    entity_llm: Optional[str] = None
-    nsfw_model: Optional[str] = None
-    agent_llm: Optional[str] = None
-    summarizer_llm: Optional[str] = None
-    vision_llm: Optional[str] = None
-    embeddings: Optional[str] = None
+    model: str = 'gemma3:12b'
+    preconditioner: str = 'gemma3:1b'
+    embeddings: str = 'nomic-embed-text'
+    polisher: Optional[str|None] = None
+    entity_llm: Optional[str|None] = None
+    nsfw_model: Optional[str|None] = None
+    agent_llm: Optional[str|None] = None
+    summarizer_llm: Optional[str|None] = None
+    vision_llm: Optional[str|None] = None
 
     # ---------- model settings
     completion_tokens: int = 4000
@@ -68,6 +70,7 @@ class ChatOptions:
     context_window: int = 32768
     disable_thinking: bool = False
     no_think_tag: bool = False
+    seed: Optional[int] = secrets.randbits(32)
 
     time_zone: str = 'GMT'
     api_key: str = 'none'
@@ -116,6 +119,7 @@ class ChatOptions:
     _ALIASES = {
         # YAML/config wording        # ChatOptions field
         'llm_server':                'host',
+        'polisher_server':           'polisher_host',
         'agent_server':              'agent_host',
         'summarizer_server':         'summarizer_host',
         'vision_server':             'vision_host',

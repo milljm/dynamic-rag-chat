@@ -50,6 +50,7 @@ class RenderWindowState:
     vision_llm: str
     vision_host: str
     polisher: str
+    polisher_host: str
     polisher_cnt: int
     nsfw_model: str
     host: str
@@ -58,6 +59,7 @@ class RenderWindowState:
     syntax_theme: str
     context: ContextManager
     current_dir: str
+    seed: int|None = None
     color: int = field(init=False)
     pulse_colors: list[int] = field(default_factory=lambda: list(
                                               range(234,254)) + list(range(252,233,-1))
@@ -156,6 +158,7 @@ class RenderWindow(PromptManager):
                                     stop_sequences=["<END_BEAT>", "<END_TURN>"],
                                     api_key=self.state.api_key,
                                     extra_body = extra_body,
+                                    seed = self.state.seed,
                                     ),
 
                 'nsfw' : ChatOpenAI(base_url=self.state.host,
@@ -170,8 +173,9 @@ class RenderWindow(PromptManager):
                                     stop_sequences=["<END_BEAT>", "<END_TURN>"],
                                     api_key=self.state.api_key,
                                     extra_body = extra_body,
+                                    seed = self.state.seed,
                                     ),
-                'polish' : ChatOpenAI(base_url=self.state.host,
+                'polish' : ChatOpenAI(base_url=self.state.polisher_host,
                                       model=('None' if self.state.polisher is None
                                              else self.state.polisher),
                                       temperature=0.9 if self.state.assistant_mode
@@ -184,6 +188,7 @@ class RenderWindow(PromptManager):
                                       stop_sequences=["<END_BEAT>", "<END_TURN>"],
                                       api_key=self.state.api_key,
                                       extra_body = extra_body,
+                                      seed = self.state.seed,
                                       ),
                 'tool' :    ChatOpenAI(base_url=self.state.agent_host,
                                       model=('None' if self.state.agent_llm is None
@@ -196,6 +201,7 @@ class RenderWindow(PromptManager):
                                       max_completion_tokens=self.state.completion_tokens,
                                       stop_sequences=["<END_BEAT>", "<END_TURN>"],
                                       api_key=self.state.api_key,
+                                      seed = self.state.seed,
                                       ),
                 'vision' :  ChatOpenAI(base_url=self.state.vision_host,
                                       model=('None' if self.state.vision_llm is None
@@ -208,6 +214,7 @@ class RenderWindow(PromptManager):
                                       max_completion_tokens=self.state.completion_tokens,
                                       stop_sequences=["<END_BEAT>", "<END_TURN>"],
                                       api_key=self.state.api_key,
+                                      seed = self.state.seed,
                                       ),
             }
 
@@ -248,6 +255,7 @@ class RenderWindow(PromptManager):
             vision_llm = args.vision_llm,
             vision_host = args.vision_host,
             polisher = args.polisher,
+            polisher_host = args.polisher_host,
             polisher_cnt = args.polisher_cnt,
             nsfw_model = args.nsfw_model,
             host = args.host,
@@ -255,7 +263,8 @@ class RenderWindow(PromptManager):
             completion_tokens = args.completion_tokens,
             syntax_theme = args.syntax_theme,
             context = context,
-            current_dir = current_dir
+            current_dir = current_dir,
+            seed = args.seed,
         )
         self.renderable = Renderables(
             header = Text(''),

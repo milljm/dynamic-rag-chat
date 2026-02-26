@@ -33,6 +33,7 @@ import argparse
 import mimetypes
 import shutil
 import glob
+import hashlib
 from dataclasses import dataclass, asdict
 from copy import deepcopy
 from typing import Dict, Any, List, Optional
@@ -69,7 +70,6 @@ HELP_TEXT = (
     "\t\\branch NAME@N               - set/fork branch name, if empty list branches;\n"
     "\t                               optional @N to fork from first N turns\n"
     "\t\\dbranch NAME                - delete chat history branch\n"
-    "\t\\seed N                      - set RNG seed (or omit to clear)\n"
     "\t\\history [N]                 - show last N user inputs (default 5)\n"
     "\t\\include branch              - include branch as attachment\n"
     "\t\\reset                       - resets history/RAG for current branch\n"
@@ -686,15 +686,6 @@ class Chat():
                             # self.session.common.save_chat()
                         # ----------------------------------------------------------------
                         continue
-                    elif cmd == "seed":
-                        try:
-                            val = int(arg)
-                            self.session.state.set_seed(val)
-                            console.print(f"[green]Seed set:[/green] {val}")
-                        except IndexError:
-                            self.session.state.set_seed(None)
-                            console.print("[yellow]Seed cleared.[/yellow]")
-                        continue
                     elif cmd == "history":
                         try:
                             n = int(arg or "5")
@@ -777,6 +768,13 @@ class Chat():
         except EOFError:
             sys.exit()
 
+def seed_from_string(user_input: str) -> int:
+    """ generate a valid 32bit int based on incoming text """
+    return int.from_bytes(
+        hashlib.sha256(user_input.encode("utf-8")).digest()[:4],
+        "big"
+    )
+
 def verify_args(p_args):
     """ verify arguments are correct """
     # The issue added to the feature tracker: nothing to verify yet
@@ -817,6 +815,9 @@ def _add_arguments(parser: argparse.ArgumentParser, defaults, *, use_defaults: b
                         type=str, help='LLM Vision Model (default: %(default)s)')
 
     parser.add_argument('--llm-server', metavar='', dest='host', default=D('host'),
+                        type=str, help='OpenAI API server address (default: %(default)s)')
+    parser.add_argument('--polisher-server', metavar='', dest='polisher_host',
+                        default=D('polisher_host'),
                         type=str, help='OpenAI API server address (default: %(default)s)')
     parser.add_argument('--pre-server', metavar='', dest='pre_host', default=D('pre_host'),
                         type=str, help='OpenAI API server address (default: %(default)s)')
@@ -916,6 +917,9 @@ def _add_arguments(parser: argparse.ArgumentParser, defaults, *, use_defaults: b
     parser.add_argument('--presence-penalty', metavar='', type=float,
                         default=D('presence_penalty'),
                         help='Model presence penalty (default: %(default)s)')
+    parser.add_argument('--seed', metavar='', type=str,
+                        default=D('seed'),
+                        help='Model(s) seed (default: %(default)s)')
 
     parser.add_argument('--context-window', metavar='', type=int,
                         default=D('context_window'),
@@ -975,6 +979,7 @@ if __name__ == '__main__':
     })
     if _opts.light_mode:
         console = Console(theme=light_mode_theme)
+    _opts.seed = seed_from_string(_opts.seed)
     session = SessionContext.from_args(console, _opts)
     import_data = ImportData(session)
     try:

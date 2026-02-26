@@ -10,15 +10,50 @@
 # directory when finished to remove any trace of your conversations.
 chat:
   model: gemma3:27b                       (heavy-weight LLM, your main go-to)
-  nsfw_model: some-nsfw-capable-model     (Optional. Defaults to model if not set. If your stories are going to be rated higher than PG=13 material, you'll want to make an NSFW model available)
-  pre_llm: gemma3:1b                      (light-weight LLM, used for metadata tagging)
+  pre_llm: gemma3:1b                      (light-weight LLM, used for metadata tagging, NSFW/SFW detection, etc)
   embedding_llm: nomic-embed-text         (embeddings for RAG vector database work)
+  nsfw_model:                             (Optional – for explicit or unfiltered storytelling)
+
+                                            Most models are SFW (Suitable For Work), meaning they are
+                                            alignment-constrained. They can handle mature themes such as
+                                            violence, war, moral darkness, sensual tension, crime, and
+                                            psychological horror — but they will avoid explicit sexual
+                                            content, extreme graphic gore, or detailed illegal instruction.
+
+                                            If your story requires fully explicit sexual content, highly
+                                            graphic brutality, or other unrestricted material, you may
+                                            choose to configure a dedicated NSFW-capable model.
+
+                                            NSFW models are not inherently “better” — they are simply
+                                            less restricted. For certain genres (erotica, extreme horror,
+                                            exploitation fiction, etc.), that flexibility may be useful.
+
+                                            Some NSFW models that come to mind:
+                                               huihui-glm-4.6-abliterated-mlx
+                                               midnight-miqu-103b-v1.0
+                                               gemma3-27b-abliterated
+
+                                            Tip:
+                                            If you intend to write primarily uncensored material, it is
+                                            often cleaner to make your NSFW model the default model and
+                                            leave this option unset. The separate configuration exists
+                                            for experimentation or dynamic routing setups (e.g., switching
+                                            models when explicit thresholds are reached).
+  polisher:                               (Optional: beautiful story prose (Midnight Miqu))
+  summarizer_llm:                         (Optional: speed and summarization of long context (mistral-7b-instruct))
+  entity_llm:                             (Optional: story/context metadata extraction (qwen2.5-coder-7b-instruct))
+  agent_llm:                              (Optional: reasoning agentic tooling tasks (glm-4.6v-flash))
+  vision_llm:                             (Optional: image processing (qwen3-vl-30b))
   history_dir:                            /some/writable/path or leave blank for default
   rag_matches: 5                          (how many matches to allow from the RAG: 5 from user's RAG and 5 from AIs)
   history_session: 5                      (how many turns of history to provide. Thats 15 from all sources by default)
-  llm_server: https://api.openai.com/v1   (an OpenAI compatible API server address. If using Ollama locally that would be: http://localhost:11434/v1)
-  pre_server:                             (the server for which is hosting the pre_llm model. If using Ollama locally that would be: http://localhost:11434/v1)
-  embedding_server:                       (the server for which is hosting the embedding_llm model. If using Ollama locally that would be: http://localhost:11434/v1)
+  llm_server: https://api.openai.com/v1   (an OpenAI compatible API server address. If using Ollama locally that would be: http://localhost:11434/v1. If using LM Studio locally that would be: http://localhost:1234/v1)
+  pre_server:                             (OpenAI API capable server address)
+  entity_server:                          (OpenAI API capable server address)
+  agent_server:                           (OpenAI API capable server address)
+  summarizer_server:                      (OpenAI API capable server address)
+  vision_server:                          (OpenAI API capable server address)
+  embedding_server:                       (the server for which is hosting the embedding_llm model)
   api_key: YOUR API KEY                   (your assigned API key, or empty if using local Ollama server)
   time_zone: 'America/Denver'             (currently not used in the system prompts, easy to implement though: {date_time})
   light_mode: False                       (set to true if you use a high luminance terminal background)
@@ -27,6 +62,7 @@ chat:
   user_name: your character's name        (Use this to ground your LLMs to you being the protagonist in your stories)
   assistant_mode: True                    (use non-story telling prompts. Useful if you're using this chat script as a tool instead of a story teller)
   syntax_style: fruity                    (specify a syntax highlighting theme see: https://pygments.org/styles/ for themes)
+  seed: str                               (specify a string to be hashlib into a 32bit int seed for LLMs (useful for debugging/reproducibility))
   debug: False
 
 # Ollama server switches of note:

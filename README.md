@@ -1,18 +1,18 @@
 # 🧠 dynamic-rag-chat
 
-**A dynamic, context-aware chat system powered by LLMs, RAGs, and context management.**
-*Built for immersive role-playing with evolving memory and rich, dynamic context.*
+**A Terminal-first, orchestrated, context-aware chat system powered by LLMs, RAGs, and context management.**
+*Built for immersive role-playing with evolving memory and rich, relevant context.*
 
 ---
 
 ## ✨ What is it?
 
-`dynamic-rag-chat` is an open-source chat tool built around retrieval-augmented generation (RAG), using metadata field filtering and context tagging. A lightweight pre-conditioner 'tags' relevant information based on the user's query, enabling a highly targeted context window.
+`dynamic-rag-chat` is a Terminal UI, open-source chat tool built around retrieval-augmented generation (RAG), using metadata field filtering and context tagging. A lightweight pre-conditioner extracts and tags relevant information based on the user's query, enabling a highly targeted context window. The resulting context is then routed to specialized LLMs based on the task at hand.
 
 This allows the LLM to:
 
 - Recall plot points, characters, and lore across long sessions
-- Provide narrative nuance often lost in general-purpose RAG pipelines
+- Provide narrative nuance often lost in general-purpose chat tools
 - Avoid clutter and hallucination while generating responses more quickly
 
 Perfect for storytelling, world-building, AI role-play, and narrative design — or just a powerful tool for tinkering with LLMs and RAGs.
@@ -21,18 +21,18 @@ Perfect for storytelling, world-building, AI role-play, and narrative design —
 
 ## 🧩 Features
 
-- ⌨️ **Terminal-first UI**: Clean CLI using `prompt_toolkit` and `rich`
+- ⌨️ **Terminal-first UI**: Clean CLI using `prompt_toolkit` and `rich` (Markdown in Terminal)
 - 🔁 **Streaming responses**: Token-level generation, async-ready
 - 🧾 **Persistent chat history**: Your context survives between runs
-- 🧠 **Dynamic RAGs**: Retrieval is triggered by user input or LLM output
-- ♻️ **Assistant Swap**: Switch between story-teller and assistant mode with an argument (while in assistant mode, chat acts more like a tool)
-- ✍️ **Preconditioning layer**: Lightweight LLM summarizes RAG output before the larger model (saves tokens while retaining depth)
-    *(Note: in active development)*
-- 🧩 **Recursive RAG import**:
-    `./chat.py --import-dir /path/to/dir` scans, tags, and loads `.txt`, `.md`, `.html`, and `.pdf` files. HTML is parsed using BeautifulSoup.
-- 🧪 **Debug mode**: View prompt assembly, RAG matches, and context composition
+- 🧠 **Multiple RAGs**: Retrieval is triggered by user input and LLM output
+- ♻️ **Assistant Swap**: Switch between story-teller and assistant mode with an argument (In assistant mode, the chat behaves more like a utility tool, with vision and web-search agent support enabled.)
+- ✍️ **Preconditioning layer**: Lightweight LLM summarizes RAG/Chat History before sending to the larger model (saves tokens while retaining depth)
+- 🧩 **Recursive RAG import**: Pre-populate your RAG with "Gold" documents or "Canon Lore"
+    `./chat.py --import-dir /path/to/dir` scans, tags, and loads `.txt`, `.md`, `.html`, and `.pdf` files. HTML is parsed using BeautifulSoup. If using `--assistant-mode`, the files are extended to `*.*` while ignoring binary files.
+- 🧪 **Debug mode**: View prompt assembly, RAG matches, and context composition, LLM raw output, etc
+- 🛠️ **Agents**: Agent tool support for web search (`\agent How are the stocks doing today`)
 - 📂 **Inline File & Image Loading**:
-    The chat tool supports inline resource references, letting you embed file, image, or URL content directly in your message using double braces:
+    The chat tool supports inline resource references, letting you embed files, images, or URL(s) content directly in your message using double braces:
 
     ```text
     images: {{/path/to/image.png}}
@@ -53,6 +53,38 @@ Perfect for storytelling, world-building, AI role-play, and narrative design —
     - ✅ `.txt`, `.md`, `.html`, `.pdf`
     - ✅ `.png`, `.jpg`, `.jpeg` (base64 encoded and injected for vision models)
     - ✅ URLs (scraped via BeautifulSoup for readable text)
+- ？**In-line commands**: An extensive in-line command system:
+```pre
+>>> \?
+in-command switches you can use:
+
+        \regenerate                  - regenerate last turn
+        \no-context msg              - perform a query with no context
+        \agent msg                   - enable agent (web search)
+        \delete-last                 - delete last message from history
+        \turn                        - show turn/status
+        \rewind N                    - rewind to turn N (keep 0..N)
+        \branch NAME@N               - set/fork branch name, if empty list branches;
+                                       optional @N to fork from first N turns
+        \dbranch NAME                - delete chat history branch
+        \seed N                      - set RNG seed (or omit to clear)
+        \history [N]                 - show last N user inputs (default 5)
+        \include branch              - include branch as attachment
+        \reset                       - resets history/RAG for current branch
+
+context injection
+    {{/absolute/path/to/file}}       - include a file as context
+    {{https://somewebsite.com/}}     - include URL as context
+
+keyboard shortcuts (terminal):
+
+    Ctrl-W - delete word left of cursor
+    Ctrl-U - delete everything left of cursor
+    Ctrl-K - delete everything right of cursor
+    Ctrl-A - move to beginning of line
+    Ctrl-E - move to end of line
+    Ctrl-L - clear screen
+```
 
 <img width="764" alt="light_mode" src="https://github.com/user-attachments/assets/df7bd018-0354-45e7-8451-903d2834fcfd" />
 
@@ -87,37 +119,28 @@ uv pip install -r requirements.txt
 
 ### 🦙 Ollama (Recommended for Local Models)
 
-This tool uses three LLMs: a heavyweight model for response generation, a lightweight model for tagging/summarizing, and a dedicated embedding model for RAG. If you're not using OpenAI for all three, you'll need a local host like [Ollama](https://ollama.com/).
+This tool requires two LLMs at a minimum: a model for response generation, and an embedding model for RAG work.
 
 Install and run Ollama (via Conda or manual method):
 ```bash
-conda activate dynamic-rag-chat
+conda activate dynamic-rag
 conda install ollama
 export OLLAMA_MAX_LOADED_MODELS=3
 ollama serve
 ```
-*`OLLAMA_MAX_LOADED_MODELS=3` is encouraged, as this tool uses three models simultaneously*
+*`OLLAMA_MAX_LOADED_MODELS=3` is encouraged, as this tool uses three+ models simultaneously*
 
 In another terminal:
 ```bash
-conda activate dynamic-rag-chat
+conda activate dynamic-rag
 ollama list  # Will either return all your hosted models, or nothing. But should NOT fail
 ollama pull nomic-embed-text
-ollama pull gemma3:1b
-ollama pull gemma3:27b  # Only if you’re not using OpenAI
+ollama pull gemma3:1b   # lightweight pre-processor model
+ollama pull gemma3:12b  # heavy model that should work on most hardware
 ```
-Recommended Ollama-hosted models:
-- Heavy Weight LLM [gemma3:27b](https://ollama.com/library/gemma3:27b)
-- Light Weight LLM (preprocessor) [gemma3:1b](https://ollama.com/library/gemma3:1b)
-- Embedding LLM (for RAG work) [nomic-embed-text](https://ollama.com/library/nomic-embed-text)
-- If you have the hardware, I encourage you to explore and use the thousands of available models out there! Some are better than others for story-telling:
-    - [Mixtral](https://ollama.com/library/mixtral:8x22b)
-    - [llama4:maverick](https://ollama.com/library/llama4:maverick)
-    - [qwen2.5](https://ollama.com/library/qwen2.5:72b)
-- As for preprocessor models, there may be better ones as well:
-    - [qwen2.5-coder](https://ollama.com/library/qwen2.5-coder/tags)
 
-Mix and Match, Explore and have fun!
+#### Experiment
+There are thousands of models to choose from. I encourage you to experiment! Mix'n match, explore and have fun! Search the internet for Ollama library, or head on over to https://huggingface.co and begin your journey into LLMs. If you are already a fan of HuggingFace, I recommend using this chat tool with LM Studio instead of Ollama (way more models to choose from).
 
 #### ⚙️ Example usage
 If you pulled the default models above, you only need to launch `./chat.py` without arguments:
@@ -153,37 +176,53 @@ conda activate dynamic-rag-chat
 ./chat.py
 ```
 
-### Under the hood design process
+### Under the orchestration process
 
 ```
 [User Input]
      ↳ [Inline resource detected: {{/path/to/file}}, {{https://url}}, etc]
+          ↳ If text file: open and inject content into context
+          ↳ If image: base64-encode and embed for LLM vision support
+          ↳ If URL: fetch and extract readable text via BeautifulSoup
+          ↳ [If \agent: perform web search using dedicated Tool Model]
+     ↓
+[Pre-conditioner (Lightweight LLM extracts metadata tags)]
+     ↓
+[Metadata tags parsed → RAG retrieval: field-filtered, BM25, similarity matching]
+     ↓
+[Context Manager: RAG result deduplication, chat history, scene/meta injection]
+          ↳ [If one-shot enabled - Use dedicated summarization model to produce a summary of chat history]
           ↓
-          → If text file: open and inject content into context
-          → If image: base64-encode and embed for LLM vision support
-          → If URL: fetch and extract readable text via BeautifulSoup
+     ↳ [If Image detected: Use dedicated Vision Model to produce response]
+     ↳ [If content rating is NSFW: use dedicated NSFW Model]
+     ↳ [Else: Heavyweight LLM Generates Response]
+          ↓
+[If Polisher enabled - post-process output using dedicated polisher model for additional quality prose]
      ↓
-[Pre-conditioner (Lightweight LLM applies metadata tags)]
-     ↓
-[Metadata tags parsed → field-filtered RAG retrieval]
-     ↓
-[Context Manager: deduplication, chat history, scene/meta injection]
-     ↓
-[Prompt Template Constructed]
-     ↓
-[Heavyweight LLM Generates Response]
-     ↓
-[Chat + Context Saved]
-     ↳ (threaded: new metadata tags → RAG collections updated)
+[Output to Screen]
+     ↓ ↳ (threaded non-blocking: new metadata extracted → NPC entity creation from output → RAG collections updated)
+[User Input]
 ```
+
+In all, this tool allows for 8 different models to be used:
+- Pre-conditioner metadata extraction
+- Summarizer
+- Agent Tool (web search)
+- Vision model
+- NSFW model
+- General Heavyweight model
+- Polisher post-process model
+- Post-Process entity extraction/generation model (the LLM created an NPC that we dedicate creating a permanent character sheet for)
 
 ### ❓Why This?
 
-Most RAG frameworks focus on Q&A or document retrieval using 1000/200 token chunking. This tool takes a different route:
+Most chat tools treat conversation as a sliding window of tokens. Once the window fills, memory collapses, the model forgets key facts, or worse: invents new ones you never discussed...
 
-- Uses 100/50 '.' split chunking for high-granularity tagging
-- Applies LLMs to generate their own memory scaffolding ({{lore:...}})
-- Employs preconditioned filtering to keep only high-value context
-- Balances narrative freedom with factual continuity
+I wanted to create a tool that basically felt like talking to world-class tools such as ChatGPT, which makes use of RAGs and multiple LLMs to achieve specialized relevant output.
 
-This is ideal for storytelling — keeping the LLM imaginative, but grounded.
+- RAG Uses 100/50 '.' split chunking for high-granularity tagging suitable for chatting/story telling
+     - Both USER and AI utilize their own RAG.
+     - RAGs are maintained dynamically (\branch cool_story_so_far) will copy existing RAG artifacts into a new RAG collection as you branch (fork) from a current conversation.
+- Employs preconditioned filtering to keep only high-value content for a pruned healthy context token count. (deduplication/fuzzy match removal)
+- Utilizes multiple LLMs for their individual strengths (model orchestration).
+
