@@ -182,7 +182,7 @@ conda activate dynamic-rag
 ./chat.py
 ```
 
-### Under the orchestration process
+### The orchestration process
 
 ```
 [User Input]
