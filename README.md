@@ -66,7 +66,6 @@ in-command switches you can use:
         \branch NAME@N               - set/fork branch name, if empty list branches;
                                        optional @N to fork from first N turns
         \dbranch NAME                - delete chat history branch
-        \seed N                      - set RNG seed (or omit to clear)
         \history [N]                 - show last N user inputs (default 5)
         \include branch              - include branch as attachment
         \reset                       - resets history/RAG for current branch
