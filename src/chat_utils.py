@@ -53,12 +53,12 @@ class ChatOptions:
     model: str = 'gemma3:12b'
     preconditioner: str = 'gemma3:1b'
     embeddings: str = 'nomic-embed-text'
-    polisher: Optional[str|None] = None
-    entity_llm: Optional[str|None] = None
-    nsfw_model: Optional[str|None] = None
-    agent_llm: Optional[str|None] = None
-    summarizer_llm: Optional[str|None] = None
-    vision_llm: Optional[str|None] = None
+    polisher: Optional[str] = 'None'
+    entity_llm: Optional[str] = 'None'
+    nsfw_model: Optional[str] = 'None'
+    agent_llm: Optional[str] = 'None'
+    summarizer_llm: Optional[str] = 'None'
+    vision_llm: Optional[str] = 'None'
 
     # ---------- model settings
     completion_tokens: int = 4000
@@ -70,7 +70,7 @@ class ChatOptions:
     context_window: int = 32768
     disable_thinking: bool = False
     no_think_tag: bool = False
-    seed: Optional[int] = secrets.randbits(32)
+    seed: Optional[str] = str(secrets.randbits(32))
 
     time_zone: str = 'GMT'
     api_key: str = 'none'

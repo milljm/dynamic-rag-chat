@@ -656,7 +656,7 @@ class RenderWindow(PromptManager):
                     start_time = time.time()
                 current_response += piece.content
                 footer_meta['token_count'] += self.response_count(piece.content)
-                if (self.state.polisher is None
+                if (self.state.polisher == 'None'
                      or documents['user_query'].find('OOC:') != -1
                      or self.opts.assistant_mode):
                     self.renderable.response = self.build_content(current_response)
@@ -675,7 +675,7 @@ class RenderWindow(PromptManager):
                 self.render_chat(live)
 
             # Polisher + polishing cnt
-            if (self.state.polisher is not None
+            if (self.state.polisher != 'None'
                     and documents['user_query'].find('OOC:') == -1
                     and not self.opts.assistant_mode):
                 self.renderable.response = Text('Loading Polisher...',

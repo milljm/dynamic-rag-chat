@@ -28,10 +28,9 @@ Perfect for storytelling, world-building, AI role-play, and narrative design —
 - ♻️ **Assistant Swap**: Switch between story-teller and assistant mode with an argument (In assistant mode, the chat behaves more like a utility tool, with vision and web-search agent support enabled.)
 - ✍️ **Preconditioning layer**: Lightweight LLM summarizes RAG/Chat History before sending to the larger model (saves tokens while retaining depth)
 - 🧩 **Recursive RAG import**: Pre-populate your RAG with "Gold" documents or "Canon Lore"
-    `./chat.py --import-dir /path/to/dir` scans, tags, and loads `.txt`, `.md`, `.html`, and `.pdf` files. HTML is parsed using BeautifulSoup. If using `--assistant-mode`, the files are extended to `*.*` while ignoring binary files.
 - 🧪 **Debug mode**: View prompt assembly, RAG matches, and context composition, LLM raw output, etc
 - 🛠️ **Agents**: Agent tool support for web search (`\agent How are the stocks doing today`)
-- 📂 **Inline File & Image Loading**:
+- 📂 **Inline file & image context aware loading**:
     The chat tool supports inline resource references, letting you embed files, images, or URL(s) content directly in your message using double braces:
 
     ```text
@@ -104,7 +103,7 @@ The recommended setup is a Conda environment with `uv` for clean dependency mana
 2. Create your environment:
 
 ```bash
-conda create -n dynamic-rag python uv pip
+conda create -n dynamic-rag python=3.13 uv pip
 conda activate dynamic-rag
 ```
 _you will need to activate this environment each time you wish to use this tool_
@@ -119,7 +118,7 @@ uv pip install -r requirements.txt
 
 ### 🦙 Ollama (Recommended for Local Models)
 
-This tool requires two LLMs at a minimum: a model for response generation, and an embedding model for RAG work.
+This tool requires three LLMs at a minimum: a model for response generation, a pre-conditioner lightweight model for metadata tag extraction, and an embedding model for RAG work.
 
 Install and run Ollama (via Conda or manual method):
 ```bash
@@ -136,11 +135,11 @@ conda activate dynamic-rag
 ollama list  # Will either return all your hosted models, or nothing. But should NOT fail
 ollama pull nomic-embed-text
 ollama pull gemma3:1b   # lightweight pre-processor model
-ollama pull gemma3:12b  # heavy model that should work on most hardware
+ollama pull gemma3:12b  # heavyweight model that should work on most hardware
 ```
 
 #### Experiment
-There are thousands of models to choose from. I encourage you to experiment! Mix'n match, explore and have fun! Search the internet for Ollama library, or head on over to https://huggingface.co and begin your journey into LLMs. If you are already a fan of HuggingFace, I recommend using this chat tool with LM Studio instead of Ollama (way more models to choose from).
+There are thousands of models to choose from. I encourage you to experiment! Mix'n match, explore and have fun! Search the internet for Ollama library, or head on over to https://huggingface.co and begin your journey into LLMs. If you are already a fan of HuggingFace, I recommend using this chat tool with LM Studio instead of Ollama (more models to choose from).
 
 #### ⚙️ Example usage
 If you pulled the default models above, you only need to launch `./chat.py` without arguments:
@@ -169,8 +168,7 @@ chat:
   context_window: 16384
   api_key: YOUR_API_KEY
 ```
-The above will leverage the powerful GPT-4o model, while using your local machine to provide
-pre-processing and embeddings through Ollama. With the above set, you would simple run:
+The above will leverage the powerful GPT-4o model, while using your local machine to provide pre-processing and embeddings through Ollama. With the above set, you would simple run:
 ```bash
 conda activate dynamic-rag-chat
 ./chat.py
@@ -214,7 +212,7 @@ In all, this tool allows for 8 different models to be used:
 - Polisher post-process model
 - Post-Process entity extraction/generation model (the LLM created an NPC that we dedicate creating a permanent character sheet for)
 
-### ❓Why This?
+### ❓ Why Use This
 
 Most chat tools treat conversation as a sliding window of tokens. Once the window fills, memory collapses, the model forgets key facts, or worse: invents new ones you never discussed...
 
