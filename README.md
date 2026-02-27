@@ -129,7 +129,14 @@ ollama serve
 ```
 *`OLLAMA_MAX_LOADED_MODELS=3` is encouraged, as this tool uses three+ models simultaneously*
 
-In another terminal:
+Note: You will need to launch Ollama each time you wish to use chat:
+```bash
+conda activate dynamic-rag
+export OLLAMA_MAX_LOADED_MODELS=3
+ollama serve
+```
+
+Then, in another terminal (do only once):
 ```bash
 conda activate dynamic-rag
 ollama list  # Will either return all your hosted models, or nothing. But should NOT fail
@@ -139,16 +146,18 @@ ollama pull gemma3:12b  # heavyweight model that should work on most hardware
 ```
 
 #### Experiment
+
 There are thousands of models to choose from. I encourage you to experiment! Mix'n match, explore and have fun! Search the internet for Ollama library, or head on over to https://huggingface.co and begin your journey into LLMs. If you are already a fan of HuggingFace, I recommend using this chat tool with LM Studio instead of Ollama (more models to choose from).
 
 #### ⚙️ Example usage
-If you pulled the default models above, you only need to launch `./chat.py` without arguments:
+
+Once Ollama is running, and you have pulled the models you want to use or if you have already pulled the default models above, you only need to launch `./chat.py` without arguments:
 ```bash
-conda activate dynamic-rag-chat
+conda activate dynamic-rag
 ./chat.py
 ./chat.py --help  # for more details on available options
 ```
-You can also configure arguments in .chat.yaml. See .chat.yaml.example for a template.
+You can also configure arguments in .chat.yaml. See .chat.yaml.example for examples.
 
 ### 🧠 Using OpenAI or ChatGPT
 
@@ -170,7 +179,7 @@ chat:
 ```
 The above will leverage the powerful GPT-4o model, while using your local machine to provide pre-processing and embeddings through Ollama. With the above set, you would simple run:
 ```bash
-conda activate dynamic-rag-chat
+conda activate dynamic-rag
 ./chat.py
 ```
 
