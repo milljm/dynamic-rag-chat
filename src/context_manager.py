@@ -407,10 +407,21 @@ class ContextManager(PromptManager):
         try:
             rating = [x.content for x in meta_tags if x.tag == 'scene_mode'] # shorthand
             return 'nsfw' in rating[0].lower()
-        #pylint: disable=bare-except   # LLMs can get so many things wrong
+        #pylint: disable-next=bare-except   # LLMs can get so many things wrong
         except:
             pass
-        #pylint: enable=bare-except
+        return False
+
+    @staticmethod
+    def use_agent(meta_tags: list[RAGTag[str, str]]) -> bool:
+        """ Return bool if content benefits from a web search """
+        try:
+            for tag in meta_tags:
+                if tag.tag == "search_internet":
+                    return tag.content is True
+        #pylint: disable-next=broad-exception-caught   # LLMs can get so many things wrong
+        except Exception:
+            pass
         return False
 
     def prompt_entities(self, meta_tags: list[RAGTag[str,str]]) -> list[str]:
@@ -591,8 +602,16 @@ class ContextManager(PromptManager):
             if not error:
                 return ([],0,0)
 
+            # Add tags so they can be passed around
+            documents['metadata'] = meta_tags
+
             # Populate explicit content if triggered
             documents['explicit'] = self.is_explicit(meta_tags)
+
+            # Use agent if pre-processor believes that would help
+            if self.use_agent(meta_tags) and self.opts.assistant_mode:
+                documents['use_agent'] = True
+                documents['agent_ran'] = False
 
             # grab entities and perform another tagging process (with character sheets)
             documents['entities'] = '---\n\n'.join(self.prompt_entities(meta_tags))

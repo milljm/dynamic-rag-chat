@@ -54,6 +54,7 @@ from src import RenderWindow
 from src import CommonUtils, ChatOptions
 from src import ImportData
 from src import SceneManager
+from src import Orchestration
 console = Console(highlight=True)
 current_dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -121,21 +122,23 @@ class SessionContext:
     context: ContextManager
     renderer: RenderWindow
     scene: SceneManager
+    orchestration: Orchestration
 
     @classmethod
     def from_args(cls, c_console, c_args)->'SessionContext':
         """ instance and return session dataclass """
+        _orchestration = Orchestration(c_args)
         _common = CommonUtils(c_console, c_args)
         _scene = SceneManager(console, _common, c_args)
         _rag = RAG(c_console, _common, c_args)
         _context = ContextManager(console, _common, _rag, _scene, current_dir, c_args)
-        _renderer = RenderWindow(console, _common, _context, current_dir, c_args)
+        _renderer = RenderWindow(console, _common, _context, current_dir, _orchestration, c_args)
         return cls(common=_common,
                    rag=_rag,
                    context=_context,
                    renderer=_renderer,
-                   scene=_scene)
-
+                   scene=_scene,
+                   orchestration=_orchestration)
 
 def parse_user_input(raw: str) -> ParsedInput:
     """ Parse incoming command string and return a ParsedInput dataclass """
@@ -789,52 +792,92 @@ def _add_arguments(parser: argparse.ArgumentParser, defaults, *, use_defaults: b
 
     parser.add_argument('--model', metavar='', default=D('model'),
                         help='LLM Model (default: %(default)s)')
-    parser.add_argument('--polisher', metavar='', default=D('polisher'),
-                        help='Polisher LLM Model (default: %(default)s)'
-                        ' (optional, used to "polish" the final output, with something like'
-                        ' Midnight Miqu)')
-    parser.add_argument('--polisher-cnt', metavar='', default=D('polisher_cnt'),
-                        help='The number passes to polish final content (default: %(default)s)'
-                        ' Warning: Models tend to ballon out of proportions. Start low.')
-    parser.add_argument('--nsfw-model', metavar='', default=D('nsfw_model'),
-                        help='NSFW LLM Model (default: %(default)s)')
+    parser.add_argument('--model-server', metavar='', dest='host', default=D('host'),
+                        type=str, help='OpenAI API server address (default: %(default)s)')
+
     parser.add_argument('--pre-llm', metavar='', dest='preconditioner', default=D('preconditioner'),
                         type=str, help='Summarizer/Tagging Preconditioner LLM '
                         '(default: %(default)s)')
-    parser.add_argument('--entity-llm', metavar='', dest='entity_llm',
-                        default=D('entity_llm'),
-                        type=str, help='Entity/Character Sheet LLM (default: %(default)s)')
+    parser.add_argument('--pre-server', metavar='', dest='pre_host', default=D('pre_host'),
+                        type=str, help='OpenAI API server address (default: %(default)s)')
+
     parser.add_argument('--embedding-llm', metavar='', dest='embeddings',
                         default=D('embeddings'),
                         type=str, help='LLM Embedding Model (default: %(default)s)')
-    parser.add_argument('--agent-llm', metavar='', dest='agent_llm',
-                        default=D('agent_llm'),
-                        type=str, help='LLM Agent Tooling Model (default: %(default)s)')
-    parser.add_argument('--summarizer-llm', metavar='', dest='summarizer_llm',
-                        default=D('summarizer_llm'),
-                        type=str, help='LLM Agent Tooling Model (default: %(default)s)')
-    parser.add_argument('--vision-llm', metavar='', dest='vision_llm',
-                        default=D('vision_llm'),
-                        type=str, help='LLM Vision Model (default: %(default)s)')
-
-    parser.add_argument('--llm-server', metavar='', dest='host', default=D('host'),
+    parser.add_argument('--embedding-server', metavar='', dest='emb_host', default=D('emb_host'),
                         type=str, help='OpenAI API server address (default: %(default)s)')
+
+    ### ------------- Optional Story Models
+    parser.add_argument('--polisher-llm', metavar='', default=D('polisher_llm'),
+                        help='Polisher LLM Model (default: %(default)s)'
+                        ' (optional, used to "polish" the final output, with something like'
+                        ' Midnight Miqu)')
     parser.add_argument('--polisher-server', metavar='', dest='polisher_host',
                         default=D('polisher_host'),
                         type=str, help='OpenAI API server address (default: %(default)s)')
-    parser.add_argument('--pre-server', metavar='', dest='pre_host', default=D('pre_host'),
+    parser.add_argument('--polisher-cnt', metavar='', default=D('polisher_cnt'),
+                        help='The number passes to polish final content (default: %(default)s)'
+                        ' Warning: Models tend to ballon out of proportions. Start low.')
+
+    parser.add_argument('--nsfw-llm', metavar='', default=D('nsfw_llm'),
+                        help='NSFW LLM Model (default: %(default)s)')
+    parser.add_argument('--nsfw-server', metavar='', dest='nsfw_host',
+                        default=D('nsfw_host'),
                         type=str, help='OpenAI API server address (default: %(default)s)')
+
+    parser.add_argument('--entity-llm', metavar='', dest='entity_llm',
+                        default=D('entity_llm'),
+                        type=str, help='Entity/Character Sheet LLM (default: %(default)s)')
     parser.add_argument('--entity-server', metavar='', dest='entity_host', default=D('entity_host'),
                         type=str, help='OpenAI API server address (default: %(default)s)')
-    parser.add_argument('--embedding-server', metavar='', dest='emb_host', default=D('emb_host'),
-                        type=str, help='OpenAI API server address (default: %(default)s)')
-    parser.add_argument('--agent-server', metavar='', dest='agent_host', default=D('agent_host'),
-                        type=str, help='OpenAI API server address (default: %(default)s)')
+
+    parser.add_argument('--summarizer-llm', metavar='', dest='summarizer_llm',
+                        default=D('summarizer_llm'),
+                        type=str, help='Summarizer Model (default: %(default)s)')
     parser.add_argument('--summarizer-server', metavar='', dest='summarizer_host',
                         default=D('summarizer_host'),
                         type=str, help='OpenAI API server address (default: %(default)s)')
+
+    ### ------------- Optional Orchestration Models
+    parser.add_argument('--vision-llm', metavar='', dest='vision_llm',
+                        default=D('vision_llm'),
+                        type=str, help='Optional Vision Model (default: %(default)s)')
     parser.add_argument('--vision-server', metavar='', dest='vision_host',
                         default=D('vision_host'),
+                        type=str, help='OpenAI API server address (default: %(default)s)')
+
+    parser.add_argument('--agent-llm', metavar='', dest='agent_llm',
+                        default=D('agent_llm'),
+                        type=str, help='Optional Agent Tooling Model (default: %(default)s)')
+    parser.add_argument('--agent-server', metavar='', dest='agent_host', default=D('agent_host'),
+                        type=str, help='OpenAI API server address (default: %(default)s)')
+
+    parser.add_argument('--casual-llm', metavar='', dest='casual_llm',
+                        default=D('casual_llm'),
+                        type=str, help='Optional Casual Model (default: %(default)s)')
+    parser.add_argument('--casual-server', metavar='', dest='casual_host',
+                        default=D('casual_host'),
+                        type=str, help='OpenAI API server address (default: %(default)s)')
+
+    parser.add_argument('--coder-llm', metavar='', dest='coder_llm',
+                        default=D('coder_llm'),
+                        type=str, help='Optional Coding Model (default: %(default)s)')
+    parser.add_argument('--coder-server', metavar='', dest='coder_host',
+                        default=D('coder_host'),
+                        type=str, help='OpenAI API server address (default: %(default)s)')
+
+    parser.add_argument('--analysis-llm', metavar='', dest='analysis_llm',
+                        default=D('analysis_llm'),
+                        type=str, help='Optional Analysis Model (default: %(default)s)')
+    parser.add_argument('--analysis-server', metavar='', dest='analysis_host',
+                        default=D('analysis_host'),
+                        type=str, help='OpenAI API server address (default: %(default)s)')
+
+    parser.add_argument('--reasoning-llm', metavar='', dest='reasoning_llm',
+                        default=D('reasoning_llm'),
+                        type=str, help='Optional Reasoning Model (default: %(default)s)')
+    parser.add_argument('--reasoning-server', metavar='', dest='reasoning_host',
+                        default=D('reasoning_host'),
                         type=str, help='OpenAI API server address (default: %(default)s)')
 
 

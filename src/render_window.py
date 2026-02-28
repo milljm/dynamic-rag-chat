@@ -13,10 +13,10 @@ from langchain.agents import create_openai_tools_agent, AgentExecutor
 from langchain.schema.messages import HumanMessage
 from langchain.schema import BaseMessage, Document   # For Type Hinting
 from langchain_core.prompts import HumanMessagePromptTemplate, SystemMessagePromptTemplate
-from langchain_openai import ChatOpenAI
 from .prompt_manager import PromptManager
 from .context_manager import ContextManager # For Type Hinting
-from .chat_utils import CommonUtils, ChatOptions # For Type Hinting
+from .chat_utils import CommonUtils, ChatOptions, RAGTag # For Type Hinting
+from .orchestrator import Orchestration # For Type Hinting
 from .agent_tools import DuckDuckGoSearchTool
 
 # pylint: disable=too-many-instance-attributes  # this is what a dataclass is for
@@ -44,17 +44,6 @@ class RenderWindowState:
     no_rags: bool
     light_mode: bool
     no_think_tag: bool
-    model: str
-    agent_llm: str
-    agent_host: str
-    vision_llm: str
-    vision_host: str
-    polisher: str
-    polisher_host: str
-    polisher_cnt: int
-    nsfw_model: str
-    host: str
-    api_key: str
     completion_tokens: int
     syntax_theme: str
     context: ContextManager
@@ -120,103 +109,19 @@ class RenderWindow(PromptManager):
                  common: CommonUtils,
                  context: ContextManager,
                  current_dir,
+                 orchestration: Orchestration,
                  args: ChatOptions):
         super().__init__(console, current_dir, args)
         self.console = console
         self.common = common
         self.opts = args
         self.think_once = True
-        self.use_vision = False
         self.thinking_chunk = ''
         self.ooc_response = ''
 
         # populate dataclasses, setup
         self._load_states(current_dir, context, args)
-
-        disable_thinking = self.state.disable_thinking
-        think = not disable_thinking
-        extra_body = {
-                       "thinking": {"type": "disabled" if not think else "enabled"},
-                       "chat_template_kwargs": {
-                         "enable_thinking": think,
-                         "include_reasoning": think,
-                         "think": think,
-                       }
-                     }
-
-        # Our heavy-weight LLMs
-        self.llm = {
-                'sfw'  : ChatOpenAI(base_url=self.state.host,
-                                    model=self.state.model,
-                                    temperature=0.6 if self.state.assistant_mode
-                                                    else args.temperature,
-                                    top_p=args.top_p,
-                                    frequency_penalty=args.frequency_penalty,
-                                    presence_penalty=args.presence_penalty,
-                                    streaming=True,
-                                    max_completion_tokens=self.state.completion_tokens,
-                                    stop_sequences=["<END_BEAT>", "<END_TURN>"],
-                                    api_key=self.state.api_key,
-                                    extra_body = extra_body,
-                                    seed = self.state.seed,
-                                    ),
-
-                'nsfw' : ChatOpenAI(base_url=self.state.host,
-                                    model=self.state.nsfw_model,
-                                    temperature=0.6 if self.state.assistant_mode
-                                                    else args.temperature,
-                                    top_p=args.top_p,
-                                    frequency_penalty=args.frequency_penalty,
-                                    presence_penalty=args.presence_penalty,
-                                    streaming=True,
-                                    max_completion_tokens=self.state.completion_tokens,
-                                    stop_sequences=["<END_BEAT>", "<END_TURN>"],
-                                    api_key=self.state.api_key,
-                                    extra_body = extra_body,
-                                    seed = self.state.seed,
-                                    ),
-                'polish' : ChatOpenAI(base_url=self.state.polisher_host,
-                                      model=('None' if self.state.polisher is None
-                                             else self.state.polisher),
-                                      temperature=0.9 if self.state.assistant_mode
-                                                        else args.temperature,
-                                      top_p=args.top_p,
-                                      frequency_penalty=args.frequency_penalty,
-                                      presence_penalty=args.presence_penalty,
-                                      streaming=True,
-                                      max_completion_tokens=self.state.completion_tokens,
-                                      stop_sequences=["<END_BEAT>", "<END_TURN>"],
-                                      api_key=self.state.api_key,
-                                      extra_body = extra_body,
-                                      seed = self.state.seed,
-                                      ),
-                'tool' :    ChatOpenAI(base_url=self.state.agent_host,
-                                      model=('None' if self.state.agent_llm is None
-                                             else self.state.agent_llm),
-                                      temperature=0.5,
-                                      top_p=args.top_p,
-                                      frequency_penalty=args.frequency_penalty,
-                                      presence_penalty=args.presence_penalty,
-                                      streaming=False,
-                                      max_completion_tokens=self.state.completion_tokens,
-                                      stop_sequences=["<END_BEAT>", "<END_TURN>"],
-                                      api_key=self.state.api_key,
-                                      seed = self.state.seed,
-                                      ),
-                'vision' :  ChatOpenAI(base_url=self.state.vision_host,
-                                      model=('None' if self.state.vision_llm is None
-                                             else self.state.vision_llm),
-                                      temperature=0.5,
-                                      top_p=args.top_p,
-                                      frequency_penalty=args.frequency_penalty,
-                                      presence_penalty=args.presence_penalty,
-                                      streaming=False,
-                                      max_completion_tokens=self.state.completion_tokens,
-                                      stop_sequences=["<END_BEAT>", "<END_TURN>"],
-                                      api_key=self.state.api_key,
-                                      seed = self.state.seed,
-                                      ),
-            }
+        self.orchestrator = orchestration
 
         # Agent Prompt
         self.agent_prompt = ChatPromptTemplate.from_messages([
@@ -229,7 +134,7 @@ class RenderWindow(PromptManager):
             console,
             current_dir,
             args,
-            prompt_model=self.state.model
+            prompt_model=self.opts.model
         )
         self.prompts.build_prompts()
 
@@ -249,17 +154,6 @@ class RenderWindow(PromptManager):
             no_rags=args.no_rags,
             light_mode = args.light_mode,
             no_think_tag = args.no_think_tag,
-            model = args.model,
-            agent_llm = args.agent_llm,
-            agent_host = args.agent_host,
-            vision_llm = args.vision_llm,
-            vision_host = args.vision_host,
-            polisher = args.polisher,
-            polisher_host = args.polisher_host,
-            polisher_cnt = args.polisher_cnt,
-            nsfw_model = args.nsfw_model,
-            host = args.host,
-            api_key = args.api_key,
             completion_tokens = args.completion_tokens,
             syntax_theme = args.syntax_theme,
             context = context,
@@ -290,13 +184,12 @@ class RenderWindow(PromptManager):
                 yield syntax
         Markdown.elements["fence"] = SimpleCodeBlock
 
-    def _format_model_name(self, is_nsfw: bool) -> str:
+    def _format_model_name(self, metadata: RAGTag) -> str:
         """Extract a cleaned model identifier and prefix with sfw/nsfw."""
-        model = self.state.nsfw_model if is_nsfw else self.state.model
-        label = 'nsfw' if is_nsfw else 'sfw'
-        matches = self.common.regex.model_re.findall(model)[:2]
+        model = self.orchestrator.route(metadata)
+        matches = self.common.regex.model_re.findall(model.model_name)[:2]
         model_short = '-'.join(matches)
-        return f'{label}-{model_short[:10]}'
+        return model_short[:10]
 
     def _pulse_emoji(self) -> str:
         stream = self.state.stream
@@ -491,29 +384,27 @@ class RenderWindow(PromptManager):
                 human_msg,
             ])
 
-        # Does this post require SFW, or NSFW
-        llm = 'nsfw' if documents['explicit'] else 'sfw'
+        # grab suitable llm model
         if polish:
-            llm = 'polish'
+            llm = self.orchestrator.get_model('polish')
+        else:
+            llm = self.orchestrator.route(documents['metadata'], documents)
 
         if self.debug:
             self.console.print(f'LLM DOCUMENTS: {documents.keys()}\n'
                                f'{documents["performance"]}\n',
                                style=f'color({self.state.color})',
                                highlight=False)
-        self.common.write_debug(self.llm[llm].model_name, documents.keys())
 
         # Format text messages from template
         images = documents.pop('dynamic_images', [])
-        if images:
-            self.use_vision = True
         formatted_messages = prompt_template.format_messages(**documents)
 
         # Optional: inject images into HumanMessage if present
         messages = self.add_image_block(formatted_messages, images)
 
         if self.debug:
-            self.console.print(f'Content rating: {llm}',
+            self.console.print(f'Model Chosen: {llm.model_name}',
                           style=f'color({self.state.color})',
                           highlight=False)
 
@@ -522,15 +413,14 @@ class RenderWindow(PromptManager):
             self.console.print(f'HEAVY LLM PROMPT (llm.stream()):\n{formatted_messages}\n\n',
                           style=f'color({self.state.color})',
                           highlight=False)
-        self.common.write_debug(self.llm[llm].model_name, formatted_messages)
+
         if documents.get('use_agent', False) and not documents.get('agent_ran', False):
             # Let LangChain create the proper prompt template for the agent
-            llm = 'tool' if self.state.agent_llm is not None else llm
-            agent = create_openai_tools_agent(self.llm[llm], self.agent_tools, self.agent_prompt)
+            agent = create_openai_tools_agent(llm, self.agent_tools, self.agent_prompt)
             documents['agent_ran'] = True
             agent_executor = AgentExecutor(agent=agent, tools=self.agent_tools, verbose=False)
-            self.console.print('Agent Tool running...', style=f'color({self.state.color})',
-                                highlight=False)
+            self.console.print('Agent Tool running (Web Search)...',
+                               style=f'color({self.state.color})', highlight=False)
             try:
                 result = agent_executor.invoke({"input": documents['user_query']})
                 documents['dynamic_files'] += f'\n=== AGENT_TOOL_RESULT ===\n{result}\n\n'
@@ -546,12 +436,11 @@ class RenderWindow(PromptManager):
     # Stream response as chunks
     def stream_response(self, documents: dict, messages: Document, polish: bool = False):
         """ Parse LLM Prompt """
-        # Priorities of which model to use depending on the situation
-        # I feel this should be way more betterer
-        llm = 'nsfw' if documents['explicit'] else 'sfw'
-        llm = 'polish' if polish else llm
-        llm = 'vision' if self.use_vision else llm
-        for chunk in self.llm[llm].stream(messages):
+        if polish:
+            llm = self.orchestrator.get_model('polish')
+        else:
+            llm = self.orchestrator.route(documents['metadata'], documents)
+        for chunk in llm.stream(messages):
             chunk = self.reveal_thinking(chunk, self.state.verbose)
             yield chunk
 
@@ -564,14 +453,14 @@ class RenderWindow(PromptManager):
         pre_processing_time = kwargs['pre_process_time']
         # pylint: disable-next=consider-using-f-string # no. this is how its done
         formatted_time = '{:.1f}s'.format(pre_processing_time)
-        rating = kwargs['content_rating']
+        metadata = kwargs['metadata']
         turn = kwargs['turn_count']
 
         foot_color = self.state.color - 6 if self.state.light_mode else self.state.color
 
         footer = Text('\nTurn:', style=f'color({foot_color})')
         footer.append(f'{turn} ', style='color(123)')
-        footer.append(self._format_model_name(rating), style='color(202)')
+        footer.append(self._format_model_name(metadata), style='color(202)')
         footer.append(self._pulse_emoji(), style=f'color({12 if self.state.light_mode else 51})')
         footer.append(f'{time_taken:.2f}', style='color(94)')
         footer.append('s Tokens(dedup:', style=f'color({foot_color})')
@@ -608,7 +497,6 @@ class RenderWindow(PromptManager):
         stream = self.state.stream   # shorthand
         context = self.state.context # shorthand
         self.think_once = True
-        self.use_vision = False
 
         # pesky LLMs that have reasoning and don't generate a <think> token,
         # yet generate an ending </think> token!
@@ -634,7 +522,8 @@ class RenderWindow(PromptManager):
                        'pre_process_time': pre_process_time,
                        'token_count'     : 0,
                        'content_rating'  : documents['explicit'],
-                       'turn_count'      : len(history[branch])+1}
+                       'turn_count'      : len(history[branch])+1,
+                       'metadata'        : documents['metadata']}
         color = self.state.color-5 if self.state.light_mode else self.state.color
         _rag = '' if not self.state.no_rags and self.state.assistant_mode else 'RAG+'
         self.renderable.header = Text(f'Submitting relevant {_rag}History tokens: '
@@ -656,7 +545,7 @@ class RenderWindow(PromptManager):
                     start_time = time.time()
                 current_response += piece.content
                 footer_meta['token_count'] += self.response_count(piece.content)
-                if (self.state.polisher == 'None'
+                if (self.opts.polisher_llm == 'None'
                      or documents['user_query'].find('OOC:') != -1
                      or self.opts.assistant_mode):
                     self.renderable.response = self.build_content(current_response)
@@ -675,14 +564,14 @@ class RenderWindow(PromptManager):
                 self.render_chat(live)
 
             # Polisher + polishing cnt
-            if (self.state.polisher != 'None'
+            if (self.opts.polisher_llm != 'None'
                     and documents['user_query'].find('OOC:') == -1
                     and not self.opts.assistant_mode):
                 self.renderable.response = Text('Loading Polisher...',
                                                      style=f'color({color}')
                 self.render_chat(live)
                 documents['llm_response'] = current_response
-                for pass_num in range(int(self.state.polisher_cnt)):
+                for pass_num in range(int(self.opts.polisher_cnt)):
                     documents['llm_response'] = current_response
                     messages = self.get_messages(documents, polish=True)
                     current_response = ''
@@ -691,12 +580,12 @@ class RenderWindow(PromptManager):
                             start_time = time.time()
                         current_response += piece.content
                         footer_meta['token_count'] += self.response_count(piece.content)
-                        if int(self.state.polisher_cnt) == pass_num+1:
+                        if int(self.opts.polisher_cnt) == pass_num+1:
                             self.renderable.response = self.build_content(current_response)
                         else:
                             self.renderable.response = Text(
                                 f'Polishing pass {pass_num+1} of'
-                                f' {int(self.state.polisher_cnt)-1} before final...',
+                                f' {int(self.opts.polisher_cnt)-1} before final...',
                                 style=f'color({color}')
                         self.renderable.footer = self.render_footer(time.time()-start_time,
                                                                      **footer_meta)

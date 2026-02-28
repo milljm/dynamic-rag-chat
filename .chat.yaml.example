@@ -9,10 +9,18 @@
 # LLM, and then change it back to continue past-conversations. Or, delete this
 # directory when finished to remove any trace of your conversations.
 chat:
+  # Required:
   model: gemma3:27b                       (heavy-weight LLM, your main go-to)
+  llm_server: https://api.openai.com/v1   (an OpenAI compatible API server address. If using Ollama locally
+                                           that would be: http://localhost:11434/v1. If using LM Studio
+                                           locally that would be: http://localhost:1234/v1)
   pre_llm: gemma3:1b                      (light-weight LLM, used for metadata tagging, NSFW/SFW detection, etc)
+  pre_server:                             (OpenAI API capable server address)
   embedding_llm: nomic-embed-text         (embeddings for RAG vector database work)
-  nsfw_model:                             (Optional – for explicit or unfiltered storytelling)
+  embedding_server:                       (OpenAI API capable server address)
+
+  # Additional Story Models (Optional Specializations)
+  nsfw_llm:                               (Optional – for explicit or unfiltered storytelling)
 
                                             Most models are SFW (Suitable For Work), meaning they are
                                             alignment-constrained. They can handle mature themes such as
@@ -39,21 +47,35 @@ chat:
                                             leave this option unset. The separate configuration exists
                                             for experimentation or dynamic routing setups (e.g., switching
                                             models when explicit thresholds are reached).
-  polisher:                               (Optional: beautiful story prose (Midnight Miqu))
+  nsfw_server:                            (OpenAI API capable server address)
+  polisher_llm:                           (Optional: beautiful story prose (Midnight Miqu))
+  polisher_server:                        (OpenAI API capable server address)
+  entity_llm:                             (Optional: story/NPC character metadata extraction (qwen2.5-coder-7b-instruct))
+  entity_server:                          (OpenAI API capable server address)
+
+  # Summarizer (--one-shot)
   summarizer_llm:                         (Optional: speed and summarization of long context (mistral-7b-instruct))
-  entity_llm:                             (Optional: story/context metadata extraction (qwen2.5-coder-7b-instruct))
+  summarizer_server:                      (OpenAI API capable server address)
+
+  # Orchestration Models (Optional Specializations for Assistant Mode)
   agent_llm:                              (Optional: reasoning agentic tooling tasks (glm-4.6v-flash))
   vision_llm:                             (Optional: image processing (qwen3-vl-30b))
+  casual_llm:                             (Optional: lightweight chat LLM)
+  coder_llm:                              (Optional: Coding LLM)
+  analysis_llm:                           (Optional: Analysis LLM)
+  reasoning_llm:                          (Optional: Deep Reasoning LLM)
+  general_llm:                            (Optional: General Purpose LLM)
+  agent_server:                           (OpenAI API capable server address)
+  vision_server:                          (OpenAI API capable server address)
+  casual_server:                          (OpenAI API capable server address)
+  coder_server:                           (OpenAI API capable server address)
+  analysis_server:                        (OpenAI API capable server address)
+  reasoning_server:                       (OpenAI API capable server address)
+  general_server:                         (OpenAI API capable server address)
+
   history_dir:                            /some/writable/path or leave blank for default
   rag_matches: 5                          (how many matches to allow from the RAG: 5 from user's RAG and 5 from AIs)
   history_session: 5                      (how many turns of history to provide. Thats 15 from all sources by default)
-  llm_server: https://api.openai.com/v1   (an OpenAI compatible API server address. If using Ollama locally that would be: http://localhost:11434/v1. If using LM Studio locally that would be: http://localhost:1234/v1)
-  pre_server:                             (OpenAI API capable server address)
-  entity_server:                          (OpenAI API capable server address)
-  agent_server:                           (OpenAI API capable server address)
-  summarizer_server:                      (OpenAI API capable server address)
-  vision_server:                          (OpenAI API capable server address)
-  embedding_server:                       (the server for which is hosting the embedding_llm model)
   api_key: YOUR API KEY                   (your assigned API key, or empty if using local Ollama server)
   time_zone: 'America/Denver'             (currently not used in the system prompts, easy to implement though: {date_time})
   light_mode: False                       (set to true if you use a high luminance terminal background)

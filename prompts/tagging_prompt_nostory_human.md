@@ -56,6 +56,42 @@ Primary programming language if clearly indicated.
 Examples: python, javascript, bash, json
 If unclear, use "".
 
+## 7) assistant_mode
+assistant_mode:
+Classify the primary interaction type.
+
+Allowed values (choose exactly one):
+
+- casual → social conversation, jokes, light chat, reactions
+- coding → debugging, writing code, stack traces, refactoring, programming questions
+- analysis → system design, architectural thinking, comparisons, evaluating approaches
+- reasoning → complex multi-step logic, philosophy, political nuance, deep arguments
+- general → definitions, explanations, factual non-time-sensitive questions
+
+Choose the single best category.
+If unsure, use "general".
+
+## 8) search_internet
+search_internet:
+Set to true ONLY if the user is requesting information that must be retrieved from the web.
+
+Do NOT set to true if:
+- the word "internet" is merely mentioned
+- the user is discussing technology casually
+- the user is describing a problem
+- the user is chatting
+- no factual lookup is required
+- definitions
+- historical facts
+- general knowledge
+- programming help
+- explanations
+- math
+- writing tasks
+
+Only set to true when the user explicitly requests or clearly requires external information.
+If unsure, use False.
+
 # SCHEMA
 
 {
@@ -63,7 +99,9 @@ If unclear, use "".
     "document_topics": [string],
     "keywords_entities": [string],
     "method": [string],
-    "language": string
+    "language": string,
+    "assistant_mode": string,
+    "search_internet": bool
   }
 }
 

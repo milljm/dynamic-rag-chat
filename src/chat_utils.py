@@ -39,7 +39,7 @@ class StandardAttributes:
 @dataclass(slots=True, kw_only=True)
 class ChatOptions:
     """ Chat arguments dataclass """
-    # ---------- “core” options ----------
+    # ---------- Story servers
     host: str = 'http://localhost:11434/v1'
     pre_host: str = host
     emb_host: str = host
@@ -49,16 +49,29 @@ class ChatOptions:
     summarizer_host: str = host
     vision_host: str = host
 
-    # ---------- models
+    # ---------- Story Models
     model: str = 'gemma3:12b'
     preconditioner: str = 'gemma3:1b'
     embeddings: str = 'nomic-embed-text'
-    polisher: Optional[str] = 'None'
+    polisher_llm: Optional[str] = 'None'
     entity_llm: Optional[str] = 'None'
-    nsfw_model: Optional[str] = 'None'
     agent_llm: Optional[str] = 'None'
     summarizer_llm: Optional[str] = 'None'
     vision_llm: Optional[str] = 'None'
+
+    # ---------- “orchestration” options
+    casual_host: str = host
+    coder_host: str = host
+    analysis_host: str = host
+    reasoning_host: str = host
+    general_host: str = host
+    nsfw_host: str = host
+    casual_llm: Optional[str] = 'None'
+    coder_llm: Optional[str] = 'None'
+    analysis_llm: Optional[str] = 'None'
+    reasoning_llm: Optional[str] = 'None'
+    general_llm: Optional[str] = 'None'
+    nsfw_llm: Optional[str] = 'None'
 
     # ---------- model settings
     completion_tokens: int = 4000
@@ -112,13 +125,25 @@ class ChatOptions:
         # derive colour from light/dark mode
         object.__setattr__(self, 'color', 245 if self.light_mode else 236)
 
-        # normalize nsfw_model: fallback to model if unset/empty/legacy sentinel
-        if not self.nsfw_model or str(self.nsfw_model).strip().lower() in {'', 'none', 'not_set'}:
-            object.__setattr__(self, 'nsfw_model', self.model)
+        # Set Orchestration models to default model if not set
+        mode_fields = {
+            "casual": ("casual_llm", "casual_host"),
+            "coder": ("coder_llm", "coder_host"),
+            "analysis": ("analysis_llm", "analysis_host"),
+            "reasoning": ("reasoning_llm", "reasoning_host"),
+            "general": ("general_llm", "general_host"),
+            "nsfw": ("nsfw_llm", "nsfw_host"),
+            }
+        for _, (llm_field, host_field) in mode_fields.items():
+            value = getattr(self, llm_field)
+
+            if not value or str(value).strip().lower() in {"", "none", "not_set"}:
+                object.__setattr__(self, llm_field, self.model)
+                object.__setattr__(self, host_field, self.host)
 
     _ALIASES = {
         # YAML/config wording        # ChatOptions field
-        'llm_server':                'host',
+        'model_server':              'host',
         'polisher_server':           'polisher_host',
         'agent_server':              'agent_host',
         'summarizer_server':         'summarizer_host',
@@ -128,11 +153,17 @@ class ChatOptions:
         'pre_server':                'pre_host',
         'embedding_server':          'emb_host',
         'entity_server':             'entity_host',
+        'nsfw_server':               'nsfw_host',
         'history_dir':               'vector_dir',
         'rag_matches':               'matches',
         'history_max':               'chat_history',
         'chat_max':                  'chat_history',
-        'use_rags':                   'no_rags',
+        'use_rags':                  'no_rags',
+        'casual_server':             'casual_host',
+        'coder_server':              'coder_host',
+        'analysis_server':           'analysis_host',
+        'reasoning_server':          'reasoning_host',
+        'general_server':            'general_host',
     }
 
     _INT_FIELDS = {'matches', 'completion_tokens', 'chat_history', 'history_sessions'}
