@@ -590,7 +590,7 @@ class ContextManager(PromptManager):
             documents['ooc_system'] = self.get_ooc()
 
             if self.opts.assistant_mode and not self.opts.no_rags:
-                return (documents, pre_tokens, post_tokens)
+                return (documents, pre_tokens, post_tokens, [])
 
             query = documents.get('user_query', '')
 
