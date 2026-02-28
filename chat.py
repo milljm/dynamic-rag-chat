@@ -127,7 +127,7 @@ class SessionContext:
     @classmethod
     def from_args(cls, c_console, c_args)->'SessionContext':
         """ instance and return session dataclass """
-        _orchestration = Orchestration(c_args)
+        _orchestration = Orchestration(console, c_args)
         _common = CommonUtils(c_console, c_args)
         _scene = SceneManager(console, _common, c_args)
         _rag = RAG(c_console, _common, c_args)
@@ -286,7 +286,7 @@ class Chat():
                     return f.read()
         return ''
 
-    def get_documents(self, user_input)->tuple[dict,int,int,int,float]:
+    def get_documents(self, user_input)->tuple[dict,list]:
         """
         Populate documents, the object which is fed to prompt formaters, and
         ultimately is what makes up the context for the LLM
@@ -323,7 +323,8 @@ class Chat():
 
         (documents,
          pre_t,
-         post_t) = self.session.context.handle_context(documents)
+         post_t,
+         meta_data) = self.session.context.handle_context(documents)
 
         # Heat Map
         (prompt_tokens, cleaned_color) = self.token_manager(documents, max(0, pre_t - post_t))
@@ -350,7 +351,7 @@ class Chat():
              'cleaned_color'    : cleaned_color,
              }
             )
-        return documents
+        return (documents, meta_data)
 
     def load_content_as_context(self, user_input: str) -> dict:
         """Parse user_input for all occurrences of {{ /path/to/file }}"""
@@ -725,14 +726,15 @@ class Chat():
                 apply_rare_controls(parsed.rare_controls, self.session.scene.get_scene())
 
                 # Build documents (with or without context)
+                meta_data = []
                 if parsed.command in ('no-context', 'agent'):
                     if parsed.command == 'no-context':
                         documents = self.no_context(parsed.args or parsed.clean_text)
                     else:
-                        documents = self.get_documents(parsed.args or parsed.clean_text)
+                        documents, meta_data = self.get_documents(parsed.args or parsed.clean_text)
                     documents['in_line_commands'] = f'Meta: [{parsed.command}]'
                 else:
-                    documents = self.get_documents(parsed.clean_text)
+                    documents, meta_data = self.get_documents(parsed.clean_text)
                 if not documents:
                     console.print("[red]There was an error while running pre-processor work.[/red]"
                                   "In many cases, re-submitting your query again solves the issue.")
@@ -767,7 +769,7 @@ class Chat():
                 # Handoff to renderer
                 # Your renderer should read documents['system_addendum']
                 # (if any) and append to the system prompt
-                self.session.renderer.live_stream(documents)
+                self.session.renderer.live_stream(documents, meta_data)
 
         except KeyboardInterrupt:
             sys.exit()
@@ -854,28 +856,40 @@ def _add_arguments(parser: argparse.ArgumentParser, defaults, *, use_defaults: b
 
     parser.add_argument('--casual-llm', metavar='', dest='casual_llm',
                         default=D('casual_llm'),
-                        type=str, help='Optional Casual Model (default: %(default)s)')
+                        type=str, help='Optional social conversation, jokes, light chat, reactions'
+                        ' (default: %(default)s)')
     parser.add_argument('--casual-server', metavar='', dest='casual_host',
                         default=D('casual_host'),
                         type=str, help='OpenAI API server address (default: %(default)s)')
 
+    parser.add_argument('--general-llm', metavar='', dest='general_llm',
+                        default=D('general_llm'),
+                        type=str, help='Optional definitions, explanations, factual '
+                        'non-time-sensitive questions (default: %(default)s)')
+    parser.add_argument('--general-server', metavar='', dest='general_host',
+                        default=D('general_host'),
+                        type=str, help='OpenAI API server address (default: %(default)s)')
+
     parser.add_argument('--coder-llm', metavar='', dest='coder_llm',
                         default=D('coder_llm'),
-                        type=str, help='Optional Coding Model (default: %(default)s)')
+                        type=str, help='Optional debugging, writing code, stack traces, '
+                        'refactoring, programming questions (default: %(default)s)')
     parser.add_argument('--coder-server', metavar='', dest='coder_host',
                         default=D('coder_host'),
                         type=str, help='OpenAI API server address (default: %(default)s)')
 
     parser.add_argument('--analysis-llm', metavar='', dest='analysis_llm',
                         default=D('analysis_llm'),
-                        type=str, help='Optional Analysis Model (default: %(default)s)')
+                        type=str, help='Optional system design, architectural thinking, '
+                        'comparisons, evaluating approaches (default: %(default)s)')
     parser.add_argument('--analysis-server', metavar='', dest='analysis_host',
                         default=D('analysis_host'),
                         type=str, help='OpenAI API server address (default: %(default)s)')
 
     parser.add_argument('--reasoning-llm', metavar='', dest='reasoning_llm',
                         default=D('reasoning_llm'),
-                        type=str, help='Optional Reasoning Model (default: %(default)s)')
+                        type=str, help='Optional complex multi-step logic, philosophy, political '
+                        'nuance, deep arguments (default: %(default)s)')
     parser.add_argument('--reasoning-server', metavar='', dest='reasoning_host',
                         default=D('reasoning_host'),
                         type=str, help='OpenAI API server address (default: %(default)s)')

@@ -4,7 +4,8 @@ from .chat_utils import ChatOptions, RAGTag # For Type Hinting
 
 class Orchestration():
     """ Responsible for instantiating all ChatOpenAI objects """
-    def __init__(self, args: ChatOptions):
+    def __init__(self, console, args: ChatOptions):
+        self.console = console
         self.args = args
         disable_thinking = args.disable_thinking
         think = not disable_thinking
@@ -82,42 +83,61 @@ class Orchestration():
                                         seed = args.seed,
                                     )
 
-    def route(self, meta_tags: list[RAGTag], documents: dict=None)->ChatOpenAI:
-        """
-        Decide which model to use based on RAGTags,
-        and documents during RAG/Context population based on USER Query.
-        """
-        if documents is None:
-            documents = {}
-        # Hard stop for story telling
-        if not self.args.assistant_mode:
-            if 'nsfw' in documents.get('explicit', []):
-                return self.get_model('nsfw')
-            return self.get_model('story')
+    def _route_story(self, documents)->ChatOpenAI:
+        if 'nsfw' in documents.get('explicit', []):
+            return self.get_model('nsfw')
+        return self.get_model('story')
 
-        # Determine best assistant mode model
-        assistant_mode = "general"
+    @staticmethod
+    def _requires_vision(documents)->bool:
+        if documents.get('dynamic_images', []):
+            return True
+        return False
+
+    def _requires_agent(self, meta_tags: list[RAGTag], documents)->bool:
+        if not self.args.assistant_mode:
+            return False
         search_internet = False
         for tag in meta_tags:
-            if tag.tag == "assistant_mode":
-                assistant_mode = tag.content.lower()
             if tag.tag == "search_internet":
                 search_internet = tag.content
 
         # If web search required, optionally override model
-        if search_internet or 'agent' in documents.get('in_line_commands', []):
+        if (search_internet or 'agent' in documents.get('in_line_commands', [])
+            and not documents.get('agent_ran', False)):
+            return True
+        return False
+
+    @staticmethod
+    def _extract_mode(meta_tags: list[RAGTag])->str:
+        assistant_mode = "general"
+        for tag in meta_tags:
+            if tag.tag == "assistant_mode":
+                assistant_mode = tag.content.lower()
+        return assistant_mode
+
+    def _route_assistant(self, meta_tags, documents)->ChatOpenAI:
+        if self._requires_agent(meta_tags, documents):
             return self.get_model("agent")
 
-        # If user uploaded an image, override model
-        if documents.get('dynamic_images', []):
+        if self._requires_vision(documents):
             return self.get_model("vision")
 
-        # Sanity check model availability, default to general
-        if assistant_mode not in self.__llm:
-            assistant_mode = "general"
+        assistant_mode = self._extract_mode(meta_tags)
+        return self.__llm.get(assistant_mode, self.__llm["general"])
 
-        return self.get_model(assistant_mode)
+    def route(self, meta_tags: list[RAGTag], documents: dict | None = None)->ChatOpenAI:
+        """
+        Return suitable LLM based on chat mode and/or special context in documents
+        """
+        documents = documents or {}
+
+        if not self.args.assistant_mode:
+            return self._route_story(documents)
+
+        return self._route_assistant(meta_tags, documents)
 
     def get_model(self, model)->ChatOpenAI:
-        """ return orchestrated model """
+        """ return a specific ChatOpenAI model object """
         return self.__llm[model]
+

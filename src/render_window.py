@@ -118,6 +118,7 @@ class RenderWindow(PromptManager):
         self.think_once = True
         self.thinking_chunk = ''
         self.ooc_response = ''
+        self.llm = None
 
         # populate dataclasses, setup
         self._load_states(current_dir, context, args)
@@ -184,10 +185,9 @@ class RenderWindow(PromptManager):
                 yield syntax
         Markdown.elements["fence"] = SimpleCodeBlock
 
-    def _format_model_name(self, metadata: RAGTag) -> str:
+    def _format_model_name(self, model) -> str:
         """Extract a cleaned model identifier and prefix with sfw/nsfw."""
-        model = self.orchestrator.route(metadata)
-        matches = self.common.regex.model_re.findall(model.model_name)[:2]
+        matches = self.common.regex.model_re.findall(model)[:2]
         model_short = '-'.join(matches)
         return model_short[:10]
 
@@ -336,7 +336,12 @@ class RenderWindow(PromptManager):
     def get_messages(self, documents: dict, polish: bool = False)->list[Document]:
         """ return formatted message to be sent to LLM stream """
         prompts = self.prompts
-
+        if polish:
+            self.llm = self.orchestrator.get_model('polish')
+        if self.debug:
+            self.console.print(f'Model Chosen: {self.llm.model_name}',
+                          style=f'color({self.state.color})',
+                          highlight=False)
         # One shot OOC population
         diag = (self.ooc_response or '').strip()
         documents['ooc_diagnostics'] = (
@@ -384,12 +389,6 @@ class RenderWindow(PromptManager):
                 human_msg,
             ])
 
-        # grab suitable llm model
-        if polish:
-            llm = self.orchestrator.get_model('polish')
-        else:
-            llm = self.orchestrator.route(documents['metadata'], documents)
-
         if self.debug:
             self.console.print(f'LLM DOCUMENTS: {documents.keys()}\n'
                                f'{documents["performance"]}\n',
@@ -399,14 +398,9 @@ class RenderWindow(PromptManager):
         # Format text messages from template
         images = documents.pop('dynamic_images', [])
         formatted_messages = prompt_template.format_messages(**documents)
-
+        self.common.write_debug(self.llm.model_name, formatted_messages)
         # Optional: inject images into HumanMessage if present
         messages = self.add_image_block(formatted_messages, images)
-
-        if self.debug:
-            self.console.print(f'Model Chosen: {llm.model_name}',
-                          style=f'color({self.state.color})',
-                          highlight=False)
 
         # pylint: enable=no-member
         if self.debug:
@@ -416,14 +410,18 @@ class RenderWindow(PromptManager):
 
         if documents.get('use_agent', False) and not documents.get('agent_ran', False):
             # Let LangChain create the proper prompt template for the agent
-            agent = create_openai_tools_agent(llm, self.agent_tools, self.agent_prompt)
+            agent = create_openai_tools_agent(self.llm, self.agent_tools, self.agent_prompt)
             documents['agent_ran'] = True
             agent_executor = AgentExecutor(agent=agent, tools=self.agent_tools, verbose=False)
-            self.console.print('Agent Tool running (Web Search)...',
-                               style=f'color({self.state.color})', highlight=False)
             try:
+                self.console.print('Agent Tool Web Search (ctl-c to cancel)...',
+                               style=f'color({self.state.color})', highlight=False)
                 result = agent_executor.invoke({"input": documents['user_query']})
                 documents['dynamic_files'] += f'\n=== AGENT_TOOL_RESULT ===\n{result}\n\n'
+                return self.get_messages(documents, polish=polish)
+            except KeyboardInterrupt:
+                documents['dynamic_files'] += ('\n=== AGENT_TOOL_RESULT ==='
+                                               '\nUSER CANCELED SEARCH\n\n')
                 return self.get_messages(documents, polish=polish)
             # pylint: disable-next=bare-except # too many ways an LLM can go wrong
             except:
@@ -434,13 +432,9 @@ class RenderWindow(PromptManager):
         return messages
 
     # Stream response as chunks
-    def stream_response(self, documents: dict, messages: Document, polish: bool = False):
+    def stream_response(self, messages: Document):
         """ Parse LLM Prompt """
-        if polish:
-            llm = self.orchestrator.get_model('polish')
-        else:
-            llm = self.orchestrator.route(documents['metadata'], documents)
-        for chunk in llm.stream(messages):
+        for chunk in self.llm.stream(messages):
             chunk = self.reveal_thinking(chunk, self.state.verbose)
             yield chunk
 
@@ -453,14 +447,14 @@ class RenderWindow(PromptManager):
         pre_processing_time = kwargs['pre_process_time']
         # pylint: disable-next=consider-using-f-string # no. this is how its done
         formatted_time = '{:.1f}s'.format(pre_processing_time)
-        metadata = kwargs['metadata']
+        model = self.llm.model_name
         turn = kwargs['turn_count']
 
         foot_color = self.state.color - 6 if self.state.light_mode else self.state.color
 
         footer = Text('\nTurn:', style=f'color({foot_color})')
         footer.append(f'{turn} ', style='color(123)')
-        footer.append(self._format_model_name(metadata), style='color(202)')
+        footer.append(self._format_model_name(model), style='color(202)')
         footer.append(self._pulse_emoji(), style=f'color({12 if self.state.light_mode else 51})')
         footer.append(f'{time_taken:.2f}', style='color(94)')
         footer.append('s Tokens(dedup:', style=f'color({foot_color})')
@@ -492,8 +486,10 @@ class RenderWindow(PromptManager):
             chat_content = Markdown(current_stream)
         return chat_content
 
-    def live_stream(self, documents: dict)->None:
+    def live_stream(self, documents: dict, meta_data: RAGTag)->None:
         """ Handle the Rich Live updating process """
+        # grab suitable llm model
+        self.llm = self.orchestrator.route(meta_data, documents)
         stream = self.state.stream   # shorthand
         context = self.state.context # shorthand
         self.think_once = True
@@ -522,8 +518,8 @@ class RenderWindow(PromptManager):
                        'pre_process_time': pre_process_time,
                        'token_count'     : 0,
                        'content_rating'  : documents['explicit'],
-                       'turn_count'      : len(history[branch])+1,
-                       'metadata'        : documents['metadata']}
+                       'turn_count'      : len(history[branch])+1
+                       }
         color = self.state.color-5 if self.state.light_mode else self.state.color
         _rag = '' if not self.state.no_rags and self.state.assistant_mode else 'RAG+'
         self.renderable.header = Text(f'Submitting relevant {_rag}History tokens: '
@@ -540,7 +536,7 @@ class RenderWindow(PromptManager):
             live.console.clear(home=True)
             self.render_chat(live)
             self.start_namepulse()
-            for piece in self.stream_response(documents, messages):
+            for piece in self.stream_response(messages):
                 if start_time == 0:
                     start_time = time.time()
                 current_response += piece.content
@@ -575,7 +571,7 @@ class RenderWindow(PromptManager):
                     documents['llm_response'] = current_response
                     messages = self.get_messages(documents, polish=True)
                     current_response = ''
-                    for piece in self.stream_response(documents, messages, polish=True):
+                    for piece in self.stream_response(messages):
                         if start_time == 0:
                             start_time = time.time()
                         current_response += piece.content

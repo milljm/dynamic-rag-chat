@@ -599,11 +599,15 @@ class ContextManager(PromptManager):
                                style=f'color({self.opts.color})',
                                highlight=False)
             (_, meta_tags, error) = self.pre_processor(query, documents)
+            if self.debug:
+                self.console.print(f'TAG RETRIEVAL:\n{meta_tags}\n\n',
+                                    style=f'color({self.opts.color})',
+                                    highlight=False)
             if not error:
                 return ([],0,0)
 
             # Add tags so they can be passed around
-            documents['metadata'] = meta_tags
+            documents['RAGTags'] = meta_tags
 
             # Populate explicit content if triggered
             documents['explicit'] = self.is_explicit(meta_tags)
@@ -640,12 +644,6 @@ class ContextManager(PromptManager):
             if documents.get('content_type', False):
                 documents['content_type'] = ('- Respond in the following format: ',
                                                 f'{documents["content_type"]}')
-
-            if self.debug:
-                self.console.print(f'TAG RETRIEVAL:\n{meta_tags}\n\n',
-                                    style=f'color({self.opts.color})',
-                                    highlight=False)
-
             self.console.print('Gathering RAG data...',
                                style=f'color({self.opts.color})',
                                highlight=False)
@@ -701,7 +699,7 @@ class ContextManager(PromptManager):
                                 tags_metadata=meta_tags,
                                 collection=f'{branch}_{self.common.attributes.collections["user"]}')
             # Return data collected
-            return (documents, pre_tokens, post_tokens)
+            return (documents, pre_tokens, post_tokens, meta_tags)
 
         # Store data (non-blocking)
         return self.post_process(documents)

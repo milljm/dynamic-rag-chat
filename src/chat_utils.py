@@ -326,6 +326,22 @@ class CommonUtils():
             _rag_tags.append(RAGTag(key, value))
         return _rag_tags
 
+    @staticmethod
+    def extract_first_json(text: str):
+        """ robust json extractor from text """
+        # Normalize Python booleans
+        text = re.sub(r'\bFalse\b', 'false', text)
+        text = re.sub(r'\bTrue\b', 'true', text)
+        decoder = json.JSONDecoder()
+        idx = 0
+        while idx < len(text):
+            try:
+                obj, _ = decoder.raw_decode(text[idx:])
+                return obj
+            except json.JSONDecodeError:
+                idx += 1
+        return None
+
     def get_tags(self, response: str)->list[RAGTag]:
         """ Extract tags in JSON and meta_tag format from the LLM's response """
         _tags = []
@@ -339,39 +355,19 @@ class CommonUtils():
             if self.opts.debug:
                 self.console.print(f'PRE-PROCESSOR REASONING REMOVED RESPONSE:\n{response}\n\n',
                                 style=f'color({self.opts.color})', highlight=False)
-        try:
-            # JSON-style block. Attempt several kinds of matching, break on the first
-            # successful json.loads()
-            for match in [self.regex.json_template.search(response),
-                          self.regex.json_malformed.search(response),
-                          self.regex.curly_match.search(response)]:
-                if match:
-                    json_str = match.group(1)
-                    # print('DEBUG: sanitizing...')
-                    # json_str = self.sanitize_response(json_str)
-                    try:
-                        data = json.loads(f'{{{json_str}}}')
-                        data = data[self.regex.metadata_key]
-                    except json.decoder.JSONDecodeError:
-                        continue
-                    _tags.extend(self.parse_tags(data))
-                    break
-            seen = set()
-            deduped = []
-            for tag in _tags:
-                key = (tag.tag,
-                       tuple(tag.content)
-                       if isinstance(tag.content, (list, set)) else tag.content)
-                if key not in seen:
-                    seen.add(key)
-                    deduped.append(tag)
-            return deduped
-
-        # pylint: disable=broad-exception-caught  # too many ways for this to go wrong
-        except Exception as e:
-            if self.opts.debug:
-                print(f'[get_tags error] {e}')
-            return []
+        matches = self.extract_first_json(response)
+        if matches:
+            _tags.extend(self.parse_tags(matches.get('metadata', {})))
+        seen = set()
+        deduped = []
+        for tag in _tags:
+            key = (tag.tag,
+                    tuple(tag.content)
+                    if isinstance(tag.content, (list, set)) else tag.content)
+            if key not in seen:
+                seen.add(key)
+                deduped.append(tag)
+        return deduped
 
     @staticmethod
     def normalize_for_dedup(text: str)->str:

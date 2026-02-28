@@ -63,7 +63,7 @@ Classify the primary interaction type.
 Allowed values (choose exactly one):
 
 - casual → social conversation, jokes, light chat, reactions
-- coding → debugging, writing code, stack traces, refactoring, programming questions
+- coding → debugging, writing code, stack traces, refactoring, programming questions, programming languages
 - analysis → system design, architectural thinking, comparisons, evaluating approaches
 - reasoning → complex multi-step logic, philosophy, political nuance, deep arguments
 - general → definitions, explanations, factual non-time-sensitive questions
@@ -73,7 +73,7 @@ If unsure, use "general".
 
 ## 8) search_internet
 search_internet:
-Set to true ONLY if the user is requesting information that must be retrieved from the web.
+Set to `true` ONLY if the user is requesting information that must be retrieved from the web.
 
 Do NOT set to true if:
 - the word "internet" is merely mentioned
@@ -90,10 +90,9 @@ Do NOT set to true if:
 - writing tasks
 
 Only set to true when the user explicitly requests or clearly requires external information.
-If unsure, use False.
+If unsure, use `false`.
 
-# SCHEMA
-
+# JSON SCHEMA
 {
   "metadata": {
     "document_topics": [string],
@@ -101,7 +100,7 @@ If unsure, use False.
     "method": [string],
     "language": string,
     "assistant_mode": string,
-    "search_internet": bool
+    "search_internet": bool,      // true or false
   }
 }
 
