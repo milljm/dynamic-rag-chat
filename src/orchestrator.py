@@ -84,7 +84,7 @@ class Orchestration():
                                     )
 
     def _route_story(self, documents)->ChatOpenAI:
-        if 'nsfw' in documents.get('explicit', []):
+        if documents.get('explicit', False):
             return self.get_model('nsfw')
         return self.get_model('story')
 
