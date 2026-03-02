@@ -410,6 +410,7 @@ class RenderWindow(PromptManager):
         formatted_messages = prompt_template.format_messages(**documents)
         # Optional: inject images into HumanMessage if present
         messages = self.add_image_block(formatted_messages, images)
+        documents['dynamic_images'] = images
 
         # pylint: enable=no-member
         if self.debug:

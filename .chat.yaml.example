@@ -77,6 +77,7 @@ chat:
   rag_matches: 5                          (how many matches to allow from the RAG: 5 from user's RAG and 5 from AIs)
   history_session: 5                      (how many turns of history to provide. Thats 15 from all sources by default)
   api_key: YOUR API KEY                   (your assigned API key, or empty if using local Ollama server)
+  tavily_key: YOUR TAVILY KEY             (your assigned API key from Tavily (deep web search capabilities), or empty if not using Tavily)
   time_zone: 'America/Denver'             (currently not used in the system prompts, easy to implement though: {date_time})
   light_mode: False                       (set to true if you use a high luminance terminal background)
   context_window: 4192                    (ask the server to use this context window size. Sometimes can be ignore)
