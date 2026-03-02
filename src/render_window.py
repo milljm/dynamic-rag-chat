@@ -1,6 +1,7 @@
 """ module responsible for rendering output to the screen """
 from dataclasses import dataclass, field
 import time
+import re
 from datetime import datetime
 from threading import Thread
 from rich.live import Live
@@ -9,6 +10,7 @@ from rich.syntax import Syntax
 from rich.text import Text
 from rich.align import Align
 from rich.console import Group
+from rich.rule import Rule
 from langchain.prompts import ChatPromptTemplate, PromptTemplate, MessagesPlaceholder
 from langchain.agents import create_openai_tools_agent, AgentExecutor
 from langchain.schema.messages import HumanMessage
@@ -174,7 +176,7 @@ class RenderWindow(PromptManager):
         self.renderable = Renderables(
             header = Text(''),
             query = Markdown(''),
-            separator = Markdown('---'),
+            separator=Rule(style="dim"),
             assistant = Text('', style='bold color(208)'),
             response = Markdown(''),
             footer = Text('')
@@ -196,10 +198,16 @@ class RenderWindow(PromptManager):
         Markdown.elements["fence"] = SimpleCodeBlock
 
     def _format_model_name(self, model) -> str:
-        """Extract a cleaned model identifier and prefix with sfw/nsfw."""
-        matches = self.common.regex.model_re.findall(model)[:2]
-        model_short = '-'.join(matches)
-        return model_short[:10]
+        match = self.common.regex.model_re.search(model)
+        if not match:
+            # fallback: take first two segments split by '-' or '/'
+            parts = re.split(r'[-/]', model)
+            return '-'.join(parts[:2])[:20]
+
+        first, middle, last = match.groups()
+        middle = f"-{middle}" if middle else ""
+        short = f"{first}{middle}-{last}"
+        return short[:20]
 
     def _pulse_emoji(self) -> str:
         stream = self.state.stream

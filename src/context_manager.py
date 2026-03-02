@@ -564,7 +564,7 @@ class ContextManager(PromptManager):
             return documents['chat_history']
 
     def handle_context(self, documents: dict,
-                             direction='query')->tuple[dict[str,list], int]:
+                             direction='query')->tuple[dict[str,list], int, list]:
         """ Method to handle all the lovely context """
         # Retrieve context from AI and User RAG and Chat History
         if direction == 'query':
@@ -601,7 +601,7 @@ class ContextManager(PromptManager):
                                     style=f'color({self.opts.color})',
                                     highlight=False)
             if not error:
-                return ([],0,0)
+                return ([],0,0,[])
 
             # Add tags so they can be passed around
             documents['RAGTags'] = meta_tags

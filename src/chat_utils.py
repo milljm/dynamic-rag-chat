@@ -200,7 +200,8 @@ class ChatOptions:
 @dataclass
 class RegExp:
     """ regular expression in use throughout the project """
-    model_re = re.compile(r'(\w+)\W+')
+    # model_re = re.compile(r'(\w+)\W+')
+    model_re = re.compile(r'([a-zA-Z]+\d*[a-zA-Z]*)[-_]?(\w*)?[-_](\d+[a-z]*)', flags=re.IGNORECASE)
     find_prompt  = re.compile(r'(?<=[<m]eta_prompt: ).*?(?=[>)])', re.DOTALL)
     meta_start_re = re.compile(r'{\W*(metadata)\W+:', re.IGNORECASE)
     json_template = re.compile(r'\{+\s*((?:".+?":.+?)+)\s*\}+', re.DOTALL)
