@@ -1,6 +1,7 @@
 """ module responsible for rendering output to the screen """
 from dataclasses import dataclass, field
 import time
+from datetime import datetime
 from threading import Thread
 from rich.live import Live
 from rich.markdown import Markdown, CodeBlock
@@ -13,6 +14,7 @@ from langchain.agents import create_openai_tools_agent, AgentExecutor
 from langchain.schema.messages import HumanMessage
 from langchain.schema import BaseMessage, Document   # For Type Hinting
 from langchain_core.prompts import HumanMessagePromptTemplate, SystemMessagePromptTemplate
+from langchain_tavily import TavilySearch
 from .prompt_manager import PromptManager
 from .context_manager import ContextManager # For Type Hinting
 from .chat_utils import CommonUtils, ChatOptions, RAGTag # For Type Hinting
@@ -126,7 +128,10 @@ class RenderWindow(PromptManager):
 
         # Agent Prompt
         self.agent_prompt = ChatPromptTemplate.from_messages([
-            ("system", """You are a helpful assistant."""),
+            ("system", ('You are a helpful research assistant. Today\'s date is '
+                        f'{datetime.today().strftime("%B %d, %Y")}. Use web search to find '
+                        'accurate, up-to-date information.'))
+            ,
             ("user", "{input}"),
             MessagesPlaceholder(variable_name="agent_scratchpad"),
             ])
@@ -143,7 +148,12 @@ class RenderWindow(PromptManager):
         self.thinking_thread = Thread(target=self.animate_thinking)
         self.namepulse_active: bool = False
         self.namepulse_thread = Thread(target=self.animate_namepulse)
+        key = (self.opts.tavily_key or "").strip().lower()
         self.agent_tools = [DuckDuckGoSearchTool()]
+        if key and key != "none":
+            self.agent_tools.append(
+                TavilySearch(tavily_api_key=self.opts.tavily_key)
+            )
 
     def _load_states(self, current_dir, context, args):
         """ Load the assorted dataclass objects in use throughout this module """
@@ -398,7 +408,6 @@ class RenderWindow(PromptManager):
         # Format text messages from template
         images = documents.pop('dynamic_images', [])
         formatted_messages = prompt_template.format_messages(**documents)
-        self.common.write_debug(self.llm.model_name, formatted_messages)
         # Optional: inject images into HumanMessage if present
         messages = self.add_image_block(formatted_messages, images)
 
@@ -488,8 +497,6 @@ class RenderWindow(PromptManager):
 
     def live_stream(self, documents: dict, meta_data: RAGTag)->None:
         """ Handle the Rich Live updating process """
-        # grab suitable llm model
-        self.llm = self.orchestrator.route(meta_data, documents)
         stream = self.state.stream   # shorthand
         context = self.state.context # shorthand
         self.think_once = True
@@ -502,7 +509,13 @@ class RenderWindow(PromptManager):
         history = self.common.load_chat()
         pre_process_time = float(documents['pre_process_time'])
         start_time = time.time()
+
+        # Grab suitable llm model from orchestrator (sets agent tool if needed)
+        self.llm = self.orchestrator.route(meta_data, documents)
         messages = self.get_messages(documents)
+        # Run orchestrator again after grabbing messages (sets appropriate model after agent runs)
+        self.llm = self.orchestrator.route(meta_data, documents)
+
         pre_process_time += time.time()-start_time
         token_total = documents['prompt_tokens']
         for message in messages:
@@ -625,11 +638,8 @@ class RenderWindow(PromptManager):
         if self.debug:
             self.console.print('DEBUG: saving to RAG...',
                                 style=f'color({self.state.color})',highlight=False)
-        self.common.write_debug('last', current_response)
         self.state.context.handle_context(documents, direction='store')
         current_response = self.common.sanitize_response(current_response)
-        self.common.write_debug('sanitized', current_response)
-
         if self.state.disable_thinking:
             documents["user_query"] = documents["user_query"].replace('</think>', '')
 

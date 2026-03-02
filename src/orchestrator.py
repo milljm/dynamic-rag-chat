@@ -102,10 +102,13 @@ class Orchestration():
             if tag.tag == "search_internet":
                 search_internet = tag.content
 
-        # If web search required, optionally override model
-        if (search_internet or 'agent' in documents.get('in_line_commands', [])
-            and not documents.get('agent_ran', False)):
+        # Agent previously invoked
+        if documents.get('agent_ran', False):
+            return False
+        # Agent requested
+        if search_internet or 'agent' in documents.get('in_line_commands', []):
             return True
+
         return False
 
     @staticmethod
@@ -124,6 +127,9 @@ class Orchestration():
             return self.get_model("vision")
 
         assistant_mode = self._extract_mode(meta_tags)
+        if self.args.debug:
+            self.console.print(f'DEBUG: DYNAMIC MODEL CHOSEN: {assistant_mode}',
+                                style=f'color({self.args.color})',highlight=False)
         return self.__llm.get(assistant_mode, self.__llm["general"])
 
     def route(self, meta_tags: list[RAGTag], documents: dict | None = None)->ChatOpenAI:

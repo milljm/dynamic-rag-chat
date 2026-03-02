@@ -87,6 +87,7 @@ class ChatOptions:
 
     time_zone: str = 'GMT'
     api_key: str = 'none'
+    tavily_key: str = 'none'
     assistant_mode: bool = False
     no_rags: bool = False
     debug: bool = False

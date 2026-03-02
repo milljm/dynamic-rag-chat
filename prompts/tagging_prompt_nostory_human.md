@@ -73,24 +73,27 @@ If unsure, use "general".
 
 ## 8) search_internet
 search_internet:
-Set to `true` ONLY if the user is requesting information that must be retrieved from the web.
+Set to `true` if the query refers to, asks about, or implies need for information that is:
+
+- time-sensitive / current events (news unfolding right now, ongoing conflicts, recent disasters, live sports/politics, market prices, election results, breaking developments)
+- recent factual claims that could change quickly (e.g. "the recent war with Iran", outbreaks, assassinations, natural disasters in last few months)
+- requires checking latest status, updates, or verification beyond general/historical knowledge
+
+Set to `true` especially for:
+- references to very recent or ongoing wars, military actions, terrorist attacks, coups, regime changes
+- mentions of specific leaders' current status (deaths, health, speeches in last days/weeks)
+- anything that sounds like "news" or "what happened recently with X"
 
 Do NOT set to true if:
+- purely historical (events >1–2 years old with no "recent" qualifier)
 - the word "internet" is merely mentioned
-- the user is discussing technology casually
-- the user is describing a problem
-- the user is chatting
-- no factual lookup is required
-- definitions
-- historical facts
-- general knowledge
-- programming help
-- explanations
-- math
-- writing tasks
+- casual tech discussion, programming help, math, definitions, writing tasks
+- general non-time-bound explanations
+- user is describing a hypothetical or fictional scenario
 
-Only set to true when the user explicitly requests or clearly requires external information.
-If unsure, use `false`.
+If the query mentions something that feels like it might be current news or rapidly evolving (especially geopolitics, conflicts, major incidents), prefer `true` over `false`. Recall > precision here too.
+
+When in doubt and the topic has real-world recency implications → `true`.
 
 # JSON SCHEMA
 {

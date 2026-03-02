@@ -162,7 +162,6 @@ class ContextManager(PromptManager):
                                 style=f'color({self.opts.color})', highlight=False)
         try:
             content = self.pre_llm.invoke(prompt).content
-            self.common.write_debug(self.pre_llm.model_name, content)
         except APITimeoutError:
             return ('APITimeoutError', [], False)
         # pylint: disable-next=bare-except  # can't handle everything
@@ -255,8 +254,6 @@ class ContextManager(PromptManager):
             self.console.print(f'THREADED META TAGS PARSED: {list_rag_tags}',
                                style=f'color({self.opts.color})',
                                highlight=False)
-        else:
-            self.common.write_debug('meta_tags', list_rag_tags)
         rag = RAG(self.console, self.common, self.opts)
         rag.store_data(response, tags_metadata=list_rag_tags, collection=collection)
 

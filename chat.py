@@ -896,7 +896,9 @@ def _add_arguments(parser: argparse.ArgumentParser, defaults, *, use_defaults: b
 
 
     parser.add_argument('--api-key', metavar='', default=D('api_key'),
-                        type=str, help='You API Key (default: REDACTED)')
+                        type=str, help='Your API Key (default: REDACTED)')
+    parser.add_argument('--tavily-key', metavar='', default=D('tavily_key'),
+                        type=str, help='Your Tavily API Key (default: REDACTED)')
     parser.add_argument('--name', metavar='', default=D('name'),
                         type=str, help='Your assistants name (default: %(default)s)')
     parser.add_argument('--user-name', metavar='', default=D('user_name'),
