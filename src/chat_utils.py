@@ -62,14 +62,12 @@ class ChatOptions:
     # ---------- “orchestration” options
     casual_host: str = host
     coder_host: str = host
-    analysis_host: str = host
-    reasoning_host: str = host
+    structured_host: str = host
     general_host: str = host
     nsfw_host: str = host
     casual_llm: Optional[str] = 'None'
     coder_llm: Optional[str] = 'None'
-    analysis_llm: Optional[str] = 'None'
-    reasoning_llm: Optional[str] = 'None'
+    structured_llm: Optional[str] = 'None'
     general_llm: Optional[str] = 'None'
     nsfw_llm: Optional[str] = 'None'
 
@@ -130,8 +128,7 @@ class ChatOptions:
         mode_fields = {
             "casual": ("casual_llm", "casual_host"),
             "coder": ("coder_llm", "coder_host"),
-            "analysis": ("analysis_llm", "analysis_host"),
-            "reasoning": ("reasoning_llm", "reasoning_host"),
+            "structured": ("structured_llm", "structured_host"),
             "general": ("general_llm", "general_host"),
             "nsfw": ("nsfw_llm", "nsfw_host"),
             }
@@ -162,8 +159,7 @@ class ChatOptions:
         'use_rags':                  'no_rags',
         'casual_server':             'casual_host',
         'coder_server':              'coder_host',
-        'analysis_server':           'analysis_host',
-        'reasoning_server':          'reasoning_host',
+        'structured_server':         'structured_host',
         'general_server':            'general_host',
     }
 
@@ -324,7 +320,7 @@ class CommonUtils():
                 split_values = re.split(r'[;,|]\s*', value.strip())
                 # Use list if it split into multiple values, else keep as string
                 value = split_values if len(split_values) > 1 else split_values[0]
-            _rag_tags.append(RAGTag(key, value))
+            _rag_tags.append(RAGTag(key, str(value)))
         return _rag_tags
 
     @staticmethod

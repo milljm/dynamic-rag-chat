@@ -53,15 +53,10 @@ class Orchestration():
                 "model": args.coder_llm,
                 "temperature": 0.2,
             },
-            "analysis": {
-                "base_url": args.analysis_host,
-                "model": args.analysis_llm,
-                "temperature": 0.4,
-            },
-            "reasoning": {
-                "base_url": args.reasoning_host,
-                "model": args.reasoning_llm,
-                "temperature": 0.3,
+            "structured": {
+                "base_url": args.structured_host,
+                "model": args.structured_llm,
+                "temperature": 0.2,
             },
             "general": {
                 "base_url": args.general_host,
@@ -106,7 +101,7 @@ class Orchestration():
         if documents.get('agent_ran', False):
             return False
         # Agent requested
-        if search_internet or 'agent' in documents.get('in_line_commands', []):
+        if search_internet.lower() == 'true' or 'agent' in documents.get('in_line_commands', []):
             return True
 
         return False

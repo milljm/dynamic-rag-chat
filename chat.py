@@ -24,6 +24,7 @@
 #     "jinja2",
 #     "duckduckgo-search",
 #     "ddgs",
+#     "langchain-tavily",
 # ]
 # ///
 import os
@@ -878,20 +879,12 @@ def _add_arguments(parser: argparse.ArgumentParser, defaults, *, use_defaults: b
                         default=D('coder_host'),
                         type=str, help='OpenAI API server address (default: %(default)s)')
 
-    parser.add_argument('--analysis-llm', metavar='', dest='analysis_llm',
-                        default=D('analysis_llm'),
-                        type=str, help='Optional system design, architectural thinking, '
-                        'comparisons, evaluating approaches (default: %(default)s)')
-    parser.add_argument('--analysis-server', metavar='', dest='analysis_host',
-                        default=D('analysis_host'),
-                        type=str, help='OpenAI API server address (default: %(default)s)')
-
-    parser.add_argument('--reasoning-llm', metavar='', dest='reasoning_llm',
-                        default=D('reasoning_llm'),
-                        type=str, help='Optional complex multi-step logic, philosophy, political '
-                        'nuance, deep arguments (default: %(default)s)')
-    parser.add_argument('--reasoning-server', metavar='', dest='reasoning_host',
-                        default=D('reasoning_host'),
+    parser.add_argument('--structured-llm', metavar='', dest='structured_llm',
+                        default=D('structured_llm'),
+                        type=str, help='Optional multi-step logic, system design, comparisons, '
+                        'deep arguments, architectural thinking (default: %(default)s)')
+    parser.add_argument('--structured-server', metavar='', dest='structured_host',
+                        default=D('structured_host'),
                         type=str, help='OpenAI API server address (default: %(default)s)')
 
 

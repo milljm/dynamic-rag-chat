@@ -9,8 +9,12 @@ Return ONE valid JSON object only.
 - Output ONLY JSON (no prose, no markdown)
 - Must start with { and end with }
 - All strings lowercase
-- Allowed value types: string, array of strings
-- No nulls, no numbers, no nested objects
+- Allowed value types:
+  - string
+  - array of strings
+  - float (for confidence)
+  - boolean (for search_internet)
+- No nulls, no nested objects
 - Use [] for empty arrays
 - No extra fields
 - Arrays must always be arrays (never a single string)
@@ -64,14 +68,24 @@ Allowed values (choose exactly one):
 
 - casual → social conversation, jokes, light chat, reactions
 - coding → debugging, writing code, stack traces, refactoring, programming questions, programming languages
-- analysis → system design, architectural thinking, comparisons, evaluating approaches
-- reasoning → complex multi-step logic, philosophy, political nuance, deep arguments
+- structured → multi-step logic, system design, comparisons, deep arguments, architectural thinking
 - general → definitions, explanations, factual non-time-sensitive questions
 
-Choose the single best category.
+Never output multiple assistant_mode values.
+assistant_mode must be exactly one of the allowed strings.
+If the request compares approaches, evaluates tradeoffs, or discusses system architecture, choose "structured" even if programming languages are mentioned.
 If unsure, use "general".
 
-## 8) search_internet
+## 8)
+confidence:
+Rate your own confidence on selecting the right assistant_mode you choose.
+Use:
+- 0.9–1.0 when category is very clear
+- 0.6–0.8 when some ambiguity exists
+- 0.3–0.5 when classification was difficult
+Avoid always using 1.0.
+
+## 9) search_internet
 search_internet:
 Set to `true` if the query refers to, asks about, or implies need for information that is:
 
@@ -83,6 +97,12 @@ Set to `true` especially for:
 - references to very recent or ongoing wars, military actions, terrorist attacks, coups, regime changes
 - mentions of specific leaders' current status (deaths, health, speeches in last days/weeks)
 - anything that sounds like "news" or "what happened recently with X"
+
+Set true for:
+- product release status
+- stock prices
+- legal rulings in the past year
+- policy changes in the past year
 
 Do NOT set to true if:
 - purely historical (events >1–2 years old with no "recent" qualifier)
@@ -103,6 +123,7 @@ When in doubt and the topic has real-world recency implications → `true`.
     "method": [string],
     "language": string,
     "assistant_mode": string,
+    "confidence": float,          // 0.0–1.0
     "search_internet": bool,      // true or false
   }
 }
