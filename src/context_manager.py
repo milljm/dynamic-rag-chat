@@ -632,8 +632,9 @@ class ContextManager(PromptManager):
 
             # Make all meta_tags available for prompt templating operations, without overwriting
             # important already established keys.
-            safe_meta = {k: v for k, v in meta_tags.items() if k not in documents}
-            documents.update(safe_meta)
+            _gold = dict(documents)
+            documents.update(meta_tags)
+            documents.update(_gold)
 
             # If content_type is populated, instruct the LLM to respond in kind
             if documents.get('content_type', False):
