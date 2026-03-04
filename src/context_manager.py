@@ -630,12 +630,10 @@ class ContextManager(PromptManager):
                                        style=f'color({self.opts.color})',
                                        highlight=False)
 
-            # Make all meta_tags available for prompt templating operations
-            # Note: This *might* have the side-effect of breaking necessary keys, though rare.
-            #       as in, we are allowing any tags that the pre-processor *might* invent on its
-            #       own, could overwrite a required on. Still, the benefits outweigh the negs.
-            #       Allowing it provides a synergy pipeline. Allowing us to stream from LLM to LLM
-            documents.update(meta_tags)
+            # Make all meta_tags available for prompt templating operations, without overwriting
+            # important already established keys.
+            safe_meta = {k: v for k, v in meta_tags.items() if k not in documents}
+            documents.update(safe_meta)
 
             # If content_type is populated, instruct the LLM to respond in kind
             if documents.get('content_type', False):

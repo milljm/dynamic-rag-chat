@@ -92,7 +92,7 @@ class Orchestration():
     def _requires_agent(self, meta_tags: list[RAGTag], documents)->bool:
         if not self.args.assistant_mode:
             return False
-        search_internet = False
+        search_internet = 'false'
         for tag in meta_tags:
             if tag.tag == "search_internet":
                 search_internet = tag.content

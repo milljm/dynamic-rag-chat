@@ -475,7 +475,7 @@ class Chat():
                      'additional_content'       : '',
                      'date_time'                : self.session.common.get_time(self.opts.time_zone),
                      'completion_tokens'        : self.opts.completion_tokens,
-                     'pre_process_time'         : '{:.1f}s'.format(0),
+                     'pre_process_time'         : '{:.1f}'.format(0),
                      'performance'              : '',
                      'light_mode'               : self.set_lightmode_aware(self.opts.light_mode),
                      'llm_prompt'               : '',
