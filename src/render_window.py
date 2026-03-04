@@ -426,7 +426,8 @@ class RenderWindow(PromptManager):
                           style=f'color({self.state.color})',
                           highlight=False)
 
-        if documents.get('use_agent', False) and not documents.get('agent_ran', False):
+        if ((documents.get('use_agent', False) or documents.get('search_internet', False))
+             and not documents.get('agent_ran', False)):
             # Let LangChain create the proper prompt template for the agent
             agent = create_openai_tools_agent(self.llm, self.agent_tools, self.agent_prompt)
             documents['agent_ran'] = True
@@ -522,6 +523,8 @@ class RenderWindow(PromptManager):
         # Grab suitable llm model from orchestrator (sets agent tool if needed)
         self.llm = self.orchestrator.route(meta_data, documents)
         messages = self.get_messages(documents)
+        self.common.write_debug(f'live_stream-{self.llm.model_name}',
+                                     messages)
         # Run orchestrator again after grabbing messages (sets appropriate model after agent runs)
         self.llm = self.orchestrator.route(meta_data, documents)
 

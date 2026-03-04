@@ -596,6 +596,8 @@ class ContextManager(PromptManager):
                                style=f'color({self.opts.color})',
                                highlight=False)
             (_, meta_tags, error) = self.pre_processor(query, documents)
+            self.common.write_debug(f'handle_context_preprocess-{self.pre_llm.model_name}',
+                                     meta_tags)
             if self.debug:
                 self.console.print(f'TAG RETRIEVAL:\n{meta_tags}\n\n',
                                     style=f'color({self.opts.color})',
