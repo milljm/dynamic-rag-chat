@@ -427,7 +427,7 @@ class RenderWindow(PromptManager):
                           highlight=False)
 
         if ((documents.get('use_agent', False)
-            or documents.get('search_internet', 'false').lower() == 'true')
+            or float(documents.get('answer_confidence', '0.75')) < float(0.75))
             and not documents.get('agent_ran', False)):
             # Let LangChain create the proper prompt template for the agent
             agent = create_openai_tools_agent(self.llm, self.agent_tools, self.agent_prompt)
@@ -447,7 +447,14 @@ class RenderWindow(PromptManager):
             except:
                 self.console.print('Error running agent!', style=f'color({self.state.color})',
                                 highlight=False)
-                documents['dynamic_files'] += '\n=== AGENT_TOOL_RESULT ===\nERROR RUNNING AGENT\n\n'
+                documents['dynamic_files'] += (
+                        '\n=== AGENT_TOOL_RESULT ===\n'
+                        'ERROR: Tool execution failed.\n'
+                        'INSTRUCTION: You must inform the user that the web/tool search failed '
+                        'and that you cannot answer reliably without it. '
+                        'Do NOT fabricate or guess.\n\n'
+                    )
+                documents['agent_error'] = 'TRUE'
                 return self.get_messages(documents, polish=polish)
         return messages
 
@@ -522,12 +529,12 @@ class RenderWindow(PromptManager):
         start_time = time.time()
 
         # Grab suitable llm model from orchestrator (sets agent tool if needed)
+        documents['agent_error'] = 'FALSE'
         self.llm = self.orchestrator.route(meta_data, documents)
         messages = self.get_messages(documents)
-        self.common.write_debug(f'live_stream-{self.llm.model_name}',
-                                     messages)
         # Run orchestrator again after grabbing messages (sets appropriate model after agent runs)
         self.llm = self.orchestrator.route(meta_data, documents)
+        self.common.write_debug(f'live_stream-{self.llm.model_name}', messages)
 
         pre_process_time += time.time()-start_time
         token_total = documents['prompt_tokens']

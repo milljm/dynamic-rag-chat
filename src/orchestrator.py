@@ -92,16 +92,16 @@ class Orchestration():
     def _requires_agent(self, meta_tags: list[RAGTag], documents)->bool:
         if not self.args.assistant_mode:
             return False
-        search_internet = 'false'
+        answer_confidence = float(0.75)
         for tag in meta_tags:
-            if tag.tag == "search_internet":
-                search_internet = tag.content
+            if tag.tag == "answer_confidence":
+                answer_confidence = float(tag.content)
 
         # Agent previously invoked
         if documents.get('agent_ran', False):
             return False
         # Agent requested
-        if search_internet.lower() == 'true' or 'agent' in documents.get('in_line_commands', []):
+        if answer_confidence < float(0.75) or 'agent' in documents.get('in_line_commands', []):
             return True
 
         return False

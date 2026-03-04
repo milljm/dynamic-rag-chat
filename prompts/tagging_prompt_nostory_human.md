@@ -77,7 +77,7 @@ If the request compares approaches, evaluates tradeoffs, or discusses system arc
 If unsure, use "general".
 
 ## 8)
-confidence:
+model_confidence:
 Rate your own confidence on selecting the right assistant_mode you choose.
 Use:
 - 0.9–1.0 when category is very clear
@@ -85,35 +85,18 @@ Use:
 - 0.3–0.5 when classification was difficult
 Avoid always using 1.0.
 
-## 9) search_internet
-search_internet:
-Set to `true` if the query refers to, asks about, or implies need for information that is:
+## 9)
+answer_confidence:
+Rate your confidence in answering the user's question accurately without needing to search the internet.
 
-- time-sensitive / current events (news unfolding right now, ongoing conflicts, recent disasters, live sports/politics, market prices, election results, breaking developments)
-- recent factual claims that could change quickly (e.g. "the recent war with Iran", outbreaks, assassinations, natural disasters in last few months)
-- requires checking latest status, updates, or verification beyond general/historical knowledge
+Use:
+- 0.9–1.0 when the information is stable, historical, or unlikely to have changed
+- 0.6–0.8 when the topic may involve recent developments but you likely know it
+- 0.3–0.5 when the topic appears new, evolving, unfamiliar, or potentially time-sensitive
 
-Set to `true` especially for:
-- references to very recent or ongoing wars, military actions, terrorist attacks, coups, regime changes
-- mentions of specific leaders' current status (deaths, health, speeches in last days/weeks)
-- anything that sounds like "news" or "what happened recently with X"
+Prefer lower values if the answer may depend on recent real-world updates.
 
-Set true for:
-- product release status
-- stock prices
-- legal rulings in the past year
-- policy changes in the past year
-
-Do NOT set to true if:
-- purely historical (events >1–2 years old with no "recent" qualifier)
-- the word "internet" is merely mentioned
-- casual tech discussion, programming help, math, definitions, writing tasks
-- general non-time-bound explanations
-- user is describing a hypothetical or fictional scenario
-
-If the query mentions something that feels like it might be current news or rapidly evolving (especially geopolitics, conflicts, major incidents), prefer `true` over `false`. Recall > precision here too.
-
-When in doubt and the topic has real-world recency implications → `true`.
+Avoid always using 1.0.
 
 # JSON SCHEMA
 {
@@ -123,8 +106,8 @@ When in doubt and the topic has real-world recency implications → `true`.
     "method": [string],
     "language": string,
     "assistant_mode": string,
-    "confidence": float,          // 0.0–1.0
-    "search_internet": bool,      // true or false
+    "model_confidence": float,    // 0.0–1.0
+    "answer_confidence": float,   // 0.0-1.0
   }
 }
 
