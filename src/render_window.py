@@ -426,21 +426,22 @@ class RenderWindow(PromptManager):
                           style=f'color({self.state.color})',
                           highlight=False)
 
-        if ((documents.get('use_agent', False) or documents.get('search_internet', False))
-             and not documents.get('agent_ran', False)):
+        if ((documents.get('use_agent', False)
+            or documents.get('search_internet', 'false').lower() == 'true')
+            and not documents.get('agent_ran', False)):
             # Let LangChain create the proper prompt template for the agent
             agent = create_openai_tools_agent(self.llm, self.agent_tools, self.agent_prompt)
             documents['agent_ran'] = True
             agent_executor = AgentExecutor(agent=agent, tools=self.agent_tools, verbose=False)
             try:
                 self.console.print('Agent Tool Web Search (ctl-c to cancel)...',
-                               style=f'color({self.state.color})', highlight=False)
+                            style=f'color({self.state.color})', highlight=False)
                 result = agent_executor.invoke({"input": documents['user_query']})
                 documents['dynamic_files'] += f'\n=== AGENT_TOOL_RESULT ===\n{result}\n\n'
                 return self.get_messages(documents, polish=polish)
             except KeyboardInterrupt:
                 documents['dynamic_files'] += ('\n=== AGENT_TOOL_RESULT ==='
-                                               '\nUSER CANCELED SEARCH\n\n')
+                                            '\nUSER CANCELED SEARCH\n\n')
                 return self.get_messages(documents, polish=polish)
             # pylint: disable-next=bare-except # too many ways an LLM can go wrong
             except:
