@@ -354,6 +354,12 @@ class CommonUtils():
                 self.console.print(f'PRE-PROCESSOR REASONING REMOVED RESPONSE:\n{response}\n\n',
                                 style=f'color({self.opts.color})', highlight=False)
         matches = self.extract_first_json(response)
+        if isinstance(matches, str):
+            self.console.print('Pardon the intrusion, but pre-processor returned non-valid JSON '
+                               'results. Please see vector_data/pre_processor_debug log for more '
+                               'information (This turn was not saved to the RAG)',
+                                style=f'color({self.opts.color})', highlight=False)
+            return []
         if matches:
             _tags.extend(self.parse_tags(matches.get('metadata', {})))
         seen = set()

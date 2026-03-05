@@ -162,6 +162,7 @@ class ContextManager(PromptManager):
                                 style=f'color({self.opts.color})', highlight=False)
         try:
             content = self.pre_llm.invoke(prompt).content
+            self.common.write_debug('pre_processor', content)
         except APITimeoutError:
             return ('APITimeoutError', [], False)
         # pylint: disable-next=bare-except  # can't handle everything
@@ -552,7 +553,10 @@ class ContextManager(PromptManager):
                     self.console.print(f'PRE-PROCESSOR REASONING REMOVED RESPONSE:\n{content}\n\n',
                                 style=f'color({self.opts.color})', highlight=False)
             if self.opts.assistant_mode:
-                return [content, *documents['chat_history'][-self.opts.one_shot_history:], ]
+                return [f'<SUMMARY - A STAGGERED CHAT_HISTORY SUMMARY OF OLD TURNS>\n{content}\n'
+                        '<END_SUMMARY>',
+                         *documents['chat_history'][-self.opts.one_shot_history:], ]
+
             return [*documents['chat_history'][-self.opts.one_shot_history:],
                     '\n\n<STORY_SUMMARY - THE STORY SUMMARIZED THUS FAR. USE THIS CONTENT TO STAY '
                     'LORE GROUNDED>'

@@ -427,7 +427,7 @@ class RenderWindow(PromptManager):
                           highlight=False)
 
         if ((documents.get('use_agent', False)
-            or float(documents.get('answer_confidence', '0.75')) < float(0.75))
+            or float(documents.get('answer_confidence', '0.6')) < float(0.6))
             and not documents.get('agent_ran', False)):
             # Let LangChain create the proper prompt template for the agent
             agent = create_openai_tools_agent(self.llm, self.agent_tools, self.agent_prompt)

@@ -92,7 +92,7 @@ class Orchestration():
     def _requires_agent(self, meta_tags: list[RAGTag], documents)->bool:
         if not self.args.assistant_mode:
             return False
-        answer_confidence = float(0.75)
+        answer_confidence = float(0.6)
         for tag in meta_tags:
             if tag.tag == "answer_confidence":
                 answer_confidence = float(tag.content)
@@ -101,7 +101,7 @@ class Orchestration():
         if documents.get('agent_ran', False):
             return False
         # Agent requested
-        if answer_confidence < float(0.75) or 'agent' in documents.get('in_line_commands', []):
+        if answer_confidence < float(0.6) or 'agent' in documents.get('in_line_commands', []):
             return True
 
         return False
