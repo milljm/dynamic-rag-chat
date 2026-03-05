@@ -326,19 +326,59 @@ class CommonUtils():
 
     @staticmethod
     def extract_first_json(text: str):
-        """ robust json extractor from text """
-        # Normalize Python booleans
-        text = re.sub(r'\bFalse\b', 'false', text)
+        """
+        Fast, robust JSON extractor for LLM outputs.
+
+        Strategy
+        --------
+        1. Locate first '{'
+        2. Extract balanced-brace JSON block
+        3. Apply small repairs for common LLM JSON errors
+        4. Parse once
+        """
+
+        # --- normalize common LLM artifacts ---
         text = re.sub(r'\bTrue\b', 'true', text)
-        decoder = json.JSONDecoder()
-        idx = 0
-        while idx < len(text):
-            try:
-                obj, _ = decoder.raw_decode(text[idx:])
-                return obj
-            except json.JSONDecodeError:
-                idx += 1
-        return None
+        text = re.sub(r'\bFalse\b', 'false', text)
+
+        # --- locate first json object ---
+        start = text.find("{")
+        if start == -1:
+            return None
+
+        # --- brace matching extraction ---
+        depth = 0
+        end = None
+
+        for i, ch in enumerate(text[start:], start):
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    end = i + 1
+                    break
+
+        if end is None:
+            return None
+
+        candidate = text[start:end]
+
+        # --- repair pass (minimal + safe) ---
+
+        # remove stray quotes after numbers
+        candidate = re.sub(r'(:\s*\d+(?:\.\d+)?)"', r"\1", candidate)
+
+        # remove trailing commas
+        candidate = re.sub(r',(\s*[}\]])', r"\1", candidate)
+
+        # convert single quotes to double quotes if needed
+        candidate = re.sub(r"'", '"', candidate)
+
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError:
+            return ''
 
     def get_tags(self, response: str)->list[RAGTag]:
         """ Extract tags in JSON and meta_tag format from the LLM's response """

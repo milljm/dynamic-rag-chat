@@ -5,8 +5,7 @@ import re
 from datetime import datetime
 from threading import Thread
 from rich.live import Live
-from rich.markdown import Markdown, CodeBlock
-from rich.syntax import Syntax
+from rich.markdown import Markdown
 from rich.text import Text
 from rich.align import Align
 from rich.console import Group
@@ -175,27 +174,12 @@ class RenderWindow(PromptManager):
         )
         self.renderable = Renderables(
             header = Text(''),
-            query = Markdown(''),
+            query = Markdown('', code_theme=self.state.syntax_theme),
             separator=Rule(style="dim"),
             assistant = Text('', style='bold color(208)'),
-            response = Markdown(''),
+            response = Markdown('', code_theme=self.state.syntax_theme),
             footer = Text('')
         )
-
-        # Use SimpleCodeBlock instead of CodeBlock (CodeBlock fencing will strip trailing
-        # character from a word if that word fits perfectly within fenced window)
-        class SimpleCodeBlock(CodeBlock):
-            """ Code Block Syntax injection """
-            state = self.state
-            def __rich_console__(self, console, options):
-                code = str(self.text).rstrip()
-                syntax = Syntax(code,
-                                self.lexer_name,
-                                theme=self.state.syntax_theme,
-                                word_wrap=True,
-                                padding=(1,0))
-                yield syntax
-        Markdown.elements["fence"] = SimpleCodeBlock
 
     def _format_model_name(self, model) -> str:
         match = self.common.regex.model_re.search(model)
@@ -510,7 +494,7 @@ class RenderWindow(PromptManager):
             color = self.state.color-5 if self.state.light_mode else self.state.color
             chat_content = Text('Thinking...', style=f'color({color}')
         else:
-            chat_content = Markdown(current_stream)
+            chat_content = Markdown(current_stream, code_theme=self.state.syntax_theme)
         return chat_content
 
     def live_stream(self, documents: dict, meta_data: RAGTag)->None:
@@ -560,7 +544,8 @@ class RenderWindow(PromptManager):
                                       f'{documents.get("in_line_commands", "")} '
                                       f"(took {'{:.1f}s'.format(pre_process_time)})...",
                                       style=f'color({color})')
-        self.renderable.query = Markdown(f'**You:** {documents["user_query"]}')
+        self.renderable.query = Markdown(f'**You:** {documents["user_query"]}',
+                                         code_theme=self.state.syntax_theme)
         self.renderable.assistant = Text(documents["name"], style='bold color(208)')
         self.renderable.response = Text('Inference/Loading...', style=f'color({color}')
         self.renderable.footer = self.render_footer(0.0, **footer_meta)
