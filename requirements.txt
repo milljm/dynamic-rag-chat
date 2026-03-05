@@ -8,7 +8,7 @@ chromadb==0.6.3
 pydantic==2.11.3
 posthog==4.0.0
 prompt_toolkit
-rich==14.2.0
+rich==14.3.3
 jinja2
 pypdf
 pytz

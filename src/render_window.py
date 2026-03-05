@@ -175,7 +175,7 @@ class RenderWindow(PromptManager):
         self.renderable = Renderables(
             header = Text(''),
             query = Markdown('', code_theme=self.state.syntax_theme),
-            separator=Rule(style="dim"),
+            separator=Rule(style="bold color(208)"),
             assistant = Text('', style='bold color(208)'),
             response = Markdown('', code_theme=self.state.syntax_theme),
             footer = Text('')
@@ -550,7 +550,7 @@ class RenderWindow(PromptManager):
         self.renderable.response = Text('Inference/Loading...', style=f'color({color}')
         self.renderable.footer = self.render_footer(0.0, **footer_meta)
         start_time = 0
-        with Live(refresh_per_second=20, console=self.console) as live:
+        with Live(refresh_per_second=30, console=self.console) as live:
             live.console.clear(home=True)
             self.render_chat(live)
             self.start_namepulse()

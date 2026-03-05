@@ -56,7 +56,32 @@ from src import CommonUtils, ChatOptions
 from src import ImportData
 from src import SceneManager
 from src import Orchestration
-console = Console(highlight=True)
+dark_rich_142_styles = {
+    "markdown.h1": "bold #FFFFFF",
+    "markdown.h2": "bold #CCCCCC",
+    "markdown.h3": "bold #999999",
+    "markdown.h4": "italic #777777",
+    "markdown.h5": "#555555",
+    "markdown.h6": "#333333",
+    "markdown.item.bullet": "yellow",
+    "markdown.hr": "yellow",
+    "markdown.table.header": "bold white",
+    "markdown.table.border": "bright_black",
+}
+light_rich_142_styles = {
+    "markdown.h1": "bold #000000",
+    "markdown.h2": "bold #333333",
+    "markdown.h3": "bold #666666",
+    "markdown.h4": "#888888",
+    "markdown.h5": "#AAAAAA",
+    "markdown.h6": "#BBBBBB",
+    "markdown.item.bullet": "yellow",
+    "markdown.hr": "yellow",
+    "markdown.table.header": "bold white",
+    "markdown.table.border": "bright_black",
+}
+
+console = Console(highlight=True, theme=Theme(dark_rich_142_styles))
 current_dir = os.path.dirname(os.path.abspath(__file__))
 
 CMD_LINE = re.compile(r"^[ \t]*\\(?P<cmd>[A-Za-z0-9_\-\?]+)(?:[ \t]+(?P<args>.*))?$")
@@ -1029,11 +1054,33 @@ Chat can read a .chat.yaml file to import your arguments. See .chat.yaml.example
 if __name__ == '__main__':
     args = parse_args(sys.argv[1:], ChatOptions.from_yaml(current_dir))
     _opts = ChatOptions.from_args(current_dir, args)
-    light_mode_theme = Theme({
+    dark_rich_142_styles = Theme({
+            "markdown.h1": "bold #FFFFFF",
+            "markdown.h2": "bold #CCCCCC",
+            "markdown.h3": "bold #999999",
+            "markdown.h4": "italic #777777",
+            "markdown.h5": "#555555",
+            "markdown.h6": "#333333",
+            "markdown.item.bullet": "yellow",
+            "markdown.hr": "yellow",
+            "markdown.table.header": "bold white",
+            "markdown.table.border": "bright_black",
+        })
+    light_rich_142_styles = Theme({
+            "markdown.h1": "bold #000000",
+            "markdown.h2": "bold #333333",
+            "markdown.h3": "bold #666666",
+            "markdown.h4": "bold italic #888888",
+            "markdown.h5": "italic #888888",
+            "markdown.h6": "#888888",
+            "markdown.item.bullet": "dark_orange",
+            "markdown.hr": "dark_orange",
+            "markdown.table.header": "bold black",
+            "markdown.table.border": "bright_black",
             "markdown.code": "black on #e6e6e6",
-    })
-    if _opts.light_mode:
-        console = Console(theme=light_mode_theme)
+        })
+
+    console = Console(theme=light_rich_142_styles if _opts.light_mode else dark_rich_142_styles)
     _opts.seed = seed_from_string(_opts.seed)
     session = SessionContext.from_args(console, _opts)
     import_data = ImportData(session)
