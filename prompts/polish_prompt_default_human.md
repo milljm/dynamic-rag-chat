@@ -27,5 +27,8 @@ Return only the edited text.
 No explanations.
 No extra text.
 
+CRITICAL RULE:
+The narrator must never introduce actions, thoughts, or reactions for the protagonist. If the protagonist performs an action in the text, you may only correct grammar or punctuation. Do not modify the action itself.
+
 TEXT:
 {{llm_response}}

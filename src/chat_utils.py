@@ -17,10 +17,10 @@ import yaml
 class RAGTag(NamedTuple):
     """
     namedtuple class constructor
-      RAGTag(tag: str, content: str)
+      RAGTag(tag: str, content: str|list)
     """
     tag: str
-    content: str
+    content: str|list
 
 @dataclass
 class StandardAttributes:
@@ -308,7 +308,7 @@ class CommonUtils():
         return _response
 
     @staticmethod
-    def parse_tags(meta_tags: dict|list[list[str,str]])->list[RAGTag[str,str]]:
+    def parse_tags(meta_tags: dict|list[list[str,str]])->list[RAGTag]:
         """ Parse supplied dictionary or list of lists into RAGTags """
         _rag_tags = []
         if isinstance(meta_tags, dict):
@@ -321,7 +321,7 @@ class CommonUtils():
                 split_values = re.split(r'[;,|]\s*', value.strip())
                 # Use list if it split into multiple values, else keep as string
                 value = split_values if len(split_values) > 1 else split_values[0]
-            _rag_tags.append(RAGTag(key, str(value)))
+            _rag_tags.append(RAGTag(key, value))
         return _rag_tags
 
     @staticmethod
@@ -395,7 +395,7 @@ class CommonUtils():
                                 style=f'color({self.opts.color})', highlight=False)
         matches = self.extract_first_json(response)
         if isinstance(matches, str):
-            self.console.print('Pardon the intrusion, but pre-processor returned non-valid JSON '
+            self.console.print('\nPardon the intrusion, but pre-processor returned non-valid JSON '
                                'results. Please see vector_data/pre_processor_debug log for more '
                                'information (This turn was not saved to the RAG)',
                                 style=f'color({self.opts.color})', highlight=False)

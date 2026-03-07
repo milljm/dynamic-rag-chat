@@ -40,7 +40,7 @@ import glob
 import hashlib
 from dataclasses import dataclass, asdict
 from copy import deepcopy
-from typing import Dict, Any, List, Optional
+from typing import List, Optional
 import requests
 from rich.console import Console
 from rich.theme import Theme
@@ -197,40 +197,6 @@ def parse_user_input(raw: str) -> ParsedInput:
         rare_controls=rare_controls,
         includes=includes,
     )
-
-def apply_rare_controls(found: List[str], scene: Dict[str, Any]):
-    """ RARE Event Handler """
-    scene.setdefault('rare_event_pending', False)
-    scene.setdefault('rare_event_used', False)
-    scene.setdefault('rare_event_cooldown', 0)
-    scene.setdefault('safe_mode_turns', 0)
-
-    if ('[RARE NOW]' in found
-        and scene.get('safe_mode_turns', 0) == 0
-        and scene.get('rare_event_cooldown', 0) == 0):
-        scene['rare_event_pending'] = True
-    if '[RARE USED]' in found:
-        scene['rare_event_used'] = True
-        scene['rare_event_pending'] = False
-        scene['rare_event_cooldown'] = max(scene.get('rare_event_cooldown', 0), 20)
-    if '[RARE RESET]' in found:
-        scene.update({
-            'rare_event_pending': False,
-            'rare_event_used': False,
-            'rare_event_cooldown': 0,
-            'safe_mode_turns': 0
-        })
-    if '[SAFE MODE]' in found:
-        scene['safe_mode_turns'] = max(scene.get('safe_mode_turns', 0), 30)
-
-def now_addendum(scene: Dict[str, Any]) -> str:
-    """ drop in rare event LLM trigger command (literally worded) """
-    if scene.get('safe_mode_turns', 0) > 0:
-        return ''
-    if scene.get('rare_event_pending'):
-        return "\nNOW: A rare involuntary event MAY occur this turn." \
-        " Otherwise, do not force protagonist actions."
-    return ''
 
 class Chat():
     """ Begin initializing variables classes. Call .chat() to begin """
@@ -748,9 +714,6 @@ class Chat():
                         console.print(f"[red]Unknown command:[/red] \\{cmd}")
                         continue
 
-                # Apply inline RARE controls (toggle flags), never seen by the model
-                apply_rare_controls(parsed.rare_controls, self.session.scene.get_scene())
-
                 # Build documents (with or without context)
                 meta_data = []
                 if parsed.command in ('no-context', 'agent'):
@@ -785,12 +748,6 @@ class Chat():
                         " ".join(f"{{{{{x}}}}}" for x in parsed.includes))
                     documents.update(inc_docs)
                     documents['user_query'] = f'{raw} \n\nattachments:{documents["user_query"]}'
-
-                # Inject NOW addendum if armed
-                sys_addon = now_addendum(self.session.scene.get_scene())
-                if sys_addon:
-                    # renderer should append this to system prompt
-                    documents['system_addendum'] = sys_addon
 
                 # Handoff to renderer
                 # Your renderer should read documents['system_addendum']

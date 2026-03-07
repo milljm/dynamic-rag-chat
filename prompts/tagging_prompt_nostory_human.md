@@ -13,8 +13,7 @@ Return ONE valid JSON object only.
   - string
   - array of strings
   - float (for confidence)
-  - boolean (for search_internet)
-- No nulls, no nested objects
+- No nulls, bools, or nested objects
 - Use [] for empty arrays
 - No extra fields
 - Arrays must always be arrays (never a single string)
@@ -47,21 +46,24 @@ Good: ["technology"]
 Better: ["ai", "programming"]
 
 ## 4) keywords_entities
+keyword_entities: [string array]
 Include specific tools, libraries, services, frameworks, or product names mentioned.
 If none are clearly present, return [].
 
 ## 5) method
+method: [string array]
 Include explicit function names, classes, commands, variables, or code identifiers.
 Only include items that appear literally in the text.
 Otherwise [].
 
 ## 6) language
+language: string
 Primary programming language if clearly indicated.
 Examples: python, javascript, bash, json
 If unclear, use "".
 
 ## 7) assistant_mode
-assistant_mode:
+assistant_mode: string
 Classify the primary interaction type.
 
 Allowed values (choose exactly one):
@@ -74,10 +76,11 @@ Allowed values (choose exactly one):
 Never output multiple assistant_mode values.
 assistant_mode must be exactly one of the allowed strings.
 If the request compares approaches, evaluates tradeoffs, or discusses system architecture, choose "structured" even if programming languages are mentioned.
+Use PREVIOUS_TURN as context to help nudge your interaction type.
 If unsure, use "general".
 
 ## 8)
-model_confidence:
+model_confidence: float
 Rate your own confidence on selecting the right assistant_mode you choose.
 Use:
 - 0.9–1.0 when category is very clear
@@ -86,7 +89,7 @@ Use:
 Avoid always using 1.0.
 
 ## 9)
-answer_confidence:
+answer_confidence: float
 Rate your confidence in answering the user's question accurately without needing to search the internet.
 
 Use:
@@ -95,6 +98,7 @@ Use:
 - 0.3–0.5 when the topic appears new, evolving, unfamiliar, or potentially time-sensitive
 
 Prefer lower values if the answer may depend on recent real-world updates.
+If the question depends on events from the past week or month, default to 0.3–0.5.
 
 Avoid always using 1.0.
 
@@ -106,8 +110,8 @@ Avoid always using 1.0.
     "method": [string],
     "language": string,
     "assistant_mode": string,
-    "model_confidence": float,    // 0.0–1.0
-    "answer_confidence": float,   // 0.0-1.0
+    "model_confidence": float,
+    "answer_confidence": float
   }
 }
 
@@ -116,6 +120,9 @@ Avoid always using 1.0.
 - all text lowercase
 - valid JSON only
 
+<PREVIOUS_TURN - USE FOR ASSISTANT_MODE CONTINUITY>
+{{ chat_history }}
+<END PREVIOUS_TURN>
 <INPUT_TEXT>
 {{ user_query }}
 </INPUT_TEXT>

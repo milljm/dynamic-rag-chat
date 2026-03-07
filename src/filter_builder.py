@@ -24,7 +24,7 @@ class FilterBuilder:
         soft_conditions = []
         for tag in tags:
             # Skip lists, null, unspecified, and empty content
-            if isinstance(tag.content, list) or isinstance(tag.content, bool):
+            if not isinstance(tag.content, str):
                 continue
             if not tag.content or tag.content.lower() in {'null',
                                                           'none',

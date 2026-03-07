@@ -146,6 +146,11 @@ class ContextManager(PromptManager):
         """
         prompts = self.prompts
         query = self.common.normalize_for_dedup(query)
+        documents = dict(documents)
+        # Make only one previous turn available in chat_history when working with pre-conditioning
+        if documents.get('chat_history', []):
+            documents['chat_history'] = documents['chat_history'][-1]
+
         # pylint: disable=no-member # dynamic prompts (see self.__build_prompts)
         human_prompt = (prompts.get_prompt(f'{prompts.tag_prompt_file}_human.md')
                         if self.debug or self.opts.prompts_debug else prompts.tag_prompt_human)
@@ -177,7 +182,7 @@ class ContextManager(PromptManager):
         tags = self.common.get_tags(content)
 
         if do_scene and not self.opts.assistant_mode:
-            tags = self.scene.ground_scene(tags, query)
+            tags = self.scene.ground_scene(tags)
             if self.debug:
                 self.console.print(f'SCENE MANAGER OVERRIDE:\n{tags}\n\n',
                                 style=f'color({self.opts.color})', highlight=False)
@@ -238,7 +243,6 @@ class ContextManager(PromptManager):
                 self.create_character(char, roll_reversal)
 
         if not self.opts.assistant_mode:
-            self.scene.finalize_turn(response)
             self.scene.save_scene()
 
         # protect against empty or gold RAG (read-only) collections
@@ -250,7 +254,7 @@ class ContextManager(PromptManager):
 
         # list_rag_tags: list[RAGTag] = self.common.get_tags(response)
         if not self.opts.assistant_mode:
-            self.scene.ground_scene(list_rag_tags, response)
+            self.scene.ground_scene(list_rag_tags)
         if self.debug:
             self.console.print(f'THREADED META TAGS PARSED: {list_rag_tags}',
                                style=f'color({self.opts.color})',
@@ -422,7 +426,7 @@ class ContextManager(PromptManager):
             pass
         return False
 
-    def prompt_entities(self, meta_tags: list[RAGTag[str,str]]) -> list[str]:
+    def prompt_entities(self, meta_tags: list[RAGTag]) -> list[str]:
         """
         Return list of strings with grounding info for each entity detected in meta_tags.
         Handles entity content as list or delimiter-separated string.

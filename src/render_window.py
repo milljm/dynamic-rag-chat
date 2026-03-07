@@ -339,7 +339,7 @@ class RenderWindow(PromptManager):
         """ return formatted message to be sent to LLM stream """
         prompts = self.prompts
         if polish:
-            self.llm = self.orchestrator.get_model('polish')
+            self.llm = self.orchestrator.get_model('polisher')
         if self.debug:
             self.console.print(f'Model Chosen: {self.llm.model_name}',
                           style=f'color({self.state.color})',
@@ -411,7 +411,7 @@ class RenderWindow(PromptManager):
                           highlight=False)
 
         if ((documents.get('use_agent', False)
-            or float(documents.get('answer_confidence', '0.6')) < float(0.6))
+            or float(documents.get('answer_confidence', '0.65')) < float(0.65))
             and not documents.get('agent_ran', False)):
             # Let LangChain create the proper prompt template for the agent
             agent = create_openai_tools_agent(self.llm, self.agent_tools, self.agent_prompt)
@@ -584,6 +584,7 @@ class RenderWindow(PromptManager):
                 self.renderable.response = Text('Loading Polisher...',
                                                      style=f'color({color}')
                 self.render_chat(live)
+                self.common.write_debug(f'polisher_input-{self.llm.model_name}', current_response)
                 documents['llm_response'] = current_response
                 for pass_num in range(int(self.opts.polisher_cnt)):
                     documents['llm_response'] = current_response
