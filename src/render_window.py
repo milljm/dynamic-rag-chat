@@ -547,7 +547,9 @@ class RenderWindow(PromptManager):
         self.renderable.query = Markdown(f'**You:** {documents["user_query"]}',
                                          code_theme=self.state.syntax_theme)
         self.renderable.assistant = Text(documents["name"], style='bold color(208)')
-        self.renderable.response = Text('Inference/Loading...', style=f'color({color}')
+        self.renderable.response = Text('Inference/Loading ('
+                                        f'{self.orchestrator.get_rout_name(meta_data, documents)})'
+                                        '...', style=f'color({color}')
         self.renderable.footer = self.render_footer(0.0, **footer_meta)
         start_time = 0
         with Live(refresh_per_second=30, console=self.console) as live:

@@ -127,6 +127,15 @@ class Orchestration():
                                 style=f'color({self.args.color})',highlight=False)
         return self.__llm.get(assistant_mode, self.__llm["general"])
 
+    def get_rout_name(self, meta_tags: list[RAGTag], documents: dict | None = None)->str:
+        """ Return route name """
+        if self._requires_agent(meta_tags, documents):
+            return 'agent'
+        if self._requires_vision(documents):
+            return 'vision'
+        assistant_mode = self._extract_mode(meta_tags)
+        return assistant_mode
+
     def route(self, meta_tags: list[RAGTag], documents: dict | None = None)->ChatOpenAI:
         """
         Return suitable LLM based on chat mode and/or special context in documents
@@ -141,4 +150,3 @@ class Orchestration():
     def get_model(self, model)->ChatOpenAI:
         """ return a specific ChatOpenAI model object """
         return self.__llm[model]
-
