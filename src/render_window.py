@@ -197,8 +197,8 @@ class RenderWindow(PromptManager):
         stream = self.state.stream
         return f' {stream.pulsing_chars[stream.pulse_index]} ' if self.thinking_active else ' '
 
-    def _calc_tokens_per_sec(self, tokens: int, duration: float) -> float:
-        return tokens / duration if duration > 0 else 0
+    def _calc_tokens_per_sec(self, tokens: int, generation_time: float) -> float:
+        return tokens / generation_time if generation_time > 0 else 0
 
     def _color_for_context(self, prompt_tokens: int) -> int:
         return [v for k, v in self.common.prompt_map.items() if k <= prompt_tokens][-1]
@@ -346,9 +346,13 @@ class RenderWindow(PromptManager):
                           highlight=False)
         # One shot OOC population
         diag = (self.ooc_response or '').strip()
-        documents['ooc_diagnostics'] = (
-            'CRITICAL: Previous turn generated invalid output. You are to study the previous turn'
-            f' and and understand your folly/error, and follow these correction rules:\n{diag}')
+        if diag:
+            documents['ooc_diagnostics'] = (
+                'CRITICAL: Previous turn generated invalid output. You are to study the previous turn'
+                f' and and understand your folly/error, and follow these correction_rules:\n{diag}\n'
+                '\nend correction_rules.')
+        else:
+            documents['ooc_diagnostics'] = ''
         documents['ooc_diagnostics_bool'] = 'TRUE' if diag else 'FALSE'
         documents['ooc_mode_bool'] = (
             'TRUE' if documents['user_query'].strip().lower().startswith("ooc:") else 'FALSE')
@@ -449,7 +453,7 @@ class RenderWindow(PromptManager):
             chunk = self.reveal_thinking(chunk, self.state.verbose)
             yield chunk
 
-    def render_footer(self, time_taken: float = 0, **kwargs) -> Text:
+    def render_footer(self, time_taken: float = 0, generation_time: float = 0, **kwargs) -> Text:
         """ Render footer stats with heatmap colors and token metrics. """
         prompt_tokens = kwargs['prompt_tokens']
         token_count = kwargs['token_count']
@@ -475,7 +479,7 @@ class RenderWindow(PromptManager):
         footer.append(f':{formatted_time}', style=f'color({foot_color})')
         footer.append(' completion:', style=f'color({foot_color})')
         footer.append(f'{token_count}', style=f'color({self._color_for_completion(token_count)})')
-        footer.append(f') {self._calc_tokens_per_sec(token_count, time_taken):.1f}T/s',
+        footer.append(f') {self._calc_tokens_per_sec(token_count, generation_time):.1f}T/s',
                       style=f'color({foot_color})')
 
         return footer
@@ -548,9 +552,10 @@ class RenderWindow(PromptManager):
                                          code_theme=self.state.syntax_theme)
         self.renderable.assistant = Text(documents["name"], style='bold color(208)')
         self.renderable.response = Text('Inference/Loading ('
-                                        f'{self.orchestrator.get_rout_name(meta_data, documents)})'
-                                        '...', style=f'color({color}')
-        self.renderable.footer = self.render_footer(0.0, **footer_meta)
+                                        f'{self.orchestrator.get_rout_name(meta_data, documents)}'
+                                        ' LLM)...', style=f'color({color}')
+        self.renderable.footer = self.render_footer(0.0, 0.0, **footer_meta)
+        inference_start = time.time()
         start_time = 0
         with Live(refresh_per_second=30, console=self.console) as live:
             live.console.clear(home=True)
@@ -568,7 +573,9 @@ class RenderWindow(PromptManager):
                 else:
                     self.renderable.response = Text('Receiving message to polish...',
                                                      style=f'color({color}')
-                self.renderable.footer = self.render_footer(time.time()-start_time, **footer_meta)
+                self.renderable.footer = self.render_footer(time.time() - inference_start,
+                                                            time.time() - start_time,
+                                                            **footer_meta)
                 # replace 'thinking' output with Model's Markdown response
                 if isinstance(self.renderable.response, Markdown) and stream.do_once:
                     stream.do_once = False
@@ -593,8 +600,6 @@ class RenderWindow(PromptManager):
                     messages = self.get_messages(documents, polish=True)
                     current_response = ''
                     for piece in self.stream_response(messages):
-                        if start_time == 0:
-                            start_time = time.time()
                         current_response += piece.content
                         footer_meta['token_count'] += self.response_count(piece.content)
                         if int(self.opts.polisher_cnt) == pass_num+1:
@@ -604,8 +609,9 @@ class RenderWindow(PromptManager):
                                 f'Polishing pass {pass_num+1} of'
                                 f' {int(self.opts.polisher_cnt)-1} before final...',
                                 style=f'color({color}')
-                        self.renderable.footer = self.render_footer(time.time()-start_time,
-                                                                     **footer_meta)
+                        self.renderable.footer = self.render_footer(time.time() - inference_start,
+                                                                    time.time() - start_time,
+                                                                    **footer_meta)
                         name_color = self.state.pulse_colors[self.state.pulse_color_index]
                         self.renderable.assistant = Text(documents["name"],
                                                     style=f'bold color({name_color})')

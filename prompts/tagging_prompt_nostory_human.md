@@ -68,9 +68,9 @@ Classify the primary interaction type.
 
 Allowed values (choose exactly one):
 
-- casual → social conversation, jokes, light chat, reactions
+- casual → social conversation, jokes, light chat, reactions, simple math
 - coding → debugging, writing code, stack traces, refactoring, programming questions, programming languages
-- structured → multi-step logic, system design, comparisons, deep arguments, architectural thinking
+- structured → multi-step logic, system design, comparisons, deep arguments, architectural thinking, analysis
 - general → definitions, explanations, factual non-time-sensitive questions
 
 Never output multiple assistant_mode values.

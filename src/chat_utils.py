@@ -2,6 +2,7 @@
 from __future__ import annotations
 import os
 import re
+import ast
 import sys
 import pickle
 import json
@@ -325,31 +326,37 @@ class CommonUtils():
         return _rag_tags
 
     @staticmethod
-    def extract_first_json(text: str):
+    def extract_first_json(text: str) -> dict | str:
         """
-        Fast, robust JSON extractor for LLM outputs.
+        Extract the first JSON object from LLM output.
 
         Strategy
         --------
-        1. Locate first '{'
-        2. Extract balanced-brace JSON block
-        3. Apply small repairs for common LLM JSON errors
-        4. Parse once
+        1. Remove markdown fences
+        2. Find first '{'
+        3. Extract balanced braces
+        4. Try strict JSON parse
+        5. Fallback to Python literal parser
         """
 
-        # --- normalize common LLM artifacts ---
-        text = re.sub(r'\bTrue\b', 'true', text)
-        text = re.sub(r'\bFalse\b', 'false', text)
+        if not text:
+            return ""
+
+        # --- remove markdown fences (common with LLMs) ---
+        text = re.sub(r"```(?:json)?", "", text)
+
+        # --- normalize python booleans ---
+        text = re.sub(r"\bTrue\b", "true", text)
+        text = re.sub(r"\bFalse\b", "false", text)
+        text = re.sub(r"\bNone\b", "null", text)
 
         # --- locate first json object ---
         start = text.find("{")
         if start == -1:
-            return None
+            return ""
 
-        # --- brace matching extraction ---
         depth = 0
         end = None
-
         for i, ch in enumerate(text[start:], start):
             if ch == "{":
                 depth += 1
@@ -360,25 +367,26 @@ class CommonUtils():
                     break
 
         if end is None:
-            return None
-
+            return ""
         candidate = text[start:end]
-
-        # --- repair pass (minimal + safe) ---
-
-        # remove stray quotes after numbers
+        # --- json repairs
+        # remove stray double quote after numbers
         candidate = re.sub(r'(:\s*\d+(?:\.\d+)?)"', r"\1", candidate)
-
-        # remove trailing commas
-        candidate = re.sub(r',(\s*[}\]])', r"\1", candidate)
-
-        # convert single quotes to double quotes if needed
-        candidate = re.sub(r"'", '"', candidate)
-
+        # --- strict JSON parse ---
         try:
-            return json.loads(candidate)
+            obj = json.loads(candidate)
+            return obj if isinstance(obj, dict) else candidate
         except json.JSONDecodeError:
-            return ''
+            pass
+        # --- python literal fallback (handles single quotes etc) ---
+        try:
+            obj = ast.literal_eval(candidate)
+            if isinstance(obj, dict):
+                return obj
+        # pylint: disable-next=broad-exception-caught
+        except Exception:
+            pass
+        return candidate
 
     def get_tags(self, response: str)->list[RAGTag]:
         """ Extract tags in JSON and meta_tag format from the LLM's response """
@@ -396,9 +404,11 @@ class CommonUtils():
         matches = self.extract_first_json(response)
         if isinstance(matches, str):
             self.console.print('\nPardon the intrusion, but pre-processor returned non-valid JSON '
-                               'results. Please see vector_data/pre_processor_debug log for more '
-                               'information (This turn was not saved to the RAG)',
+                               'results. Please see:\n\n\tvector_data/pre_processor_debug.log\n\t'
+                               'vector_data/json_load_debug.log\n\nfor more information (This turn '
+                               'was not saved to the RAG).',
                                 style=f'color({self.opts.color})', highlight=False)
+            self.write_debug('json_load', matches)
             return []
         if matches:
             _tags.extend(self.parse_tags(matches.get('metadata', {})))

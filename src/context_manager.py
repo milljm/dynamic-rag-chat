@@ -562,8 +562,7 @@ class ContextManager(PromptManager):
                          *documents['chat_history'][-self.opts.one_shot_history:], ]
 
             return [*documents['chat_history'][-self.opts.one_shot_history:],
-                    '\n\n<STORY_SUMMARY - THE STORY SUMMARIZED THUS FAR. USE THIS CONTENT TO STAY '
-                    'LORE GROUNDED>'
+                    '\n\n<STORY_SUMMARY - A SUMMARIZATION OF CHAT_HISTORY. MAY CONTAIN FALSEHOODS OR APPEAR OUT OF ORDER>'
                     f'\n{content}<END STORY_SUMMARY>', ]
 
         except APITimeoutError:
