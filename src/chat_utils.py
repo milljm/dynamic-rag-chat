@@ -47,7 +47,6 @@ class ChatOptions:
     polisher_host: str = host
     entity_host: str = host
     agent_host: str = host
-    summarizer_host: str = host
     vision_host: str = host
 
     # ---------- Story Models
@@ -144,7 +143,6 @@ class ChatOptions:
         'model_server':              'host',
         'polisher_server':           'polisher_host',
         'agent_server':              'agent_host',
-        'summarizer_server':         'summarizer_host',
         'vision_server':             'vision_host',
         'pre_llm':                   'preconditioner',
         'embedding_llm':             'embeddings',

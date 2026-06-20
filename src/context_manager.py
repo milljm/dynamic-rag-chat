@@ -61,15 +61,6 @@ class ContextManager(PromptManager):
                                   seed = args.seed,
                                   request_timeout=150)
 
-        self.summarizer_llm = ChatOpenAI(base_url=args.summarizer_host,
-                                  model=args.summarizer_llm,
-                                  temperature=0.5,
-                                  streaming=False,
-                                  max_tokens=4096,
-                                  api_key=args.api_key,
-                                  seed = args.seed,
-                                  request_timeout=150)
-
         self.filter_builder = FilterBuilder()
         self.prompts.build_prompts()
 

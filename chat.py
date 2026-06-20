@@ -781,7 +781,7 @@ def _add_arguments(parser: argparse.ArgumentParser, defaults, *, use_defaults: b
                         type=str, help='OpenAI API server address (default: %(default)s)')
 
     parser.add_argument('--pre-llm', metavar='', dest='preconditioner', default=D('preconditioner'),
-                        type=str, help='Summarizer/Tagging Preconditioner LLM '
+                        type=str, help='Tagging Preconditioner LLM '
                         '(default: %(default)s)')
     parser.add_argument('--pre-server', metavar='', dest='pre_host', default=D('pre_host'),
                         type=str, help='OpenAI API server address (default: %(default)s)')
@@ -814,13 +814,6 @@ def _add_arguments(parser: argparse.ArgumentParser, defaults, *, use_defaults: b
                         default=D('entity_llm'),
                         type=str, help='Entity/Character Sheet LLM (default: %(default)s)')
     parser.add_argument('--entity-server', metavar='', dest='entity_host', default=D('entity_host'),
-                        type=str, help='OpenAI API server address (default: %(default)s)')
-
-    parser.add_argument('--summarizer-llm', metavar='', dest='summarizer_llm',
-                        default=D('summarizer_llm'),
-                        type=str, help='Summarizer Model (default: %(default)s)')
-    parser.add_argument('--summarizer-server', metavar='', dest='summarizer_host',
-                        default=D('summarizer_host'),
                         type=str, help='OpenAI API server address (default: %(default)s)')
 
     ### ------------- Optional Orchestration Models
