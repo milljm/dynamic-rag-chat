@@ -103,11 +103,10 @@ class ChatOptions:
 
     # ---------- Context / RAG / pre‑ & post‑processing ----------
     vector_dir: str = field(default_factory=lambda: str(Path.cwd() / 'vector_data'))
-    matches: int = 20
+    matches: int = 2
     chat_history: int = 10000
-    history_sessions: int = 5
-    one_shot: bool = False
-    one_shot_history: int = 2
+    history_sessions: int = 10
+    unmolested_sessions: int = 4
     polisher_cnt: int = 1
 
     # ---------- UI ----------

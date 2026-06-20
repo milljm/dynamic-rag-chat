@@ -891,14 +891,10 @@ def _add_arguments(parser: argparse.ArgumentParser, defaults, *, use_defaults: b
                         help='Number of results to pull from *each* RAG (there are 3 RAGs)'
                         ' (default: %(default)s)')
     parser.add_argument('--history-sessions', metavar='', default=D('history_sessions'), type=int,
-                        help='Chat history responses available in context (overridden by'
-                        ' --one-shot if enabled) (default: %(default)s)')
-    parser.add_argument('--one-shot', action='store_true', default=D('one_shot'),
-                        help='Summarize --history-sessions into single message for one-shot type'
-                        ' LLMs.')
-    parser.add_argument('--one-shot-history', metavar='', default=D('one_shot_history'), type=int,
-                        help='Chat history responses available in context when --one-shot'
-                        ' is enabled (default: %(default)s)')
+                        help='Chat history responses available in context (default: %(default)s)')
+    parser.add_argument('--unmolested-sessions', metavar='', default=D('unmolested_sessions'),
+                        type=int, help='Chat history responses available before staggering occurs.'
+                        ' Set to 0 to disable (default: %(default)s)')
 
     # imports
     parser.add_argument('--import-pdf', metavar='', type=str,

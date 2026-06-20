@@ -317,7 +317,7 @@ class ContextManager(PromptManager):
             f.write(content)
 
     @staticmethod
-    def stagger_history(history_size: int,
+    def stagger_indices(history_size: int,
                         max_elements: int = 20,
                         recent_tail: int = 4) -> list[int]:
         """
@@ -334,18 +334,16 @@ class ContextManager(PromptManager):
 
         # Spread earlier indices linearly
         step = max(1, earlier) / max(1, base_count)
-        indices = [int(i * step) for i in range(base_count)]
+        #indices = [int(i * step) for i in range(base_count)]
 
-        # Add tail
-        indices += list(range(history_size - recent_tail, history_size))
-        return sorted(set(indices))
+        # Add tail - ensure exactly recent_tail elements, no overlap handling
+        tail_start = history_size - recent_tail
 
-    def get_chat_history(self, history_list)->list:
-        """ return n previous turns """
-        if self.opts.one_shot:
-            summary_cnt = int(self.opts.history_sessions) + int(self.opts.one_shot_history)
-            return history_list[-(summary_cnt*2):]
-        return history_list[-self.opts.history_sessions:]
+        # Build result: base indices (deduped) + guaranteed tail
+        base_indices = set(int(i * step) for i in range(base_count))
+        tail_indices = set(range(tail_start, history_size))
+
+        return sorted(base_indices | tail_indices)
 
     def handle_topics(self,
                       meta_tags: list[RAGTag],
@@ -502,73 +500,33 @@ class ContextManager(PromptManager):
                 return f.read()
         return ''
 
-    def summarize_history(self, documents)->list:
-        """ return last *n* unmolested turns plus a summarization of story """
-        prompts = self.prompts
+    def stagger_history(self, documents)->list:
+        """ return last *n* unmolested turns plus staggered retention turns """
+        # Recent turns to leave unmolested
+        unmolested_count = self.opts.unmolested_sessions
+
         # Get the full chat history we're working with
         full_history = documents['chat_history']
 
-        # Calculate how many recent turns to leave unmolested
-        unmolested_count = self.opts.one_shot_history
+        # User opting for full unmolested history
+        if unmolested_count == 0:
+            return full_history[-self.opts.history_sessions:]
 
-        # The history we can summarize is everything except the unmolested recent turns
-        if unmolested_count > 0:
-            summarizable_history = full_history[:-unmolested_count]
-        else:
-            summarizable_history = full_history
+        # The history we can stagger (everything except unmolested_count)
+        unmolested_history = full_history[:-unmolested_count]
 
-        # Get stagger indices for the summarizable portion
-        if len(summarizable_history) > 0:
-            max_elements = min(self.opts.history_sessions, len(summarizable_history))
-            recent_tail = min(self.opts.one_shot_history, len(summarizable_history))
-
-            indices = self.stagger_history(len(summarizable_history), max_elements, recent_tail)
+        # Get stagger indices
+        if len(unmolested_history) > 0:
+            max_elements = self.opts.history_sessions
+            recent_tail = min(self.opts.unmolested_sessions, len(unmolested_history))
+            indices = self.stagger_indices(len(full_history), max_elements, recent_tail)
 
             # Pull the actual chat turns using those indices
-            selected_turns = [summarizable_history[i] for i in indices]
-        else:
-            selected_turns = []
+            selected_turns = [full_history[i] for i in indices]
+            return selected_turns
 
-        # Build the summarization payload with our staggered selection
-        summarizing = {
-            'chat_history'    : ' '.join(selected_turns),
-            'character_sheet' : documents['character_sheet'],
-            'entities'        : documents['entities'],
-            'user_name'       : documents['user_name']
-        }
-        # pylint: disable=no-member # dynamic prompts (see self.__build_prompts)
-        human_prompt = (prompts.get_prompt(f'{prompts.pre_prompt_file}_human.md')
-                        if self.debug or self.opts.prompts_debug else prompts.pre_prompt_human)
-        # pylint: enable=no-member
-        human_tmpl = PromptTemplate(template=human_prompt,
-                                    template_format="jinja2")
-        human_msg = HumanMessagePromptTemplate(prompt=human_tmpl)
-        prompt_template = ChatPromptTemplate.from_messages([human_msg])
-        prompt = prompt_template.format_messages(**summarizing)
-        if self.debug:
-            self.console.print(f'PRE-PROCESSOR PROMPT:\n{prompt}\n\n',
-                                style=f'color({self.opts.color})', highlight=False)
-        try:
-            content = self.summarizer_llm.invoke(prompt).content
-            think_frame = self.common.regex.think_re.findall(content)
-            if think_frame:
-                content = think_frame[0]
-                if self.opts.debug:
-                    self.console.print(f'PRE-PROCESSOR REASONING REMOVED RESPONSE:\n{content}\n\n',
-                                style=f'color({self.opts.color})', highlight=False)
-            if self.opts.assistant_mode:
-                return [f'<SUMMARY - A STAGGERED CHAT_HISTORY SUMMARY OF OLD TURNS>\n{content}\n'
-                        '<END_SUMMARY>',
-                         *documents['chat_history'][-self.opts.one_shot_history:], ]
-
-            return [*documents['chat_history'][-self.opts.one_shot_history:],
-                    '\n\n<STORY_SUMMARY - A SUMMARIZATION OF CHAT_HISTORY. MAY CONTAIN FALSEHOODS OR APPEAR OUT OF ORDER>'
-                    f'\n{content}<END STORY_SUMMARY>', ]
-
-        except APITimeoutError:
-            self.console.print('PRE-PROCESSOR PROMPT API ERROR\n',
-                                style=f'color({self.opts.color})', highlight=False)
-            return documents['chat_history']
+        # No history or history count is below unmolested count
+        return full_history
 
     def handle_context(self, documents: dict,
                              direction='query')->tuple[dict[str,list], int, list]:
@@ -588,7 +546,7 @@ class ContextManager(PromptManager):
             # column cnt
             documents['terminal_width'] = int(os.get_terminal_size().columns) - 5
             # populate chat history
-            documents['chat_history'] = self.get_chat_history(history[branch])
+            documents['chat_history'] = history[branch]
 
             documents['additional_content'] = self.get_explicit()
             documents['ooc_system'] = self.get_ooc()
@@ -629,15 +587,8 @@ class ContextManager(PromptManager):
                            self.scene.get_scene().get('known_characters', [])
                        )
 
-            if self.opts.one_shot and len(documents['chat_history']) > self.opts.one_shot_history:
-                self.console.print('Summarizing Chat History (--one-shot enabled)...',
-                               style=f'color({self.opts.color})',
-                               highlight=False)
-                documents['chat_history'] = self.summarize_history(documents)
-                if self.debug:
-                    self.console.print(f'SUMMARIZED:\n{documents["chat_history"]}\n\n',
-                                       style=f'color({self.opts.color})',
-                                       highlight=False)
+            if (len(documents['chat_history']) > self.opts.unmolested_sessions):
+                documents['chat_history'] = self.stagger_history(documents)
 
             # Make all meta_tags available for prompt templating operations, without overwriting
             # important already established keys.
