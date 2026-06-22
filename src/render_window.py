@@ -335,7 +335,9 @@ class RenderWindow(PromptManager):
                     break  # Only handle first HumanMessage
         return messages
 
-    def get_messages(self, documents: dict, polish: bool = False)->list[Document]:
+    def get_messages(self, meta_data: RAGTag,
+                     documents: dict,
+                     polish: bool = False)->list[Document]:
         """ return formatted message to be sent to LLM stream """
         prompts = self.prompts
         if polish:
@@ -414,9 +416,7 @@ class RenderWindow(PromptManager):
                           style=f'color({self.state.color})',
                           highlight=False)
 
-        if ((documents.get('use_agent', False)
-            or float(documents.get('answer_confidence', '0.65')) < float(0.65))
-            and not documents.get('agent_ran', False)):
+        if self.orchestrator.requires_agent(meta_data, documents):
             # Let LangChain create the proper prompt template for the agent
             agent = create_openai_tools_agent(self.llm, self.agent_tools, self.agent_prompt)
             documents['agent_ran'] = True
@@ -426,11 +426,11 @@ class RenderWindow(PromptManager):
                             style=f'color({self.state.color})', highlight=False)
                 result = agent_executor.invoke({"input": documents['user_query']})
                 documents['dynamic_files'] += f'\n=== AGENT_TOOL_RESULT ===\n{result}\n\n'
-                return self.get_messages(documents, polish=polish)
+                return self.get_messages(meta_data, documents, polish=polish)
             except KeyboardInterrupt:
                 documents['dynamic_files'] += ('\n=== AGENT_TOOL_RESULT ==='
                                             '\nUSER CANCELED SEARCH\n\n')
-                return self.get_messages(documents, polish=polish)
+                return self.get_messages(meta_data, documents, polish=polish)
             # pylint: disable-next=bare-except # too many ways an LLM can go wrong
             except:
                 self.console.print('Error running agent!', style=f'color({self.state.color})',
@@ -443,7 +443,7 @@ class RenderWindow(PromptManager):
                         'Do NOT fabricate or guess.\n\n'
                     )
                 documents['agent_error'] = 'TRUE'
-                return self.get_messages(documents, polish=polish)
+                return self.get_messages(meta_data, documents, polish=polish)
         return messages
 
     # Stream response as chunks
@@ -519,7 +519,7 @@ class RenderWindow(PromptManager):
         # Grab suitable llm model from orchestrator (sets agent tool if needed)
         documents['agent_error'] = 'FALSE'
         self.llm = self.orchestrator.route(meta_data, documents)
-        messages = self.get_messages(documents)
+        messages = self.get_messages(meta_data, documents)
         # Run orchestrator again after grabbing messages (sets appropriate model after agent runs)
         self.llm = self.orchestrator.route(meta_data, documents)
         self.common.write_debug(f'live_stream-{self.llm.model_name}', messages)
@@ -597,7 +597,7 @@ class RenderWindow(PromptManager):
                 documents['llm_response'] = current_response
                 for pass_num in range(int(self.opts.polisher_cnt)):
                     documents['llm_response'] = current_response
-                    messages = self.get_messages(documents, polish=True)
+                    messages = self.get_messages(meta_data, documents, polish=True)
                     current_response = ''
                     for piece in self.stream_response(messages):
                         current_response += piece.content

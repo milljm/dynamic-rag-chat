@@ -89,19 +89,23 @@ class Orchestration():
             return True
         return False
 
-    def _requires_agent(self, meta_tags: list[RAGTag], documents)->bool:
+    def requires_agent(self, meta_tags: list[RAGTag], documents)->bool:
         if not self.args.assistant_mode:
             return False
         answer_confidence = float(0.0)
+        use_web_search = float(0.0)
         for tag in meta_tags:
             if tag.tag == "answer_confidence":
                 answer_confidence = float(tag.content)
+            if tag.tag == "use_web_search":
+                use_web_search = float(tag.content)
 
         # Agent previously invoked
         if documents.get('agent_ran', False):
             return False
         # Agent requested
-        if answer_confidence < float(0.75) or 'agent' in documents.get('in_line_commands', []):
+        # aggregated = abs(answer_confidence - use_web_search)
+        if answer_confidence < float(0.6) or 'agent' in documents.get('in_line_commands', []):
             return True
 
         return False
@@ -115,7 +119,7 @@ class Orchestration():
         return assistant_mode
 
     def _route_assistant(self, meta_tags, documents)->ChatOpenAI:
-        if self._requires_agent(meta_tags, documents):
+        if self.requires_agent(meta_tags, documents):
             return self.get_model("agent")
 
         if self._requires_vision(documents):
@@ -129,7 +133,7 @@ class Orchestration():
 
     def get_rout_name(self, meta_tags: list[RAGTag], documents: dict | None = None)->str:
         """ Return route name """
-        if self._requires_agent(meta_tags, documents):
+        if self.requires_agent(meta_tags, documents):
             return 'agent'
         if self._requires_vision(documents):
             return 'vision'

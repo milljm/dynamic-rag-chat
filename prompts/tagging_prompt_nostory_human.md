@@ -65,18 +65,14 @@ If unclear, use ""
 ## 7) assistant_mode
 assistant_mode: string
 Classify the primary interaction type
-
 Allowed values (choose exactly one):
-
+- general → definitions, explanations, factual non-time-sensitive questions
 - casual → social conversation, jokes, light chat, reactions, simple math
 - coding → debugging, writing code, stack traces, refactoring, programming questions, programming languages
-- structured → multi-step logic, system design, comparisons, deep arguments, architectural thinking, analysis
-- general → definitions, explanations, factual non-time-sensitive questions
+- structured → system design, deep arguments, architectural thinking, analysis
 
 Never output multiple assistant_mode values
 assistant_mode must be exactly one of the allowed strings
-If the request compares approaches, evaluates tradeoffs, or discusses system architecture, choose "structured" even if programming languages are mentioned
-Use PREVIOUS_TURN as context to help nudge your interaction type
 If unsure, use "general"
 
 ## 8)
@@ -93,18 +89,16 @@ Use:
 Avoid always using 1.0
 
 ## 10)
+answer: string
+Add your answer for INPUT_TEXT to the best of your abilities.
+
+## 11)
 answer_confidence: float
-Rate your confidence in answering the user's question accurately without needing agentic tasks
-
+Rate your confidence in discussing INPUT_TEXT without needing the internet to form an accurate response
 Use:
-- 0.9–1.0 when the information is stable, historical, or unlikely to have changed, or does not depend on recent events
-- 0.6–0.8 when the topic may involve recent developments but you likely know it
-- 0.3–0.5 when the topic appears new, evolving, unfamiliar, or potentially time-sensitive
-
-Prefer underconfidence over overconfidence for routing decisions
-Prefer lower values if the answer can be strengthened using agentic web searches
-If the question depends on events from the past week or month, default to 0.3–0.5
-Avoid always using 1.0
+- 1.0 Use when you are absolutely sure no use of internet is required
+- 0.5 Use if you believe performing a search on the internet would provide a more precise answer
+CRITICAL: If `answer` mentions needing additional information, then you MUST set your confidence to 0.5 or lower!
 
 # JSON SCHEMA
 {
@@ -116,6 +110,7 @@ Avoid always using 1.0
     "assistant_mode": string,
     "assistant_mode_reason": string,
     "model_confidence": float,
+    "answer": string,
     "answer_confidence": float
   }
 }
