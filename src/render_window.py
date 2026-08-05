@@ -181,17 +181,43 @@ class RenderWindow(PromptManager):
             footer = Text('')
         )
 
-    def _format_model_name(self, model) -> str:
-        match = self.common.regex.model_re.search(model)
-        if not match:
-            # fallback: take first two segments split by '-' or '/'
-            parts = re.split(r'[-/]', model)
-            return '-'.join(parts[:2])[:20]
+    def _get_version(self, model: str) -> str:
+        # Match: optional letter + number + optional decimal + optional letter suffix
+        match = re.search(r'([a-z]?\d+(?:\.\d+)?[a-z]?)', model, re.IGNORECASE)
+        if match:
+            return match.group(1)[:4]  # limit to 4 chars
+        # Fallback to last word
+        parts = re.split(r'[-_/]', model)
+        return parts[-1][:4]
 
-        first, middle, last = match.groups()
-        middle = f"-{middle}" if middle else ""
-        short = f"{first}{middle}-{last}"
-        return short[:20]
+    def _format_model_name(self, model) -> str:
+        clean = model.lower().replace('_', '-')
+
+        patterns = {
+            'claude': ('🧠', 'Claude'),
+            'gpt': ('🤖', 'GPT'),
+            'llama': ('🦙', 'Meta'),
+            'maverick': ('🦙', 'Meta'),
+            'meta': ('🦙', 'Meta'),
+            'sapphira': ('🦙', 'Meta'),
+            'mixtral': ('🌪️', 'Mistral'),
+            'mistral': ('🌪️', 'Mistral'),
+            'midnight': ('🌪️', 'Mistral'),
+            'qwen': ('🐉', 'Qwen'),
+            'glm': ('🔮', 'GLM'),
+            'deepseek': ('🔍', 'DeepSeek'),
+            'minimax': ('🎯', 'MiniMax'),
+            'gemma': ('💎', 'Gemma'),
+        }
+
+        for keyword, (icon, title) in patterns.items():
+            if keyword in clean:
+                version = self._get_version(model)
+                return f"{icon} {title} [{version}]"
+
+        parts = re.split(r'[-_/]', model)
+        last_word = parts[-1][:4]
+        return f"📟 {' '.join(parts[:1])} [{last_word}]".title()[:20]
 
     def _pulse_emoji(self) -> str:
         stream = self.state.stream
@@ -467,7 +493,7 @@ class RenderWindow(PromptManager):
 
         foot_color = self.state.color - 6 if self.state.light_mode else self.state.color
 
-        footer = Text('\nTurn:', style=f'color({foot_color})')
+        footer = Text('\nTurn: ', style=f'color({foot_color})')
         footer.append(f'{turn} ', style='color(123)')
         footer.append(self._format_model_name(model), style='color(202)')
         footer.append(self._pulse_emoji(), style=f'color({12 if self.state.light_mode else 51})')

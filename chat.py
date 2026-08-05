@@ -90,10 +90,10 @@ RARE_TOKENS_RE = re.compile("|".join(re.escape(t) for t in RARE_TOKENS))
 INCLUDE_RE = re.compile(r"\{\{([^}]+)\}\}")  # {{/path}} or {{https://url}}
 
 HELP_TEXT = (
-    "in-command switches you can use:\n\n"
+    "in-command switches you can use (some are mode-specific):\n\n"
     "\t\\regenerate                  - regenerate last turn\n"
     "\t\\no-context msg              - perform a query with no context\n"
-    "\t\\agent msg                   - enable agent (web search)\n"
+    "\t\\agent msg                   - force agent (web search)\n"
     "\t\\delete-last                 - delete last message from history\n"
     "\t\\turn                        - show turn/status\n"
     "\t\\rewind N                    - rewind to turn N (keep 0..N)\n"
@@ -101,7 +101,7 @@ HELP_TEXT = (
     "\t                               optional @N to fork from first N turns\n"
     "\t\\dbranch NAME                - delete chat history branch\n"
     "\t\\history [N]                 - show last N user inputs (default 5)\n"
-    "\t\\include branch              - include branch as attachment\n"
+    "\t\\include branch msg          - include branch as attachment\n"
     "\t\\reset                       - resets history/RAG for current branch\n"
     "\n[bold]context injection[/bold]\n"
     "    {{/absolute/path/to/file}}       - include a file as context\n"
@@ -490,9 +490,9 @@ class Chat():
             buffer = event.current_buffer
             buffer.insert_text('\n')
 
-        console.print('💬 Type message then press [italic red]Esc+Enter[/italic red] to send '
-                      r'(multi-line), [red]\? Esc+Enter[/red] for help, '
-                      '[italic red]Ctrl+C[/italic red] to quit.\n')
+        console.print('💬 Type message then press [italic red]Esc,Enter[/italic red] to send '
+                      r'(multi-line), [red]\? Esc,Enter[/red] for help, '
+                      '[italic red]Ctrl-C[/italic red] to quit.\n')
 
         try:
             while True:

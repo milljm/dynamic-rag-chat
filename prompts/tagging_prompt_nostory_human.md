@@ -67,13 +67,12 @@ assistant_mode: string
 Classify the primary interaction type
 Allowed values (choose exactly one):
 - general → definitions, explanations, factual non-time-sensitive questions
-- casual → social conversation, jokes, light chat, reactions, simple math
+- casual → anything light weight and simple
 - coding → debugging, writing code, stack traces, refactoring, programming questions, programming languages
 - structured → system design, deep arguments, architectural thinking, analysis
 
 Never output multiple assistant_mode values
 assistant_mode must be exactly one of the allowed strings
-If unsure, use "general"
 
 ## 8)
 assistant_mode_reason: string
@@ -122,7 +121,7 @@ CRITICAL: If `answer` mentions needing additional information, then you MUST set
 
 <PREVIOUS_TURN - USE FOR ASSISTANT_MODE CONTINUITY>
 {{ chat_history }}
-<END PREVIOUS_TURN>
+</PREVIOUS_TURN>
 <INPUT_TEXT>
 {{ user_query }}
 </INPUT_TEXT>

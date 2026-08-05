@@ -98,7 +98,7 @@ Avoid always using 1.0.
 
 <PREVIOUS_TURN - USE FOR EPHEMERAL AWARENESS>
 {{ chat_history }}
-<END PREVIOUS_TURN>
+</PREVIOUS_TURN>
 <INPUT_TEXT>
 {{ user_query }}
-<END INPUT_TEXT>
+</INPUT_TEXT>

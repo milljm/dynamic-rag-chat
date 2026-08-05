@@ -90,7 +90,7 @@ class Orchestration():
         return False
 
     def requires_agent(self, meta_tags: list[RAGTag], documents)->bool:
-        if not self.args.assistant_mode:
+        if not self.args.assistant_mode or self.__llm['agent'].model_name == 'None':
             return False
         answer_confidence = float(0.0)
         use_web_search = float(0.0)
