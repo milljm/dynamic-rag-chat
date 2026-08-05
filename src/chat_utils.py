@@ -54,9 +54,8 @@ class ChatOptions:
     preconditioner: str = 'gemma3:1b'
     embeddings: str = 'nomic-embed-text'
     polisher_llm: Optional[str] = 'None'
-    entity_llm: Optional[str] = 'None'
+    entity_llm: Optional[str] = 'gemma3:1b'
     agent_llm: Optional[str] = 'None'
-    summarizer_llm: Optional[str] = 'None'
     vision_llm: Optional[str] = 'None'
 
     # ---------- “orchestration” options

@@ -122,7 +122,7 @@ This tool requires three LLMs at a minimum: a model for response generation, a p
 Install and run Ollama (via Conda or manual method):
 ```bash
 conda activate dynamic-rag
-conda install ollama
+conda install ollama=0.24.0
 export OLLAMA_MAX_LOADED_MODELS=3
 ollama serve
 ```
@@ -146,11 +146,13 @@ ollama pull gemma3:12b  # heavyweight model that should work on most hardware
 
 #### Experiment
 
-There are thousands of models to choose from. I encourage you to experiment! Mix'n match, explore and have fun! Search the internet for Ollama library, or head on over to https://huggingface.co and begin your journey into LLMs. If you are already a fan of HuggingFace, I recommend using this chat tool with LM Studio instead of Ollama (more models to choose from).
+There are thousands of models to choose from. I encourage you to experiment! Mix'n match, explore and have fun! Search the internet for Ollama library, or head on over to https://huggingface.co and begin your journey into LLMs. If you are already a fan of HuggingFace, I highly recommend using this chat tool with LM Studio instead of Ollama (more models to choose from).
+
+If you are interested in making full use of all capabilities, you'll want to look at `.chat.yaml.examples` for all the available model routes you can have this tool use simultaneously (model orchestration).
 
 #### ⚙️ Example usage
 
-Once Ollama is running, and you have pulled the models you want to use or if you have already pulled the default models above, you only need to launch `./chat.py` without arguments:
+Once Ollama is running, and you have pulled the default models above, you only need to launch `./chat.py` without arguments:
 ```bash
 conda activate dynamic-rag
 ./chat.py
@@ -192,39 +194,46 @@ conda activate dynamic-rag
           ↳ If URL: fetch and extract readable text via BeautifulSoup
           ↳ [If \agent: perform web search using dedicated Tool Model]
      ↓
-[Pre-conditioner (Lightweight LLM extracts metadata tags)]
+[Pre-conditioner (Lightweight LLM extracts metadata tags, routes model)]
      ↓
 [Metadata tags parsed → RAG retrieval: field-filtered, BM25, similarity matching]
      ↓
 [Context Manager: RAG result deduplication, chat history, scene/meta injection]
-          ↳ [If one-shot enabled - Use dedicated summarization model to produce a summary of chat history]
-          ↓
      ↳ [If Image detected: Use dedicated Vision Model to produce response]
      ↳ [If content rating is NSFW: use dedicated NSFW Model]
      ↳ [Else: Heavyweight LLM Generates Response]
           ↓
-[If Polisher enabled - post-process output using dedicated polisher model for additional quality prose]
+[If Polisher enabled - post-process output for better prose (story mode only)]
      ↓
 [Output to Screen]
-     ↓ ↳ (threaded non-blocking: new metadata extracted → NPC entity creation from output → RAG collections updated)
+     ↓ ↳ (threaded non-blocking: RAG collections updated / NPC character sheet creation)
 [User Input]
 ```
 
-In all, this tool allows for 8 different models to be used:
-- Pre-conditioner metadata extraction
-- Summarizer
-- Agent Tool (web search)
-- Vision model
-- NSFW model
-- General Heavyweight model
-- Polisher post-process model
-- Post-Process entity extraction/generation model (the LLM created an NPC that we dedicate creating a permanent character sheet for)
+This tool can be configured to use up to 7 different models, for different tasks:
+Story Mode (5 models involved):
+- Pre-conditioner (Metadata/RAG):
+     - SFW or NSFW
+     - Polisher
+- Post-Process:
+     -  RAG updated (Metadata/RAG)
+     -  NPC character sheet creation
+
+Assistant Mode (7 models involved):
+- Pre-conditioner (Metadata/RAG, Model Routing (Orchestration)):
+     - Agent Tool (web search)
+     - Vision
+     - Casual
+     - General
+     - Coder
+     - Structured
+- Post-Process (RAG updated)
 
 ### ❓ Why Use This
 
 Most chat tools treat conversation as a sliding window of tokens. Once the window fills, memory collapses, the model forgets key facts, or worse: invents new ones you never discussed...
 
-I wanted to create a tool that basically felt like talking to world-class tools such as ChatGPT, which makes use of RAGs and multiple LLMs to achieve specialized relevant output.
+I wanted to create a tool that basically felt like talking to world-class tools such as ChatGPT, Grok, etc, which makes use of RAGs and multiple LLMs to achieve specialized relevant output on my own personal device.
 
 - RAG Uses 100/50 '.' split chunking for high-granularity tagging suitable for chatting/story telling
      - Both USER and AI utilize their own RAG.

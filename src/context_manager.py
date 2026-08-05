@@ -255,7 +255,7 @@ class ContextManager(PromptManager):
 
     def create_character(self, char: str, documents: dict)->None:
         """ Query the Entity LLM to generate a character file based on chat_history """
-        if self.opts.assistant_mode:
+        if self.opts.assistant_mode or self.entity_llm.model_name == 'None':
             return
         if not os.path.exists(os.path.join(self.opts.vector_dir, 'entities')):
             os.makedirs(os.path.join(self.opts.vector_dir, 'entities'))

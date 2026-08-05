@@ -53,23 +53,20 @@ chat:
   entity_llm:                             (Optional: story/NPC character metadata extraction (qwen2.5-coder-7b-instruct))
   entity_server:                          (OpenAI API capable server address)
 
-  # Summarizer (--one-shot)
-  summarizer_llm:                         (Optional: speed and summarization of long context (mistral-7b-instruct))
-  summarizer_server:                      (OpenAI API capable server address)
-
   # Orchestration Models (Optional Specializations for Assistant Mode)
-  agent_llm:                              (Optional: agentic tooling tasks)
-  vision_llm:                             (Optional: image processing)
-  casual_llm:                             (Optional: Specialized Chat LLM)
-  coder_llm:                              (Optional: Coding LLM)
-  structured_llm:                         (Optional: Analysis/Reasoning specialized LLM)
-  general_llm:                            (Optional: General Purpose LLM)
+  agent_llm:                              (Optional: Agentic Tooling tasks)
+  vision_llm:                             (Optional: Image Processing)
+  casual_llm:                             (Optional: Simple Queries or Comments)
+  general_llm:                            (Optional: General Purpose)
+  coder_llm:                              (Optional: Coding Specific)
+  structured_llm:                         (Optional: Analysis/Reasoning)
+
   agent_server:                           (OpenAI API capable server address)
   vision_server:                          (OpenAI API capable server address)
   casual_server:                          (OpenAI API capable server address)
+  general_server:                         (OpenAI API capable server address)
   coder_server:                           (OpenAI API capable server address)
   structured_server:                      (OpenAI API capable server address)
-  general_server:                         (OpenAI API capable server address)
 
   history_dir:                            /some/writable/path or leave blank for default
   rag_matches: 5                          (how many matches to allow from the RAG: 5 from user's RAG and 5 from AIs)
