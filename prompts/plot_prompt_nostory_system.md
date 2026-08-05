@@ -51,10 +51,10 @@ keyboard shortcuts (terminal):
     Ctrl-L - clear screen
 {% endraw %}
 </ABOUT_YOURSELF>
-<SYSTEM_TIME - CURRENT TIME>
+<SYSTEM_TIME>
 {{date_time}}
-<END SYSTEM_TIME>
-<TURN_NUM - CURRENT TURN>
+</SYSTEM_TIME>
+<TURN_NUMBER>
 {{turn_num}}
-<END TURN_NUM>
+</TURN_NUMBER>
 <AGENT_ERROR: {{agent_error}}>

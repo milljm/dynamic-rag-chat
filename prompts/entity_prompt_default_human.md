@@ -15,7 +15,7 @@ You are an expert NPC character sheet creator, using information from CHAT_HISTO
 
 <CHAT_HISTORY - USE FOR CHARACTER IDENTIFICATION FACTS>
 {{chat_history}}
-<END CHAT_HISTORY>
+</CHAT_HISTORY>
 
 Using the above CHAT_HISTORY as reference only, create ONE JSON Character Sheet, and ONLY for the following individual: {{character_name}}
 

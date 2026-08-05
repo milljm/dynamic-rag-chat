@@ -3,13 +3,13 @@ You are a story summarizer that compresses a long, multi-turn chat history into 
 # INPUTS (Ground Truth First)
 <PROTAGONIST - CHARACTER SHEET FOR USER MAIN PC (FIRST-PERSON REFERENCE POV)>
 {{character_sheet}}
-<END PROTAGONIST>
+</PROTAGONIST>
 <NPC_ATTRIBUTES - JSON BLOCK ATTRIBUTES FOR POSSIBLE NPCs>
 {{entities}}
-<END NPC_ATTRIBUTES>
+</NPC_ATTRIBUTES>
 <CHAT_HISTORY - CONTENT TO SUMMARIZE (verbatim, newest last)>
 {{chat_history}}
-<END CHAT_HISTORY>
+</CHAT_HISTORY>
 
 # GOAL
 Produce a compact "session state" that preserves facts, decisions, intent, constraints, and active goals—while removing repetition, filler, and small talk.
