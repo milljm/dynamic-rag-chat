@@ -21,6 +21,7 @@ from .context_manager import ContextManager # For Type Hinting
 from .chat_utils import CommonUtils, ChatOptions, RAGTag # For Type Hinting
 from .orchestrator import Orchestration # For Type Hinting
 from .agent_tools import DuckDuckGoSearchTool
+from openai import APIError # For exception handling
 
 # pylint: disable=too-many-instance-attributes  # this is what a dataclass is for
 @dataclass
@@ -186,7 +187,7 @@ class RenderWindow(PromptManager):
         match = re.search(r'([a-z]?\d+(?:\.\d+)?[a-z]?)', model, re.IGNORECASE)
         if match:
             return match.group(1)[:4]  # limit to 4 chars
-        # Fallback to last word
+        # Fallback to first word
         parts = re.split(r'[-_/]', model)
         return parts[-1][:4]
 
@@ -216,8 +217,8 @@ class RenderWindow(PromptManager):
                 return f"{icon} {title} [{version}]"
 
         parts = re.split(r'[-_/]', model)
-        last_word = parts[-1][:4]
-        return f"📟 {' '.join(parts[:1])} [{last_word}]".title()[:20]
+        version = self._get_version(model)
+        return f"📚 {' '.join(parts[:1])} [{version}]".title()[:20]
 
     def _pulse_emoji(self) -> str:
         stream = self.state.stream
@@ -587,30 +588,43 @@ class RenderWindow(PromptManager):
             live.console.clear(home=True)
             self.render_chat(live)
             self.start_namepulse()
-            for piece in self.stream_response(messages):
-                if start_time == 0:
-                    start_time = time.time()
-                current_response += piece.content
-                footer_meta['token_count'] += self.response_count(piece.content)
-                if (self.opts.polisher_llm == 'None'
-                     or documents['user_query'].find('OOC:') != -1
-                     or self.opts.assistant_mode):
-                    self.renderable.response = self.build_content(current_response)
-                else:
-                    self.renderable.response = Text('Receiving message to polish...',
-                                                     style=f'color({color}')
-                self.renderable.footer = self.render_footer(time.time() - inference_start,
-                                                            time.time() - start_time,
-                                                            **footer_meta)
-                # replace 'thinking' output with Model's Markdown response
-                if isinstance(self.renderable.response, Markdown) and stream.do_once:
-                    stream.do_once = False
-                    # Reset (erase) the thinking output
-                    current_response = ''
-                name_color = self.state.pulse_colors[self.state.pulse_color_index]
-                self.renderable.assistant = Text(documents["name"],
-                                                 style=f'bold color({name_color})')
+            try:
+                for piece in self.stream_response(messages):
+                    if start_time == 0:
+                        start_time = time.time()
+                    current_response += piece.content
+                    footer_meta['token_count'] += self.response_count(piece.content)
+                    if (self.opts.polisher_llm == 'None'
+                        or documents['user_query'].find('OOC:') != -1
+                        or self.opts.assistant_mode):
+                        self.renderable.response = self.build_content(current_response)
+                    else:
+                        self.renderable.response = Text('Receiving message to polish...',
+                                                        style=f'color({color}')
+                    self.renderable.footer = self.render_footer(time.time() - inference_start,
+                                                                time.time() - start_time,
+                                                                **footer_meta)
+                    # replace 'thinking' output with Model's Markdown response
+                    if isinstance(self.renderable.response, Markdown) and stream.do_once:
+                        stream.do_once = False
+                        # Reset (erase) the thinking output
+                        current_response = ''
+                    name_color = self.state.pulse_colors[self.state.pulse_color_index]
+                    self.renderable.assistant = Text(documents["name"],
+                                                    style=f'bold color({name_color})')
+                    self.render_chat(live)
+            except Exception as e:
+                error_text = (
+                    f"**LLM Error**: {e}\n\nThe model backend may need to be reloaded.")
+
+                self.renderable.response = self.build_content(error_text)
                 self.render_chat(live)
+
+                if self.state.debug:
+                    import traceback
+                    traceback.print_exc()
+
+                return
 
             # Polisher + polishing cnt
             if (self.opts.polisher_llm != 'None'

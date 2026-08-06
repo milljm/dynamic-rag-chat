@@ -490,8 +490,8 @@ class Chat():
             buffer = event.current_buffer
             buffer.insert_text('\n')
 
-        console.print('💬 Type message then press [italic red]Esc,Enter[/italic red] to send '
-                      r'(multi-line), [red]\? Esc,Enter[/red] for help, '
+        console.print('💬 Press [italic red]Esc Enter[/italic red] to send message, '
+                      r'[red]\?[/red] [italic red]Esc Enter[/italic red] for help, '
                       '[italic red]Ctrl-C[/italic red] to quit.\n')
 
         try:

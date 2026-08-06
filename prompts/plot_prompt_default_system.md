@@ -47,6 +47,7 @@ END IF
 - First-person perspective from {{user_name}}'s point of view only
 - Describe ONLY what {{user_name}} can see, hear, smell, taste, feel, or directly perceive
 - No em-dashes or en-dashes. Use commas instead
+- No Purple-prose
 - English characters only
 - Target 500 words. Never exceed 600
 - Avoid Tolkien-style nature mysticism clichés or barefoot elf tropes
