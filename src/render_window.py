@@ -183,13 +183,20 @@ class RenderWindow(PromptManager):
         )
 
     def _get_version(self, model: str) -> str:
+        """Extract version-like pattern, preferring ones with letter suffixes."""
         # Match: optional letter + number + optional decimal + optional letter suffix
-        match = re.search(r'([a-z]?\d+(?:\.\d+)?[a-z]?)', model, re.IGNORECASE)
-        if match:
-            return match.group(1)[:4]  # limit to 4 chars
-        # Fallback to first word
-        parts = re.split(r'[-_/]', model)
-        return parts[-1][:4]
+        matches = re.findall(r'([a-z]?\d+(?:\.\d+)?[a-z]?)', model, re.IGNORECASE)
+
+        if not matches:
+            parts = re.split(r'[-_/]', model)
+            return parts[-1][:4]
+
+        # Rank matches: prefer those with a letter suffix
+        def has_suffix(m):
+            return bool(re.search(r'[a-z]$', m, re.IGNORECASE))
+
+        ranked = sorted(matches, key=lambda m: (has_suffix(m), matches.index(m)), reverse=True)
+        return ranked[0][:4]
 
     def _format_model_name(self, model) -> str:
         clean = model.lower().replace('_', '-')
@@ -201,9 +208,9 @@ class RenderWindow(PromptManager):
             'maverick': ('🦙', 'Meta'),
             'meta': ('🦙', 'Meta'),
             'sapphira': ('🦙', 'Meta'),
-            'mixtral': ('🌪️', 'Mistral'),
-            'mistral': ('🌪️', 'Mistral'),
-            'midnight': ('🌪️', 'Mistral'),
+            'mixtral': ('🌪️ ', 'Mistral'),
+            'mistral': ('🌪️ ', 'Mistral'),
+            'midnight': ('🌪️ ', 'Mistral'),
             'qwen': ('🐉', 'Qwen'),
             'glm': ('🔮', 'GLM'),
             'deepseek': ('🔍', 'DeepSeek'),

@@ -52,6 +52,7 @@ END IF
 - Target 500 words. Never exceed 600
 - Avoid Tolkien-style nature mysticism clichés or barefoot elf tropes
 - DO NOT GENERATE A STORY_SUMMARY AT THE END OF YOUR RESPONSE
+- You are writing in natural, native-level English. Use "a", "an", and "the" exactly as a fluent native speaker would.  Never omit articles. Avoid bare noun phrases and telegraphic style. Prefer full, flowing sentences with proper determiners.
 </WRITING_STYLE>
 {{additional_content}}
 <NPC_BEHAVIOR>
