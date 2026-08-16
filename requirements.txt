@@ -20,3 +20,4 @@ rank_bm25
 duckduckgo-search
 ddgs
 langchain-tavily
+cloudscraper

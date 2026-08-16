@@ -19,6 +19,7 @@
 #     "pytz",
 #     "pillow"
 #     "requests",
+#     "cloudscraper",
 #     "beautifulsoup4",
 #     "pygments",
 #     "jinja2",
@@ -42,6 +43,7 @@ from dataclasses import dataclass, asdict
 from copy import deepcopy
 from typing import List, Optional
 import requests
+import cloudscraper
 from rich.console import Console
 from rich.theme import Theme
 from bs4 import BeautifulSoup
@@ -203,6 +205,7 @@ class Chat():
     def __init__(self, o_session, _args):
         self.opts: ChatOptions = _args
         self.session: SessionContext = o_session
+        scraper = cloudscraper.create_scraper()
 
         if _args.assistant_mode:
             self.chat_branch = 'assistant'
@@ -425,7 +428,7 @@ class Chat():
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
                    'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
         try:
-            response = requests.get(url, headers=headers, timeout=10)
+            response = scraper.get(url, headers=headers, timeout=10)
             if response.status_code == 200:
                 soup = BeautifulSoup(response.content, 'html.parser')
                 return soup.get_text(), "🌍"
