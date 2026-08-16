@@ -1,91 +1,201 @@
-# Make changes, and then save the file as: .chat.yaml
-# Supplied command line arguments override settings here, allowing you to
-# store common arguments like server, yet pass --model on the fly.
-# NOTE: The values below should match the full options name (see --help) with
-#       underscores instead of dashes. (eg: context_window not context-window)
-#
-# Interesting Note: history_dir contains *everything* about your experience. You
-# therefore can change this on a whim to have a new history/experience with your
-# LLM, and then change it back to continue past-conversations. Or, delete this
-# directory when finished to remove any trace of your conversations.
-chat:
-  # Required:
-  model: gemma3:27b                       (heavy-weight LLM, your main go-to)
-  llm_server: https://api.openai.com/v1   (an OpenAI compatible API server address. If using Ollama locally
-                                           that would be: http://localhost:11434/v1. If using LM Studio
-                                           locally that would be: http://localhost:1234/v1)
-  pre_llm: gemma3:1b                      (light-weight LLM, used for metadata tagging, NSFW/SFW detection, etc)
-  pre_server:                             (OpenAI API capable server address)
-  embedding_llm: nomic-embed-text         (embeddings for RAG vector database work)
-  embedding_server:                       (OpenAI API capable server address)
+ # ==============================================================================
+ # .chat.yaml - Configuration for dynamic-rag-chat
+ # ==============================================================================
+ #
+ # Supplied command line arguments override settings here, allowing you to
+ # store common arguments like server addresses, yet pass --model on the fly.
+ #
+ # NOTE: The values below should match the full options name (see --help) with
+ #       underscores instead of dashes. (eg: context_window not context-window)
+ #
+ # Interesting Note: history_dir contains *everything* about your experience.
+ # You can change this on a whim to have a new history/experience with your LLM,
+ # and then change it back to continue past-conversations. Or, delete this
+ # directory when finished to remove any trace of your conversations.
+ #
+ # ==============================================================================
 
-  # Additional Story Models (Optional Specializations)
-  nsfw_llm:                               (Optional – for explicit or unfiltered storytelling)
+ chat:
 
-                                            Most models are SFW (Suitable For Work), meaning they are
-                                            alignment-constrained. They can handle mature themes such as
-                                            violence, war, moral darkness, sensual tension, crime, and
-                                            psychological horror — but they will avoid explicit sexual
-                                            content, extreme graphic gore, or detailed illegal instruction.
+   # ---------------------------------------------------------------------------
+   # Core Models
+   # ---------------------------------------------------------------------------
 
-                                            If your story requires fully explicit sexual content, highly
-                                            graphic brutality, or other unrestricted material, you may
-                                            choose to configure a dedicated NSFW-capable model.
+   model: gemma3:27b                    # Heavy-weight LLM, your main go-to
+   model_temp: 1.0
 
-                                            NSFW models are not inherently “better” — they are simply
-                                            less restricted. For certain genres (erotica, extreme horror,
-                                            exploitation fiction, etc.), that flexibility may be useful.
+   pre_llm: gemma3:1b                   # Light-weight LLM, used for metadata tagging,
+                                        # NSFW/SFW detection, routing decisions, etc
+   pre_temp: 0.7
 
-                                            Some NSFW models that come to mind:
-                                               huihui-glm-4.6-abliterated-mlx
-                                               midnight-miqu-103b-v1.0
-                                               gemma3-27b-abliterated
+   embedding_llm: nomic-embed-text      # Embeddings for RAG vector database work
 
-                                            Tip:
-                                            If you intend to write primarily uncensored material, it is
-                                            often cleaner to make your NSFW model the default model and
-                                            leave this option unset. The separate configuration exists
-                                            for experimentation or dynamic routing setups (e.g., switching
-                                            models when explicit thresholds are reached).
-  nsfw_server:                            (OpenAI API capable server address)
-  polisher_llm:                           (Optional: beautiful story prose (Midnight Miqu))
-  polisher_server:                        (OpenAI API capable server address)
-  entity_llm:                             (Optional: story/NPC character metadata extraction (qwen2.5-coder-7b-instruct))
-  entity_server:                          (OpenAI API capable server address)
+   # ---------------------------------------------------------------------------
+   # Story-Specific Models (Optional Specializations)
+   # ---------------------------------------------------------------------------
 
-  # Orchestration Models (Optional Specializations for Assistant Mode)
-  agent_llm:                              (Optional: Agentic Tooling tasks)
-  vision_llm:                             (Optional: Image Processing)
-  casual_llm:                             (Optional: Simple Queries or Comments)
-  general_llm:                            (Optional: General Purpose)
-  coder_llm:                              (Optional: Coding Specific)
-  structured_llm:                         (Optional: Analysis/Reasoning)
+   nsfw_llm:                            # (Optional) For explicit or unfiltered storytelling
+                                        #
+                                        # Most models are SFW — they can handle mature themes
+                                        # like violence, war, moral darkness, sensual tension,
+                                        # crime, and psychological horror — but they will avoid
+                                        # explicit sexual content, extreme graphic gore, or
+                                        # detailed illegal instruction.
+                                        #
+                                        # If your story requires fully explicit sexual content,
+                                        # highly graphic brutality, or other unrestricted
+                                        # material, configure a dedicated NSFW-capable model.
+                                        #
+                                        # Some NSFW models that come to mind:
+                                        #   - huihui-glm-4.6-abliterated-mlx
+                                        #   - midnight-miqu-103b-v1.0
+                                        #   - gemma3-27b-abliterated
+                                        #
+                                        # Tip: If you write primarily uncensored material, it is
+                                        # often cleaner to make your NSFW model the default and
+                                        # leave this option unset. The separate configuration
+                                        # exists for experimentation or dynamic routing setups.
+   nsfw_temp: 1.0
 
-  agent_server:                           (OpenAI API capable server address)
-  vision_server:                          (OpenAI API capable server address)
-  casual_server:                          (OpenAI API capable server address)
-  general_server:                         (OpenAI API capable server address)
-  coder_server:                           (OpenAI API capable server address)
-  structured_server:                      (OpenAI API capable server address)
+   polisher_llm:                        # (Optional) Beautiful story prose
+                                        # Example: midnight-miqu-103b-v1.0
+   polisher_temp: 1.0
 
-  distrust_confidence: 0.6                (Your implied distrust of the model's ability when to properly perform
-                                           an internet search. Higher values == More agentic web searches. Use with
-                                           caution if on a paid subscription plan)
+   entity_llm:                          # (Optional) Story/NPC character metadata extraction
+                                        # Example: qwen2.5-coder-7b-instruct
+   entity_temp: 0.7
 
-  history_dir:                            /some/writable/path or leave blank for default
-  rag_matches: 5                          (how many matches to allow from the RAG: 5 from user's RAG and 5 from AIs)
-  history_session: 5                      (how many turns of history to provide. Thats 15 from all sources by default)
-  api_key: YOUR API KEY                   (your assigned API key, or empty if using local Ollama server)
-  tavily_key: YOUR TAVILY KEY             (your assigned API key from Tavily (deep web search capabilities), or empty if not using Tavily)
-  time_zone: 'America/Denver'             (currently not used in the system prompts, easy to implement though: {date_time})
-  light_mode: False                       (set to true if you use a high luminance terminal background)
-  context_window: 4192                    (ask the server to use this context window size. Sometimes can be ignore)
-  name: your assistant's name             (name your assistant/story-teller)
-  user_name: your character's name        (Use this to ground your LLMs to you being the protagonist in your stories)
-  assistant_mode: True                    (use non-story telling prompts. Useful if you're using this chat script as a tool instead of a story teller)
-  syntax_style: fruity                    (specify a syntax highlighting theme see: https://pygments.org/styles/ for themes)
-  seed: str                               (specify a string to be hashlib into a 32bit int seed for LLMs (useful for debugging/reproducibility))
-  debug: False
+   # ---------------------------------------------------------------------------
+   # Assistant Mode Models (Optional Specializations)
+   # ---------------------------------------------------------------------------
+
+   agent_llm:                           # (Optional) Agentic tooling tasks
+   agent_temp: 0.6
+
+   vision_llm:                          # (Optional) Image processing
+   vision_temp: 0.9
+
+   casual_llm:                          # (Optional) Simple queries or comments
+   casual_temp: 0.9
+
+   general_llm:                         # (Optional) General purpose Q&A
+   general_temp: 0.9
+
+   coder_llm:                           # (Optional) Coding specific tasks
+   coder_temp: 0.7
+
+   structured_llm:                      # (Optional) Analysis and reasoning
+   structured_temp: 0.7
+
+   # ---------------------------------------------------------------------------
+   # Server Configuration
+   # ---------------------------------------------------------------------------
+
+   llm_server: https://api.openai.com/v1    # Or an OpenAI compatible API server address
+   pre_server:                              # (OpenAI API capable server address)
+   embedding_server:                        # (OpenAI API capable server address)
+   polisher_server:                         # (OpenAI API capable server address)
+   entity_server:                           # (OpenAI API capable server address)
+   nsfw_server:                             # (OpenAI API capable server address)
+   agent_server:                            # (OpenAI API capable server address)
+   vision_server:                           # (OpenAI API capable server address)
+   casual_server:                           # (OpenAI API capable server address)
+   general_server:                          # (OpenAI API capable server address)
+   coder_server:                            # (OpenAI API capable server address)
+   structured_server:                       # (OpenAI API capable server address)
+
+   # ---------------------------------------------------------------------------
+   # Behavior & Tuning
+   # ---------------------------------------------------------------------------
+
+   distrust_confidence: 0.6             # Your implied distrust of the model's ability to
+                                        # properly perform an internet search.
+                                        #
+                                        # Higher values == more agentic web searches.
+                                        # Use with caution if on a paid subscription plan.
+
+   rag_matches: 2                       # How many matches to allow from the RAG (2 from user's RAG and 2
+                                        # from AI's RAG). In practice, increasing this number to large
+                                        # values adds little in the quality of provided context. Low-ish
+                                        # numbers are better. Even 1 is satisfactory here.
+
+                                        # Why: RAG is what makes very long stories possible.
+                                        # RAG results are *highly* targeted snippets of *relevant* context.
+                                        # Say you mention an NPC by name and perhaps the weather that day...
+                                        # This will allow the model access to that context regardless of when
+                                        # it occurred in your turn history (hundreds... thousands of turns
+                                        # ago). A good LLM will use this information and remain faithful,
+                                        # truthful, and engaging.
+
+   history_session: 8                   # How many turns of history to provide
+                                        # (that's ~14 messages from all sources (3+3+8))
+
+   unmolested_sessions: 4               # The trailing number of turns to leave alone. This system
+                                        # utilizes an exponential decay method which tries to 'efficiently'
+                                        # preserve earlier random context (this is important in stories).
+
+                                        # Example(s): if history_sessions = 8 and you are on turn 20, the
+                                        # following turn history will be provided:
+                                        # [0, 4, 8, 12, 16, 17, 18, 19]
+                                        #               ^^ <------> ^^ 4 unmolested sessions
+                                        #  ^ <----> ^^ (8-4) 4 exponentially decaying turns remaining
+
+                                        # If you are on turn 80:
+                                        # [0, 19, 38, 57, 76, 77, 78, 79]
+                                        #                 ^^ <------> ^^ 4 unmolested sessions
+                                        #  ^ <------> ^^ (8-4) 4 exponentially decaying turns remaining
+
+                                        # If you do not wish this feature enabled, set unmolested_sessions
+                                        # to the same integer as history_sessions.
+
+                                        # Obviously, if you are using powerful models that can handle huge
+                                        # context windows, on equally powerful hardware, these numbers should
+                                        # all be cranked up. The defaults above (for me on average), produce
+                                        # ~32K token context sessions
+
+
+   context_window: 4192                 # Ask the server to use this context window size
+                                        # (sometimes can be ignored by the server)
+
+   seed:                                # Specify a string to hash into a 32-bit int
+                                        # (useful for debugging/reproducibility)
+
+   # ---------------------------------------------------------------------------
+   # API Keys
+   # ---------------------------------------------------------------------------
+
+   api_key: YOUR_API_KEY                # Your assigned API key, or empty if using local Ollama
+   tavily_key: YOUR_TAVILY_KEY          # Your assigned API key from Tavily (deep web search)
+                                        # Leave empty if not using Tavily
+
+   # ---------------------------------------------------------------------------
+   # UI / UX
+   # ---------------------------------------------------------------------------
+
+   time_zone: America/Denver            # Currently not used in system prompts, but easy to
+                                        # implement: {date_time}
+
+   light_mode: false                    # Set to true if you use a high luminance terminal background
+
+   syntax_style: fruity                 # Syntax highlighting theme
+                                        # See: https://pygments.org/styles/
+
+   name: your_assistant                 # Name your assistant/story-teller
+
+   user_name: your_character            # Use this to ground your LLMs — you are the protagonist
+                                        # in your stories
+
+   sex: male || female                  # Your character's gender (this allows pro-nouns to be filled
+                                        # in templates)
+
+   character_sheet: /path/to/file       # supply a file that contains the context of your Character Sheet
+                                        # FYI: this file does NOT support templating operations. It is read
+                                        # literally as-is
+
+   assistant_mode: true                 # Use non-storytelling prompts. Useful if you're using
+                                        # this chat script as a tool instead of a storyteller
+
+   debug: false                         # Enable verbose debugging output
 
 # Ollama server switches of note:
 # I have good experiences with the above models running locally at 25+ tokens/s (Mac Studio 512GB),

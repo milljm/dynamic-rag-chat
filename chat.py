@@ -782,12 +782,16 @@ def _add_arguments(parser: argparse.ArgumentParser, defaults, *, use_defaults: b
                         help='LLM Model (default: %(default)s)')
     parser.add_argument('--model-server', metavar='', dest='host', default=D('host'),
                         type=str, help='OpenAI API server address (default: %(default)s)')
+    parser.add_argument('--model-temp', metavar='', type=float, default=D('model_temp'),
+                        help='Model Temperature (default: %(default)s)')
 
     parser.add_argument('--pre-llm', metavar='', dest='preconditioner', default=D('preconditioner'),
-                        type=str, help='Tagging Preconditioner LLM '
+                        type=str, help='Preconditioner LLM'
                         '(default: %(default)s)')
     parser.add_argument('--pre-server', metavar='', dest='pre_host', default=D('pre_host'),
                         type=str, help='OpenAI API server address (default: %(default)s)')
+    parser.add_argument('--pre-temp', metavar='', type=float, default=D('pre_temp'),
+                        help='Pre-LLM Temperature (default: %(default)s)')
 
     parser.add_argument('--embedding-llm', metavar='', dest='embeddings',
                         default=D('embeddings'),
@@ -803,6 +807,8 @@ def _add_arguments(parser: argparse.ArgumentParser, defaults, *, use_defaults: b
     parser.add_argument('--polisher-server', metavar='', dest='polisher_host',
                         default=D('polisher_host'),
                         type=str, help='OpenAI API server address (default: %(default)s)')
+    parser.add_argument('--polisher-temp', metavar='', type=float, default=D('polisher_temp'),
+                        help='Polisher Model Temperature (default: %(default)s)')
     parser.add_argument('--polisher-cnt', metavar='', default=D('polisher_cnt'),
                         help='The number passes to polish final content (default: %(default)s)'
                         ' Warning: Models tend to ballon out of proportions. Start low.')
@@ -812,12 +818,16 @@ def _add_arguments(parser: argparse.ArgumentParser, defaults, *, use_defaults: b
     parser.add_argument('--nsfw-server', metavar='', dest='nsfw_host',
                         default=D('nsfw_host'),
                         type=str, help='OpenAI API server address (default: %(default)s)')
+    parser.add_argument('--nsfw-temp', metavar='', type=float, default=D('nsfw_temp'),
+                        help='NSFW Model Temperature (default: %(default)s)')
 
     parser.add_argument('--entity-llm', metavar='', dest='entity_llm',
                         default=D('entity_llm'),
                         type=str, help='Entity/Character Sheet LLM (default: %(default)s)')
     parser.add_argument('--entity-server', metavar='', dest='entity_host', default=D('entity_host'),
                         type=str, help='OpenAI API server address (default: %(default)s)')
+    parser.add_argument('--entity-temp', metavar='', type=float, default=D('entity_temp'),
+                        help='Entity Model Temperature (default: %(default)s)')
 
     ### ------------- Optional Orchestration Models
     parser.add_argument('--vision-llm', metavar='', dest='vision_llm',
@@ -826,12 +836,16 @@ def _add_arguments(parser: argparse.ArgumentParser, defaults, *, use_defaults: b
     parser.add_argument('--vision-server', metavar='', dest='vision_host',
                         default=D('vision_host'),
                         type=str, help='OpenAI API server address (default: %(default)s)')
+    parser.add_argument('--vision-temp', metavar='', type=float, default=D('vision_temp'),
+                        help='Vision Model Temperature (default: %(default)s)')
 
     parser.add_argument('--agent-llm', metavar='', dest='agent_llm',
                         default=D('agent_llm'),
                         type=str, help='Optional Agent Tooling Model (default: %(default)s)')
     parser.add_argument('--agent-server', metavar='', dest='agent_host', default=D('agent_host'),
                         type=str, help='OpenAI API server address (default: %(default)s)')
+    parser.add_argument('--agent-temp', metavar='', type=float, default=D('agent_temp'),
+                        help='Agent Model Temperature (default: %(default)s)')
 
     parser.add_argument('--casual-llm', metavar='', dest='casual_llm',
                         default=D('casual_llm'),
@@ -840,6 +854,8 @@ def _add_arguments(parser: argparse.ArgumentParser, defaults, *, use_defaults: b
     parser.add_argument('--casual-server', metavar='', dest='casual_host',
                         default=D('casual_host'),
                         type=str, help='OpenAI API server address (default: %(default)s)')
+    parser.add_argument('--casual-temp', metavar='', type=float, default=D('casual_temp'),
+                        help='Casual Model Temperature (default: %(default)s)')
 
     parser.add_argument('--general-llm', metavar='', dest='general_llm',
                         default=D('general_llm'),
@@ -848,6 +864,8 @@ def _add_arguments(parser: argparse.ArgumentParser, defaults, *, use_defaults: b
     parser.add_argument('--general-server', metavar='', dest='general_host',
                         default=D('general_host'),
                         type=str, help='OpenAI API server address (default: %(default)s)')
+    parser.add_argument('--general-temp', metavar='', type=float, default=D('general_temp'),
+                        help='General Model Temperature (default: %(default)s)')
 
     parser.add_argument('--coder-llm', metavar='', dest='coder_llm',
                         default=D('coder_llm'),
@@ -856,6 +874,8 @@ def _add_arguments(parser: argparse.ArgumentParser, defaults, *, use_defaults: b
     parser.add_argument('--coder-server', metavar='', dest='coder_host',
                         default=D('coder_host'),
                         type=str, help='OpenAI API server address (default: %(default)s)')
+    parser.add_argument('--coder-temp', metavar='', type=float, default=D('coder_temp'),
+                        help='Coder Model Temperature (default: %(default)s)')
 
     parser.add_argument('--structured-llm', metavar='', dest='structured_llm',
                         default=D('structured_llm'),
@@ -864,8 +884,10 @@ def _add_arguments(parser: argparse.ArgumentParser, defaults, *, use_defaults: b
     parser.add_argument('--structured-server', metavar='', dest='structured_host',
                         default=D('structured_host'),
                         type=str, help='OpenAI API server address (default: %(default)s)')
+    parser.add_argument('--structured-temp', metavar='', type=float, default=D('structured_temp'),
+                        help='Structured Model Temperature (default: %(default)s)')
 
-
+    ### ------------- UX
     parser.add_argument('--api-key', metavar='', default=D('api_key'),
                         type=str, help='Your API Key (default: REDACTED)')
     parser.add_argument('--tavily-key', metavar='', default=D('tavily_key'),
@@ -882,7 +904,7 @@ def _add_arguments(parser: argparse.ArgumentParser, defaults, *, use_defaults: b
     parser.add_argument('--time-zone', metavar='', default=D('time_zone'),
                         type=str, help='your assistants name (default: %(default)s)')
 
-    # Chat History/RAG matches
+    ### ------------- History/RAG matches
     parser.add_argument('--rag-matches', metavar='', dest='matches', default=D('matches'), type=int,
                         help='Number of results to pull from *each* RAG (there are 3 RAGs)'
                         ' (default: %(default)s)')
@@ -892,7 +914,7 @@ def _add_arguments(parser: argparse.ArgumentParser, defaults, *, use_defaults: b
                         type=int, help='Chat history responses available before staggering occurs.'
                         ' Set to 0 to disable (default: %(default)s)')
 
-    # imports
+    ### ------------- Importing
     parser.add_argument('--import-pdf', metavar='', type=str,
                         help='Path to pdf to pre-populate GOLD RAG (--assistant-mode to populate '
                         'assistant GOLD RAG)')
@@ -907,7 +929,7 @@ def _add_arguments(parser: argparse.ArgumentParser, defaults, *, use_defaults: b
                               '*.txt, *.pdf, *.py) (--assistant-mode to populate assistant GOLD '
                               'RAG with *.* file patterns)'))
 
-    # flags (bools)
+    ### ------------- UI
     parser.add_argument('--light-mode', action='store_true', default=D('light_mode'),
                         help='Use a color scheme suitable for light background terminals')
     parser.add_argument('--assistant-mode', action='store_true', default=D('assistant_mode'),
@@ -930,11 +952,10 @@ def _add_arguments(parser: argparse.ArgumentParser, defaults, *, use_defaults: b
                         help='Use this if your model fails to produce a <think> tag before it'
                         ' begins reasoning')
 
+    ### ------------- MISC
     parser.add_argument('--history-dir', metavar='', dest='vector_dir', default=D('vector_dir'),
                         type=str, help='History directory (default: %(default)s)')
 
-    parser.add_argument('--temperature', metavar='', type=float, default=D('temperature'),
-                        help='Model temperature (default: %(default)s)')
     parser.add_argument('--repeat-penalty', metavar='', type=float,
                         default=D('repeat_penalty'),
                         help='Model repeat penalty (default: %(default)s)')
@@ -964,7 +985,7 @@ def _add_arguments(parser: argparse.ArgumentParser, defaults, *, use_defaults: b
                         help=('Your desired syntax-highlight theme (default: %(default)s). '
                               'See https://pygments.org/styles/ for available themes'))
 
-    # Agentic Tools
+    ### ------------- Agentic Tools
     parser.add_argument('--distrust-confidence', metavar='', type=float,
                         default=D('distrust_confidence'),
                           help=('How much do you distrust the model\'s self-assessment. '

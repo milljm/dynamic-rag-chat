@@ -21,51 +21,53 @@ class Orchestration():
             "story": {
                 "base_url": args.host,
                 "model": args.model,
-                "temperature": 0.7,
+                "temperature": args.model_temp,
             },
             "polisher": {
                 "base_url": args.polisher_host,
                 "model": args.polisher_llm,
-                "temperature": 0.9,
+                "temperature": args.polisher_temp,
             },
             "vision": {
                 "base_url": args.vision_host,
                 "model": args.vision_llm,
-                "temperature": 0.5,
+                "temperature": args.vision_temp,
             },
             "agent": {
                 "base_url": args.agent_host,
                 "model": args.agent_llm,
-                "temperature": 0.7,
+                "temperature": args.agent_temp,
             },
             "nsfw": {
                 "base_url": args.nsfw_host,
                 "model": args.nsfw_llm,
-                "temperature": 0.7,
+                "temperature": args.nsfw_temp,
             },
             "casual": {
                 "base_url": args.casual_host,
                 "model": args.casual_llm,
-                "temperature": 0.7,
+                "temperature": args.casual_temp,
             },
             "coding": {
                 "base_url": args.coder_host,
                 "model": args.coder_llm,
-                "temperature": 0.2,
+                "temperature": args.coder_temp,
             },
             "structured": {
                 "base_url": args.structured_host,
                 "model": args.structured_llm,
-                "temperature": 0.2,
+                "temperature": args.structured_temp,
             },
             "general": {
                 "base_url": args.general_host,
                 "model": args.general_llm,
-                "temperature": 0.6,
+                "temperature": args.general_temp,
             },
         }
         self.__llm = {}
         for model, dict_meta in model_specs.items():
+            # TODO: allow more individual settings in YAML resource file (top_k,
+            # top_p, repeat_penalty... comes to mind)
             self.__llm[model] = ChatOpenAI(**dict_meta,
                                         top_p=args.top_p,
                                         frequency_penalty=args.frequency_penalty,
@@ -93,12 +95,9 @@ class Orchestration():
         if not self.args.assistant_mode or self.__llm['agent'].model_name == 'None':
             return False
         answer_confidence = float(0.0)
-        use_web_search = float(0.0)
         for tag in meta_tags:
             if tag.tag == "answer_confidence":
                 answer_confidence = float(tag.content)
-            if tag.tag == "use_web_search":
-                use_web_search = float(tag.content)
 
         # Agent previously invoked
         if documents.get('agent_ran', False):

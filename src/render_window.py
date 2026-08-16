@@ -19,7 +19,7 @@ from langchain_tavily import TavilySearch
 from .prompt_manager import PromptManager
 from .context_manager import ContextManager # For Type Hinting
 from .chat_utils import CommonUtils, ChatOptions, RAGTag # For Type Hinting
-from .orchestrator import Orchestration # For Type Hinting
+from .model_orchestrator import Orchestration # For Type Hinting
 from .agent_tools import DuckDuckGoSearchTool
 from openai import APIError # For exception handling
 

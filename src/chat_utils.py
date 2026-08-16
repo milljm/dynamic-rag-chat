@@ -71,8 +71,18 @@ class ChatOptions:
     nsfw_llm: Optional[str] = 'None'
 
     # ---------- model settings
+    model_temp: float = 1.0
+    pre_temp: float = 0.7
+    nsfw_temp: float = 1.0
+    polisher_temp: float = 1.0
+    entity_temp: float = 0.7
+    agent_temp: float = 0.6
+    vision_temp: float = 0.9
+    casual_temp: float = 0.9
+    general_temp: float = 0.9
+    coder_temp: float = 0.7
+    structured_temp: float = 0.7
     completion_tokens: int = 4000
-    temperature: float = 0.5
     top_p: float = 0.95
     repeat_penalty: float = 1.10
     frequency_penalty: float = 0.4

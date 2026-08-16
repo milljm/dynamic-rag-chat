@@ -45,7 +45,7 @@ class ContextManager(PromptManager):
 
         self.pre_llm = ChatOpenAI(base_url=args.pre_host,
                                   model=args.preconditioner,
-                                  temperature=0.1,
+                                  temperature=args.pre_temp,
                                   streaming=False,
                                   max_tokens=8096,
                                   api_key=args.api_key,
@@ -54,7 +54,7 @@ class ContextManager(PromptManager):
 
         self.entity_llm = ChatOpenAI(base_url=args.entity_host,
                                   model=args.entity_llm,
-                                  temperature=0.3,
+                                  temperature=args.entity_temp,
                                   streaming=False,
                                   max_tokens=4096,
                                   api_key=args.api_key,
