@@ -70,6 +70,7 @@ Allowed values (choose exactly one):
 - casual → anything light weight and simple
 - coding → debugging, writing code, stack traces, refactoring, programming questions, programming languages
 - structured → system design, deep arguments, architectural thinking, analysis
+- vision → user attached an image to scrutinize
 
 Never output multiple assistant_mode values
 assistant_mode must be exactly one of the allowed strings
@@ -90,6 +91,7 @@ Avoid always using 1.0
 ## 10)
 answer: string
 Add your own VERY SHORT answer for INPUT_TEXT to the best of your abilities, concisely and with as few words as possible.
+CRITICAL: If user is asking about images they are attaching, simply answer "routing to vision capable model"
 
 ## 11)
 answer_confidence: float
@@ -99,6 +101,7 @@ Use:
 - 0.5–0.7: General knowledge but could benefit from verification with an internet search
 - 0.0–0.4: Time-sensitive, factual recall, or highly specific — definitely need internet search
 CRITICAL: If `answer` (from section 10) mentions needing additional information, then you MUST set your confidence to 0.4 or lower!
+CRITICAL: If INPUT_TEXT is asking about an image they are attaching, override your initial confidence *feelings* and set answer_confidence to 1.0 immediately. e.g.: Vision related queries will NEVER require agentic web searches
 
 # JSON SCHEMA
 {

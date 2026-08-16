@@ -394,6 +394,12 @@ class RenderWindow(PromptManager):
             'TRUE' if documents['user_query'].strip().lower().startswith("ooc:") else 'FALSE')
         self.ooc_response = ''
 
+        # One shot VISION population
+        documents['vision_capable'] = 'FALSE'
+        if self.orchestrator.get_rout_name(meta_data, documents) == 'vision':
+            documents['vision_capable'] = ('TRUE - YOU ARE A VISION CAPABLE MODEL AND BEING '
+                                           'PROVIDED ATTACHED IMAGES THIS TURN')
+
         if self.state.disable_thinking and not polish:
             documents['user_query'] = f'{documents["user_query"]} </think> </think> '
 

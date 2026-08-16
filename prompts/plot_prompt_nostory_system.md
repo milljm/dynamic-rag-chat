@@ -60,3 +60,4 @@ keyboard shortcuts (terminal):
 {{turn_num}}
 </TURN_NUMBER>
 <AGENT_ERROR: {{agent_error}}>
+<VISION_CAPABLE: {{vision_capable}}>
