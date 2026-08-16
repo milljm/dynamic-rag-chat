@@ -961,6 +961,13 @@ def _add_arguments(parser: argparse.ArgumentParser, defaults, *, use_defaults: b
                         help=('Your desired syntax-highlight theme (default: %(default)s). '
                               'See https://pygments.org/styles/ for available themes'))
 
+    # Agentic Tools
+    parser.add_argument('--distrust-confidence', metavar='', type=float,
+                        default=D('distrust_confidence'),
+                          help=('How much do you distrust the model\'s self-assessment. '
+                                'Lower = fewer searches, higher = more searches '
+                                '(0.0=never, 1.0=always; default: %(default)s)'))
+
 def parse_args(argv, yaml_opts):
     """Two-stage parse so help shows effective defaults: CLI > YAML > dataclass."""
     about = """

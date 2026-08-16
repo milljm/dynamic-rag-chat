@@ -68,6 +68,10 @@ chat:
   coder_server:                           (OpenAI API capable server address)
   structured_server:                      (OpenAI API capable server address)
 
+  distrust_confidence: 0.6                (Your implied distrust of the model's ability when to properly perform
+                                           an internet search. Higher values == More agentic web searches. Use with
+                                           caution if on a paid subscription plan)
+
   history_dir:                            /some/writable/path or leave blank for default
   rag_matches: 5                          (how many matches to allow from the RAG: 5 from user's RAG and 5 from AIs)
   history_session: 5                      (how many turns of history to provide. Thats 15 from all sources by default)

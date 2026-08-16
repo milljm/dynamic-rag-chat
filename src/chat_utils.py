@@ -99,13 +99,14 @@ class ChatOptions:
     sex: str = 'male'
     character_sheet: str = ''
 
-    # ---------- Context / RAG / pre‑ & post‑processing ----------
+    # ---------- Context / RAG / pre‑ & post‑processing / agentic use ----------
     vector_dir: str = field(default_factory=lambda: str(Path.cwd() / 'vector_data'))
     matches: int = 2
     chat_history: int = 10000
     history_sessions: int = 10
     unmolested_sessions: int = 4
     polisher_cnt: int = 1
+    distrust_confidence: float = 0.6
 
     # ---------- UI ----------
     syntax_theme: str = 'fruity'

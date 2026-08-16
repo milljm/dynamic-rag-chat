@@ -202,7 +202,6 @@ class RenderWindow(PromptManager):
         clean = model.lower().replace('_', '-')
 
         patterns = {
-            'claude': ('🧠', 'Claude'),
             'gpt': ('🤖', 'GPT'),
             'llama': ('🦙', 'Meta'),
             'maverick': ('🦙', 'Meta'),
@@ -216,6 +215,7 @@ class RenderWindow(PromptManager):
             'deepseek': ('🔍', 'DeepSeek'),
             'minimax': ('🎯', 'MiniMax'),
             'gemma': ('💎', 'Gemma'),
+            'claude': ('🧠', 'Claude'),
         }
 
         for keyword, (icon, title) in patterns.items():

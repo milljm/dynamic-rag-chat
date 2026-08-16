@@ -104,8 +104,8 @@ class Orchestration():
         if documents.get('agent_ran', False):
             return False
         # Agent requested
-        # aggregated = abs(answer_confidence - use_web_search)
-        if answer_confidence < float(0.6) or 'agent' in documents.get('in_line_commands', []):
+        if (answer_confidence <= float(self.args.distrust_confidence)
+            or 'agent' in documents.get('in_line_commands', [])):
             return True
 
         return False

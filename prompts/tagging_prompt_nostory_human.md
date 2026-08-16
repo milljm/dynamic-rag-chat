@@ -76,7 +76,7 @@ assistant_mode must be exactly one of the allowed strings
 
 ## 8)
 assistant_mode_reason: string
-Add your reasoning for selecting the assistant_mode you did
+Add your reasoning for selecting the assistant_mode you did concisely and with as few words as possible
 
 ## 9)
 model_confidence: float
@@ -89,15 +89,16 @@ Avoid always using 1.0
 
 ## 10)
 answer: string
-Add your answer for INPUT_TEXT to the best of your abilities.
+Add your own VERY SHORT answer for INPUT_TEXT to the best of your abilities, concisely and with as few words as possible.
 
 ## 11)
 answer_confidence: float
 Rate your confidence in discussing INPUT_TEXT without needing the internet to form an accurate response
 Use:
-- 1.0 Use when you are absolutely sure no use of internet is required
-- 0.5 Use if you believe performing a search on the internet would provide a more precise answer
-CRITICAL: If `answer` mentions needing additional information, then you MUST set your confidence to 0.5 or lower!
+- 0.8–1.0: Factual, well-established, no search needed
+- 0.5–0.7: General knowledge but could benefit from verification with an internet search
+- 0.0–0.4: Time-sensitive, factual recall, or highly specific — definitely need internet search
+CRITICAL: If `answer` (from section 10) mentions needing additional information, then you MUST set your confidence to 0.4 or lower!
 
 # JSON SCHEMA
 {
