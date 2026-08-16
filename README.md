@@ -19,17 +19,18 @@ Perfect for storytelling, world-building, AI role-play, and narrative design —
 
 ---
 
-## 🧩 Features
+## 🧩 Features (some of the following only work in either Assistant mode or Story mode)
 
 - ⌨️ **Terminal-first UI**: Clean CLI using `prompt_toolkit` and `rich` (Markdown in Terminal)
 - 🔁 **Streaming responses**: Token-level generation, async-ready
 - 🧾 **Persistent chat history**: Your context survives between runs
 - 🧠 **Multiple RAGs**: Retrieval is triggered by user input and LLM output
 - ♻️ **Assistant Swap**: Switch between story-teller and assistant mode with an argument (In assistant mode, the chat behaves more like a utility tool, with vision and web-search agent support enabled.)
-- ✍️ **Preconditioning layer**: Lightweight LLM summarizes RAG/Chat History before sending to the larger model (saves tokens while retaining depth)
-- 🧩 **Recursive RAG import**: Pre-populate your RAG with "Gold" documents or "Canon Lore"
+- ✍️ **Pre-Processing Layer**: Lightweight LLM processes your query for real model orchestration (casual->general->coding->analysis)
+- ✍️ **Post-Processing Layer**: Lightweight LLM processes Heavyweight LLM's response for dynamic NPC character creation  (work in progress, sorta works. Could be better!)
+- 🧩 **Recursive RAG import**: Pre-populate your RAG with "Gold" documents or "Canon Lore" (Currently supports loading: `*.md *.html *.txt *.pdf *.template` files)
 - 🧪 **Debug mode**: View prompt assembly, RAG matches, and context composition, LLM raw output, etc
-- 🛠️ **Agents**: Agent tool support for web search (`\agent How are the stocks doing today`)
+- 🛠️ **Agents**: Based on your query, the Lightweight LLM will attempt to decide when to use an agent (threshold is user configurable). Or you can always force an agent web search with in-line commands (`\agent How are the stocks doing today`)
 - 📂 **Inline file & image context aware loading**:
     The chat tool supports inline resource references, letting you embed files, images, or URL(s) content directly in your message using double braces:
 
