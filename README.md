@@ -122,7 +122,7 @@ This tool requires three LLMs at a minimum: a model for response generation, a p
 
 Install and run Ollama (via Conda or manual method):
 ```bash
-conda activate dynamic-rag
+conda activate dynamic-rag   # if not already active
 conda install ollama=0.24.0
 export OLLAMA_MAX_LOADED_MODELS=3
 ollama serve
@@ -138,7 +138,7 @@ ollama serve
 
 Then, in another terminal (do only once):
 ```bash
-conda activate dynamic-rag
+conda activate dynamic-rag   # if not already active
 ollama list  # Will either return all your hosted models, or nothing. But should NOT fail
 ollama pull nomic-embed-text
 ollama pull gemma3:1b   # lightweight pre-processor model
@@ -153,12 +153,25 @@ If you are interested in making full use of all capabilities, you'll want to loo
 
 #### ⚙️ Example usage
 
-Once Ollama is running, and you have pulled the default models above, you only need to launch `./chat.py` without arguments:
+Once Ollama is running, and you have pulled the default models above, launch `./chat.py` with the following arguments:
 ```bash
-conda activate dynamic-rag
-./chat.py
-./chat.py --help  # for more details on available options
+conda activate dynamic-rag   # if not already active
+# Story Mode:
+./chat.py \
+  --model gemma3-27b \
+  --pre-llm gemma3-1b \
+  --embedding-llm nomic-embed-text \
+  --model-server http://localhost:11434/v1
+
+# Assistant Mode:
+./chat.py \
+  --assistant-mode \
+  --model gemma3-27b \
+  --pre-llm gemma3-1b \
+  --embedding-llm nomic-embed-text \
+  --model-server http://localhost:11434/v1
 ```
+Use `./chat.py --help` to display all options.
 You can also configure arguments in .chat.yaml. See .chat.yaml.example for examples.
 
 ### 🧠 Using OpenAI or ChatGPT
@@ -181,7 +194,7 @@ chat:
 ```
 The above will leverage the powerful GPT-4o model, while using your local machine to provide pre-processing and embeddings through Ollama. With the above set, you would simple run:
 ```bash
-conda activate dynamic-rag
+conda activate dynamic-rag   # if not already active
 ./chat.py
 ```
 

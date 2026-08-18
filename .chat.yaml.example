@@ -127,23 +127,23 @@
                                         # ago). A good LLM will use this information and remain faithful,
                                         # truthful, and engaging.
 
-   history_session: 8                   # How many turns of history to provide
-                                        # (that's ~14 messages from all sources (3+3+8))
+   history_session: 9                   # How many turns of history to provide
+                                        # (that's ~13 messages from all sources (2+2+9))
 
-   unmolested_sessions: 4               # The trailing number of turns to leave alone. This system
+   unmolested_sessions: 5               # The trailing number of turns to leave alone. This system
                                         # utilizes an exponential decay method which tries to 'efficiently'
                                         # preserve earlier random context (this is important in stories).
 
-                                        # Example(s): if history_sessions = 8 and you are on turn 20, the
+                                        # Example(s): if history_sessions = 9 and you are on turn 20, the
                                         # following turn history will be provided:
-                                        # [0, 4, 8, 12, 16, 17, 18, 19]
-                                        #               ^^ <------> ^^ 4 unmolested sessions
-                                        #  ^ <----> ^^ (8-4) 4 exponentially decaying turns remaining
+                                        # [0, 3, 7, 11, 15, 16, 17, 18, 19]
+                                        #               ^^ <----------> ^^ 5 unmolested sessions
+                                        #  ^ <----> ^^ (9-5=4) exponentially decaying previous turns
 
                                         # If you are on turn 80:
-                                        # [0, 19, 38, 57, 76, 77, 78, 79]
-                                        #                 ^^ <------> ^^ 4 unmolested sessions
-                                        #  ^ <------> ^^ (8-4) 4 exponentially decaying turns remaining
+                                        # [0, 23, 47, 71, 95, 96, 97, 98, 99]
+                                        #                 ^^ <----------> ^^ 5 unmolested sessions
+                                        #  ^ <------> ^^ (9-5=4) exponentially decaying previous turns
 
                                         # If you do not wish this feature enabled, set unmolested_sessions
                                         # to the same integer as history_sessions.
@@ -153,6 +153,20 @@
                                         # all be cranked up. The defaults above (for me on average), produce
                                         # ~32K token context sessions
 
+   lookback: None                       # Maximum turns to use when computing above unmolested_sessions.
+                                        # None == use full history. If not None, the decay is no longer
+                                        # exponential; a hard floor excludes all turns prior to:
+                                        # max(0, all_history - lookback). Example:
+
+                                        # If you are on turn 80 and lookback is set to 30, the following
+                                        # turn history will be provided:
+                                        # [50, 56, 63, 69, 76, 77, 78, 79]
+                                        #                  ^^ <------> ^^ 4 unmolested sessions
+                                        #  ^ <-------> ^^ (8-4=4), 7 evenly spaced decaying previous turns
+
+                                        # Setting loopback to a hard number may help with extremely long winded
+                                        # stories (when supplying such an early turn as 0, is more a hindrance
+                                        # than help). If you opt to set this, I suggest a high value
 
    context_window: 4192                 # Ask the server to use this context window size
                                         # (sometimes can be ignored by the server)

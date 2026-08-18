@@ -310,29 +310,49 @@ class ContextManager(PromptManager):
     @staticmethod
     def stagger_indices(history_size: int,
                         max_elements: int = 20,
-                        recent_tail: int = 4) -> list[int]:
+                        recent_tail: int = 4,
+                        lookback: int = None) -> list[int]:
         """
-        Returns a list of indices from chat history with decaying density.
+        Returns a list of indices from chat history with exponentially growing gaps.
         - Guarantees `recent_tail` most recent indices.
-        - Remaining slots are staggered across earlier history.
+        - Older turns get progressively sparser representation.
+
+        Args:
+            history_size: Total number of turns in chat history.
+            max_elements: Maximum indices to return (including tail).
+            recent_tail: Number of guaranteed unmolested most-recent turns.
+            lookback: Optional window. When set, hard floor excludes older turns.
+
+        Returns:
+            Sorted list of indices with decaying density.
         """
         if history_size <= max_elements:
             return list(range(history_size))
 
+        if lookback is None:
+            lookback = history_size
+
+        floor = max(0, history_size - lookback)
         recent_tail = min(recent_tail, max_elements)
-        base_count = max_elements - recent_tail
-        earlier = history_size - recent_tail
 
-        # Spread earlier indices linearly
-        step = max(1, earlier) / max(1, base_count)
-        #indices = [int(i * step) for i in range(base_count)]
+        earlier_end = history_size - recent_tail
+        tail_indices = set(range(earlier_end, history_size))
 
-        # Add tail - ensure exactly recent_tail elements, no overlap handling
-        tail_start = history_size - recent_tail
+        if earlier_end <= floor:
+            return sorted(tail_indices)
 
-        # Build result: base indices (deduped) + guaranteed tail
-        base_indices = set(int(i * step) for i in range(base_count))
-        tail_indices = set(range(tail_start, history_size))
+        # Cap base_count to available slots before tail
+        max_base_slots = earlier_end - floor
+        base_count = min(max_elements - recent_tail, max_base_slots)
+
+        earlier_span = max(1, earlier_end - floor)
+
+        base_indices = set()
+        for i in range(base_count):
+            progress = i / max(1, base_count - 1)
+            idx = int(floor + (1 - progress ** 2) * earlier_span)
+            idx = min(idx, earlier_end - 1)
+            base_indices.add(idx)
 
         return sorted(base_indices | tail_indices)
 
@@ -510,7 +530,10 @@ class ContextManager(PromptManager):
         if len(unmolested_history) > 0:
             max_elements = self.opts.history_sessions
             recent_tail = min(self.opts.unmolested_sessions, len(unmolested_history))
-            indices = self.stagger_indices(len(full_history), max_elements, recent_tail)
+            indices = self.stagger_indices(len(full_history),
+                                            max_elements,
+                                            recent_tail,
+                                            self.opts.lookback)
 
             # Pull the actual chat turns using those indices
             selected_turns = [full_history[i] for i in indices]

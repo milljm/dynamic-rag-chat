@@ -200,6 +200,10 @@ def parse_user_input(raw: str) -> ParsedInput:
         includes=includes,
     )
 
+class CustomWidthFormatter(argparse.RawTextHelpFormatter):
+    def __init__(self, prog):
+        super().__init__(prog, max_help_position=40, width=100)
+
 class Chat():
     """ Begin initializing variables classes. Call .chat() to begin """
     def __init__(self, o_session, _args):
@@ -778,236 +782,321 @@ def _add_arguments(parser: argparse.ArgumentParser, defaults, *, use_defaults: b
     """Register all CLI options. If use_defaults=False, suppress defaults (for pre-parse)."""
     D = (lambda name: getattr(defaults, name)) if use_defaults else (lambda _: argparse.SUPPRESS)
 
-    parser.add_argument('--model', metavar='', default=D('model'),
-                        help='LLM Model (default: %(default)s)')
-    parser.add_argument('--model-server', metavar='', dest='host', default=D('host'),
-                        type=str, help='OpenAI API server address (default: %(default)s)')
-    parser.add_argument('--model-temp', metavar='', type=float, default=D('model_temp'),
-                        help='Model Temperature (default: %(default)s)')
+    # =========================================================================
+    # MODEL CONFIGURATION
+    # =========================================================================
+    story = parser.add_argument_group("Story Model Options")
+    story.add_argument('--model', metavar='', default=D('model'),
+                       help='Model (default: %(default)s)')
+    story.add_argument('--model-server', metavar='', dest='host', type=str, default=D('host'),
+                       help='Server address (default: %(default)s)')
+    story.add_argument('--model-temp', metavar='', type=float, default=D('model_temp'),
+                       help='Temperature (default: %(default)s)')
+    story.add_argument('--model-top_p', metavar='', dest='model_topp', type=float,
+                       default=D('model_topp'), help='top_p (default: %(default)s)')
 
-    parser.add_argument('--pre-llm', metavar='', dest='preconditioner', default=D('preconditioner'),
-                        type=str, help='Preconditioner LLM'
-                        '(default: %(default)s)')
-    parser.add_argument('--pre-server', metavar='', dest='pre_host', default=D('pre_host'),
-                        type=str, help='OpenAI API server address (default: %(default)s)')
-    parser.add_argument('--pre-temp', metavar='', type=float, default=D('pre_temp'),
-                        help='Pre-LLM Temperature (default: %(default)s)')
+    pre_model = parser.add_argument_group("Preconditioner Model (lightweight model) Options")
+    pre_model.add_argument('--pre-llm', metavar='', dest='preconditioner', type=str,
+                           default=D('preconditioner'), help='Model (default: %(default)s)')
+    pre_model.add_argument('--pre-server', metavar='', dest='pre_host', type=str,
+                           default=D('pre_host'), help='Server address (default: %(default)s)')
+    pre_model.add_argument('--pre-temp', metavar='', type=float, default=D('pre_temp'),
+                           help='Temperature (default: %(default)s)')
+    pre_model.add_argument('--pre-top_p', metavar='', type=float, dest='pre_topp',
+                           default=D('pre_topp'), help='top_p (default: %(default)s)')
 
-    parser.add_argument('--embedding-llm', metavar='', dest='embeddings',
-                        default=D('embeddings'),
-                        type=str, help='LLM Embedding Model (default: %(default)s)')
-    parser.add_argument('--embedding-server', metavar='', dest='emb_host', default=D('emb_host'),
-                        type=str, help='OpenAI API server address (default: %(default)s)')
+    embedding_model = parser.add_argument_group("Embedding Model Options")
+    embedding_model.add_argument('--embedding-llm', metavar='', dest='embeddings', type=str,
+                                 default=D('embeddings'), help='Model (default: %(default)s)')
+    embedding_model.add_argument('--embedding-server', metavar='', dest='emb_host', type=str,
+                                 default=D('emb_host'),
+                                 help='Server address (default: %(default)s)')
 
-    ### ------------- Optional Story Models
-    parser.add_argument('--polisher-llm', metavar='', default=D('polisher_llm'),
-                        help='Polisher LLM Model (default: %(default)s)'
-                        ' (optional, used to "polish" the final output, with something like'
-                        ' Midnight Miqu)')
-    parser.add_argument('--polisher-server', metavar='', dest='polisher_host',
-                        default=D('polisher_host'),
-                        type=str, help='OpenAI API server address (default: %(default)s)')
-    parser.add_argument('--polisher-temp', metavar='', type=float, default=D('polisher_temp'),
-                        help='Polisher Model Temperature (default: %(default)s)')
-    parser.add_argument('--polisher-cnt', metavar='', default=D('polisher_cnt'),
-                        help='The number passes to polish final content (default: %(default)s)'
-                        ' Warning: Models tend to ballon out of proportions. Start low.')
+    # Optional story models
+    polisher_model = parser.add_argument_group(
+        "Polisher Model Options (optionally polish output)"
+    )
+    polisher_model.add_argument('--polisher-llm', metavar='', default=D('polisher_llm'),
+                                help='Model (default: %(default)s)')
+    polisher_model.add_argument('--polisher-server', metavar='', dest='polisher_host', type=str,
+                                default=D('polisher_host'),
+                                help='Server address (default: %(default)s)')
+    polisher_model.add_argument('--polisher-temp', metavar='', type=float,
+                                default=D('polisher_temp'),
+                                help='Temperature (default: %(default)s)')
+    polisher_model.add_argument('--polisher-top_p', metavar='', type=float, dest='polisher_topp',
+                                default=D('polisher_topp'), help='top_p (default: %(default)s)')
+    polisher_model.add_argument('--polisher-cnt', metavar='', default=D('polisher_cnt'),
+             help='The number of passes to polish final content (default: %(default)s)\n'
+             'Warning: Models tend to balloon out of proportions. Start low.')
 
-    parser.add_argument('--nsfw-llm', metavar='', default=D('nsfw_llm'),
-                        help='NSFW LLM Model (default: %(default)s)')
-    parser.add_argument('--nsfw-server', metavar='', dest='nsfw_host',
-                        default=D('nsfw_host'),
-                        type=str, help='OpenAI API server address (default: %(default)s)')
-    parser.add_argument('--nsfw-temp', metavar='', type=float, default=D('nsfw_temp'),
-                        help='NSFW Model Temperature (default: %(default)s)')
+    nsfw_model = parser.add_argument_group("NSFW Model Options (optional)")
+    nsfw_model.add_argument('--nsfw-llm', metavar='', default=D('nsfw_llm'),
+                            help='Model (default: %(default)s)')
+    nsfw_model.add_argument('--nsfw-server', metavar='', dest='nsfw_host', type=str,
+                            default=D('nsfw_host'), help='Server address (default: %(default)s)')
+    nsfw_model.add_argument('--nsfw-temp', metavar='', type=float, default=D('nsfw_temp'),
+                            help='Temperature (default: %(default)s)')
+    nsfw_model.add_argument('--nsfw-top_p', metavar='', type=float, dest='nsfw_topp',
+                            default=D('nsfw_topp'), help='top_p (default: %(default)s)')
 
-    parser.add_argument('--entity-llm', metavar='', dest='entity_llm',
-                        default=D('entity_llm'),
-                        type=str, help='Entity/Character Sheet LLM (default: %(default)s)')
-    parser.add_argument('--entity-server', metavar='', dest='entity_host', default=D('entity_host'),
-                        type=str, help='OpenAI API server address (default: %(default)s)')
-    parser.add_argument('--entity-temp', metavar='', type=float, default=D('entity_temp'),
-                        help='Entity Model Temperature (default: %(default)s)')
+    entity_model = parser.add_argument_group(
+        "NPC Character Creation Model Options (optional)"
+    )
+    entity_model.add_argument('--entity-llm', metavar='', dest='entity_llm', type=str,
+                              default=D('entity_llm'), help='Model (default: %(default)s)')
+    entity_model.add_argument('--entity-server', metavar='', dest='entity_host', type=str,
+                              default=D('entity_host'),
+                              help='Server address (default: %(default)s)')
+    entity_model.add_argument('--entity-temp', metavar='', type=float, default=D('entity_temp'),
+                              help='Temperature (default: %(default)s)')
+    entity_model.add_argument('--entity-top_p', metavar='', type=float, dest='entity_topp',
+                              default=D('entity_topp'), help='top_p (default: %(default)s)')
 
-    ### ------------- Optional Orchestration Models
-    parser.add_argument('--vision-llm', metavar='', dest='vision_llm',
-                        default=D('vision_llm'),
-                        type=str, help='Optional Vision Model (default: %(default)s)')
-    parser.add_argument('--vision-server', metavar='', dest='vision_host',
-                        default=D('vision_host'),
-                        type=str, help='OpenAI API server address (default: %(default)s)')
-    parser.add_argument('--vision-temp', metavar='', type=float, default=D('vision_temp'),
-                        help='Vision Model Temperature (default: %(default)s)')
+    # Model orchestration
+    vision_model = parser.add_argument_group("Vision Model Options (optional)")
+    vision_model.add_argument('--vision-llm', metavar='', dest='vision_llm', type=str,
+                              default=D('vision_llm'), help='Model (default: %(default)s)')
+    vision_model.add_argument('--vision-server', metavar='', dest='vision_host', type=str,
+                              default=D('vision_host'),
+                              help='Server address (default: %(default)s)')
+    vision_model.add_argument('--vision-temp', metavar='', type=float, default=D('vision_temp'),
+                              help='Temperature (default: %(default)s)')
+    vision_model.add_argument('--vision-top_p', metavar='', type=float, dest='vision_topp',
+                              default=D('vision_topp'), help='top_p (default: %(default)s)')
 
-    parser.add_argument('--agent-llm', metavar='', dest='agent_llm',
-                        default=D('agent_llm'),
-                        type=str, help='Optional Agent Tooling Model (default: %(default)s)')
-    parser.add_argument('--agent-server', metavar='', dest='agent_host', default=D('agent_host'),
-                        type=str, help='OpenAI API server address (default: %(default)s)')
-    parser.add_argument('--agent-temp', metavar='', type=float, default=D('agent_temp'),
-                        help='Agent Model Temperature (default: %(default)s)')
+    agent_model = parser.add_argument_group("Agentic Model Options (optional)")
+    agent_model.add_argument('--agent-llm', metavar='', dest='agent_llm', type=str,
+                             default=D('agent_llm'), help='Model (default: %(default)s)')
+    agent_model.add_argument('--agent-server', metavar='', dest='agent_host', type=str,
+                             default=D('agent_host'), help='Server address (default: %(default)s)')
+    agent_model.add_argument('--agent-temp', metavar='', type=float, default=D('agent_temp'),
+                             help='Agent Model Temperature (default: %(default)s)')
+    agent_model.add_argument('--agent-top_p', metavar='', type=float, dest='agent_topp',
+                             default=D('agent_topp'), help='top_p (default: %(default)s)')
 
-    parser.add_argument('--casual-llm', metavar='', dest='casual_llm',
-                        default=D('casual_llm'),
-                        type=str, help='Optional social conversation, jokes, light chat, reactions'
-                        ' (default: %(default)s)')
-    parser.add_argument('--casual-server', metavar='', dest='casual_host',
-                        default=D('casual_host'),
-                        type=str, help='OpenAI API server address (default: %(default)s)')
-    parser.add_argument('--casual-temp', metavar='', type=float, default=D('casual_temp'),
-                        help='Casual Model Temperature (default: %(default)s)')
+    casual_model = parser.add_argument_group("Casual Model Options (optional)")
+    casual_model.add_argument('--casual-llm', metavar='', dest='casual_llm', type=str,
+                              default=D('casual_llm'), help='Model (default: %(default)s)')
+    casual_model.add_argument('--casual-server', metavar='', dest='casual_host', type=str,
+                              default=D('casual_host'),
+                              help='Server address (default: %(default)s)')
+    casual_model.add_argument('--casual-temp', metavar='', type=float, default=D('casual_temp'),
+                              help='Temperature (default: %(default)s)')
+    casual_model.add_argument('--casual-top_p', metavar='', type=float, dest='casual_topp',
+                              default=D('casual_topp'), help='top_p (default: %(default)s)')
 
-    parser.add_argument('--general-llm', metavar='', dest='general_llm',
-                        default=D('general_llm'),
-                        type=str, help='Optional definitions, explanations, factual '
-                        'non-time-sensitive questions (default: %(default)s)')
-    parser.add_argument('--general-server', metavar='', dest='general_host',
-                        default=D('general_host'),
-                        type=str, help='OpenAI API server address (default: %(default)s)')
-    parser.add_argument('--general-temp', metavar='', type=float, default=D('general_temp'),
-                        help='General Model Temperature (default: %(default)s)')
+    general_model = parser.add_argument_group("General Model Options (optional)")
+    general_model.add_argument('--general-llm', metavar='', dest='general_llm', type=str,
+                               default=D('general_llm'), help='Model (default: %(default)s)')
+    general_model.add_argument('--general-server', metavar='', dest='general_host', type=str,
+                               default=D('general_host'),
+                               help='Server address (default: %(default)s)')
+    general_model.add_argument('--general-temp', metavar='', type=float, default=D('general_temp'),
+                               help='Temperature (default: %(default)s)')
+    general_model.add_argument('--general-top_p', metavar='', type=float, dest='general_topp',
+                               default=D('general_topp'), help='top_p (default: %(default)s)')
 
-    parser.add_argument('--coder-llm', metavar='', dest='coder_llm',
-                        default=D('coder_llm'),
-                        type=str, help='Optional debugging, writing code, stack traces, '
-                        'refactoring, programming questions (default: %(default)s)')
-    parser.add_argument('--coder-server', metavar='', dest='coder_host',
-                        default=D('coder_host'),
-                        type=str, help='OpenAI API server address (default: %(default)s)')
-    parser.add_argument('--coder-temp', metavar='', type=float, default=D('coder_temp'),
-                        help='Coder Model Temperature (default: %(default)s)')
+    coder_model = parser.add_argument_group("Coder Model Options (optional)")
+    coder_model.add_argument('--coder-llm', metavar='', dest='coder_llm', type=str,
+                             default=D('coder_llm'), help='Model (default: %(default)s)')
+    coder_model.add_argument('--coder-server', metavar='', dest='coder_host', type=str,
+                             default=D('coder_host'), help='Server address (default: %(default)s)')
+    coder_model.add_argument('--coder-temp', metavar='', type=float, default=D('coder_temp'),
+                             help='Coder Model Temperature (default: %(default)s)')
+    coder_model.add_argument('--coder-top_p', metavar='', type=float, dest='coder_topp',
+                             default=D('coder_topp'), help='top_p (default: %(default)s)')
 
-    parser.add_argument('--structured-llm', metavar='', dest='structured_llm',
-                        default=D('structured_llm'),
-                        type=str, help='Optional multi-step logic, system design, comparisons, '
-                        'deep arguments, architectural thinking (default: %(default)s)')
-    parser.add_argument('--structured-server', metavar='', dest='structured_host',
-                        default=D('structured_host'),
-                        type=str, help='OpenAI API server address (default: %(default)s)')
-    parser.add_argument('--structured-temp', metavar='', type=float, default=D('structured_temp'),
-                        help='Structured Model Temperature (default: %(default)s)')
+    struct_model = parser.add_argument_group(
+        "Analysis/Reasoning Model Options (optional)"
+    )
+    struct_model.add_argument('--structured-llm', metavar='', dest='structured_llm', type=str,
+                              default=D('structured_llm'),
+                              help='Model (default: %(default)s)')
+    struct_model.add_argument('--structured-server', metavar='', dest='structured_host', type=str,
+                              default=D('structured_host'),
+                              help='Server address (default: %(default)s)')
+    struct_model.add_argument('--structured-temp', metavar='', type=float,
+                              default=D('structured_temp'),
+                              help='Temperature (default: %(default)s)')
+    struct_model.add_argument('--structured-top_p', metavar='', type=float, dest='structured_topp',
+                              default=D('structured_topp'), help='top_p (default: %(default)s)')
 
-    ### ------------- UX
-    parser.add_argument('--api-key', metavar='', default=D('api_key'),
-                        type=str, help='Your API Key (default: REDACTED)')
-    parser.add_argument('--tavily-key', metavar='', default=D('tavily_key'),
-                        type=str, help='Your Tavily API Key (default: REDACTED)')
-    parser.add_argument('--name', metavar='', default=D('name'),
-                        type=str, help='Your assistants name (default: %(default)s)')
-    parser.add_argument('--user-name', metavar='', default=D('user_name'),
-                        type=str, help='Your characters name (default: %(default)s)')
-    parser.add_argument('--sex', metavar='', default=D('sex'),
-                        type=str, help='Your characters sex (helps with pro-nouns)'
-                        ' (default: %(default)s)')
-    parser.add_argument('--character-sheet', metavar='', default=D('character_sheet'),
-                        type=str, help='Your character sheet (default: %(default)s)')
-    parser.add_argument('--time-zone', metavar='', default=D('time_zone'),
-                        type=str, help='your assistants name (default: %(default)s)')
+    # =========================================================================
+    # USER / APPLICATION CONFIGURATION
+    # =========================================================================
+    user_args = parser.add_argument_group("User Options")
+    user_args.add_argument('--name', metavar='', default=D('name'), type=str,
+                           help='Your assistant\'s name (default: %(default)s)')
+    user_args.add_argument('--user-name', metavar='', default=D('user_name'), type=str,
+                           help='Your character\'s name (default: %(default)s)')
+    user_args.add_argument('--sex', metavar='', default=D('sex'), type=str,
+                           help='Your character\'s sex (helps with pronouns) '
+                                '(default: %(default)s)')
+    user_args.add_argument('--character-sheet', metavar='', default=D('character_sheet'), type=str,
+                           help='Your character sheet (default: %(default)s)')
+    user_args.add_argument('--time-zone', metavar='', default=D('time_zone'), type=str,
+                           help='Your assistant\'s time zone (default: %(default)s)')
 
-    ### ------------- History/RAG matches
-    parser.add_argument('--rag-matches', metavar='', dest='matches', default=D('matches'), type=int,
-                        help='Number of results to pull from *each* RAG (there are 3 RAGs)'
-                        ' (default: %(default)s)')
-    parser.add_argument('--history-sessions', metavar='', default=D('history_sessions'), type=int,
-                        help='Chat history responses available in context (default: %(default)s)')
-    parser.add_argument('--unmolested-sessions', metavar='', default=D('unmolested_sessions'),
-                        type=int, help='Chat history responses available before staggering occurs.'
-                        ' Set to 0 to disable (default: %(default)s)')
+    api_args = parser.add_argument_group("API / Service Options")
+    api_args.add_argument('--api-key', metavar='', default=D('api_key'), type=str,
+                          help='Your API Key (default: REDACTED)')
+    api_args.add_argument('--tavily-key', metavar='', default=D('tavily_key'), type=str,
+                          help='Your Tavily API Key (default: REDACTED)')
 
-    ### ------------- Importing
-    parser.add_argument('--import-pdf', metavar='', type=str,
-                        help='Path to pdf to pre-populate GOLD RAG (--assistant-mode to populate '
-                        'assistant GOLD RAG)')
-    parser.add_argument('--import-txt', metavar='', type=str,
-                        help='Path to txt to pre-populate GOLD RAG (--assistant-mode to populate '
-                        'assistant GOLD RAG)')
-    parser.add_argument('--import-web', metavar='', type=str,
-                        help='URL to pre-populate GOLD RAG (--assistant-mode to populate '
-                        'assistant GOLD RAG)')
-    parser.add_argument('--import-dir', metavar='', type=str,
-                        help=('Path to recursively find and import assorted files (*.md *.html, '
-                              '*.txt, *.pdf, *.py) (--assistant-mode to populate assistant GOLD '
-                              'RAG with *.* file patterns)'))
+    # =========================================================================
+    # CONTEXT / RAG / HISTORY
+    # =========================================================================
+    context_args = parser.add_argument_group("Context / RAG / History Options")
+    context_args.add_argument('--rag-matches', metavar='', dest='matches', type=int,
+                              default=D('matches'),
+                              help='Number of results to pull from *each* RAG (there are 3 RAGs)\n'
+                                   '(default: %(default)s)')
+    context_args.add_argument('--history-sessions', metavar='', type=int,
+                              default=D('history_sessions'),
+                              help='Chat history responses available in context\n'
+                                   '(default: %(default)s)')
+    context_args.add_argument('--unmolested-sessions', metavar='', type=int,
+                              default=D('unmolested_sessions'),
+                              help='Chat history responses available before staggering occurs.\n'
+                                   'Set to 0 to disable (default: %(default)s)')
+    context_args.add_argument('--lookback', metavar='',type=int, default=D('lookback'),
+                              help='Max turns to use when computing unmolested-sessions.\n'
+                                   'A value of None = exponential decay of entire history\n'
+                                   '(default: %(default)s)')
+    context_args.add_argument('--history-dir', metavar='', dest='vector_dir', type=str,
+                              default=D('vector_dir'),
+                              help='History directory (default: %(default)s)')
 
-    ### ------------- UI
-    parser.add_argument('--light-mode', action='store_true', default=D('light_mode'),
-                        help='Use a color scheme suitable for light background terminals')
-    parser.add_argument('--assistant-mode', action='store_true', default=D('assistant_mode'),
-                        help='Do not utilize story-telling mode prompts or the RAGs. Do not save '
-                        'chat history to disk')
-    parser.add_argument('--disable-thinking', action='store_true', default=D('disable_thinking'),
-                        help='Do not utilize reasoning, even if the model supports it '
-                        '(default: %(default)s)')
-    parser.add_argument('--use-rags', action='store_true', default=D('no_rags'),
-                        help='Use RAGs regardless of assistant-mode (no effect when not also using '
-                        'assistant-mode)')
-    parser.add_argument('-d', '--debug', action='store_true', default=D('debug'),
-                        help='Print preconditioning message, prompt, etc')
-    parser.add_argument('-v', '--verbose', action='store_true', default=D('verbose'),
-                        help='Do not hide what the model is thinking (if the model supports '
-                        'thinking)')
-    parser.add_argument('--prompts-debug', action='store_true', default=D('prompts_debug'),
-                        help='re-read the prompt files every turn')
-    parser.add_argument('--no-think-tag', action='store_true', default=D('no_think_tag'),
-                        help='Use this if your model fails to produce a <think> tag before it'
-                        ' begins reasoning')
+    # =========================================================================
+    # IMPORTING
+    # =========================================================================
+    import_args = parser.add_argument_group("Import Options")
+    import_args.add_argument('--import-pdf', metavar='', type=str,
+                             help='Path to PDF to pre-populate GOLD RAG.\n'
+                                  'Use --assistant-mode to populate the assistant GOLD RAG.')
+    import_args.add_argument('--import-txt', metavar='', type=str,
+                             help='Path to TXT to pre-populate GOLD RAG.\n'
+                                  'Use --assistant-mode to populate the assistant GOLD RAG.')
+    import_args.add_argument('--import-web', metavar='', type=str,
+                             help='URL to pre-populate GOLD RAG.\n'
+                                  'Use --assistant-mode to populate the assistant GOLD RAG.')
+    import_args.add_argument('--import-dir', metavar='', type=str,
+                             help='Path to recursively find and import assorted files\n'
+                                  '(*.md, *.html, *.txt, *.pdf, *.py).\n'
+                                  'Use --assistant-mode to populate the assistant GOLD RAG\n'
+                                  'with *.* file patterns.')
 
-    ### ------------- MISC
-    parser.add_argument('--history-dir', metavar='', dest='vector_dir', default=D('vector_dir'),
-                        type=str, help='History directory (default: %(default)s)')
+    # =========================================================================
+    # INTERFACE
+    # =========================================================================
+    ui_args = parser.add_argument_group("Interface Options")
+    ui_args.add_argument('--light-mode', action='store_true', default=D('light_mode'),
+                         help='Use a color scheme suitable for light-background terminals.')
+    ui_args.add_argument('-v', '--verbose', action='store_true', default=D('verbose'),
+                         help='Do not hide what the model is thinking\n'
+                              '(if the model supports thinking).')
 
-    parser.add_argument('--repeat-penalty', metavar='', type=float,
-                        default=D('repeat_penalty'),
-                        help='Model repeat penalty (default: %(default)s)')
-    parser.add_argument('--top-p', metavar='', type=float, default=D('top_p'),
-                        help='Model top_p (default: %(default)s)')
-    parser.add_argument('--frequency-penalty', metavar='', type=float,
-                        default=D('frequency_penalty'),
-                        help='Model frequency penalty (default: %(default)s)')
-    parser.add_argument('--presence-penalty', metavar='', type=float,
-                        default=D('presence_penalty'),
-                        help='Model presence penalty (default: %(default)s)')
-    parser.add_argument('--seed', metavar='', type=str,
-                        default=D('seed'),
-                        help='Model(s) seed (default: %(default)s)')
+    # =========================================================================
+    # BEHAVIOR
+    # =========================================================================
+    behavior_args = parser.add_argument_group("Behavior Options")
+    behavior_args.add_argument('--assistant-mode', action='store_true', default=D('assistant_mode'),
+                               help='Switch to Assistant Mode')
+    behavior_args.add_argument('--disable-thinking', action='store_true',
+                               default=D('disable_thinking'),
+                               help='Do not utilize reasoning, even if the model supports it.\n'
+                                    '(default: %(default)s)')
+    behavior_args.add_argument('--use-rags', action='store_true', default=D('no_rags'),
+                               help='Use RAGs regardless of assistant-mode.\n'
+                                    'No effect when not also using assistant-mode.')
+    behavior_args.add_argument('--no-think-tag', action='store_true', default=D('no_think_tag'),
+                               help='Use this if your model fails to produce a <think> tag\n'
+                                    'before it begins reasoning.')
 
-    parser.add_argument('--context-window', metavar='', type=int,
-                        default=D('context_window'),
-                        help=('Does nothing, except to beautify the color map of "context". '
-                              'Input here, what your max context window is being set on the server '
-                              '(default: %(default)s)'))
+    # =========================================================================
+    # GENERATION
+    # =========================================================================
+    generation_args = parser.add_argument_group("Generation Options")
+    generation_args.add_argument('--repeat-penalty', metavar='', type=float,
+                                 default=D('repeat_penalty'),
+                                 help='Model repeat penalty (default: %(default)s)')
+    generation_args.add_argument('--frequency-penalty', metavar='', type=float,
+                                 default=D('frequency_penalty'),
+                                 help='Model frequency penalty (default: %(default)s)')
+    generation_args.add_argument('--presence-penalty', metavar='', type=float,
+                                 default=D('presence_penalty'),
+                                 help='Model presence penalty (default: %(default)s)')
+    generation_args.add_argument('--seed',metavar='', type=str, default=D('seed'),
+                                 help='Model(s) seed (default: %(default)s)')
+    generation_args.add_argument('--context-window',metavar='', type=int,
+                                 default=D('context_window'),
+                                 help='Does nothing except beautify the color map of "context".\n'
+                                      'Enter the maximum context window set on the server.\n'
+                                      '(default: %(default)s)')
+    generation_args.add_argument('--completion-tokens', metavar='', dest='completion_tokens',
+                                 type=int, default=D('completion_tokens'),
+                                 help='The maximum tokens the LLM can respond with\n'
+                                      '(default: %(default)s)')
 
-    parser.add_argument('--completion-tokens', metavar='', dest='completion_tokens',
-                        default=D('completion_tokens'), type=int,
-                        help='The maximum tokens the LLM can respond with (default: %(default)s)')
-    parser.add_argument('--syntax-style', metavar='', dest='syntax_theme',
-                        default=D('syntax_theme'), type=str,
-                        help=('Your desired syntax-highlight theme (default: %(default)s). '
-                              'See https://pygments.org/styles/ for available themes'))
+    # =========================================================================
+    # DISPLAY / FORMATTING
+    # =========================================================================
+    display_args = parser.add_argument_group("Display / Formatting Options")
+    display_args.add_argument('--syntax-style', metavar='', dest='syntax_theme', type=str,
+                              default=D('syntax_theme'),
+                              help='Your desired syntax-highlight theme (default: %(default)s).\n'
+                                   'See https://pygments.org/styles/ for available themes.')
 
-    ### ------------- Agentic Tools
-    parser.add_argument('--distrust-confidence', metavar='', type=float,
-                        default=D('distrust_confidence'),
-                          help=('How much do you distrust the model\'s self-assessment. '
-                                'Lower = fewer searches, higher = more searches '
-                                '(0.0=never, 1.0=always; default: %(default)s)'))
+    # =========================================================================
+    # AGENTIC TOOLS
+    # =========================================================================
+    agent_args = parser.add_argument_group("Agentic Tool Options")
+    agent_args.add_argument('--distrust-confidence',metavar='', type=float,
+                            default=D('distrust_confidence'),
+                            help='How much do you distrust the model\'s self-assessment.\n'
+                                 'Lower = fewer searches; higher = more searches.\n'
+                                 '(0.0 = never, 1.0 = always; default: %(default)s)')
+
+    # =========================================================================
+    # DEBUGGING
+    # =========================================================================
+    debug_args = parser.add_argument_group("Debugging Options")
+    debug_args.add_argument('-d', '--debug', action='store_true', default=D('debug'),
+                            help='Print preconditioning message, prompt, etc.')
+    debug_args.add_argument('--prompts-debug', action='store_true', default=D('prompts_debug'),
+                            help='Re-read the prompt files every turn.')
 
 def parse_args(argv, yaml_opts):
     """Two-stage parse so help shows effective defaults: CLI > YAML > dataclass."""
     about = """
-A tool capable of dynamically creating/instancing RAG
-collections using quick 1B parameter summarizers to 'tag'
-items of interest that will be fed back into the context
-window for your favorite heavy-weight LLM to draw upon.
+A tool capable of dynamically creating/instancing RAG collections using quick
+1B parameter summarizers to 'tag' items of interest that will be fed back into
+the context window for your favorite heavy-weight LLM to draw upon.
 
 This allows for long-term memory, and fast relevant
 content generation.
 """
     epilog = f"""
 example:
-  ./{os.path.basename(__file__)} --model gemma3-27b --pre-llm gemma3-1b --embedding-llm nomic-embed-text
+Story Mode:
+  ./{os.path.basename(__file__)} --model gemma3-27b \\
+     --pre-llm gemma3-1b \\
+     --embedding-llm nomic-embed-text \\
+     --model-server http://localhost:11434/v1
 
-Chat can read a .chat.yaml file to import your arguments. See .chat.yaml.example for details.
+Assistant Mode:
+  ./{os.path.basename(__file__)} --assistant-mode \\
+     --model gemma3-27b \\
+     --pre-llm gemma3-1b \\
+     --embedding-llm nomic-embed-text \\
+     --model-server http://localhost:11434/v1
+
+That's a lot of available options! The only required options are --model,
+--pre-llm, and --embedding-llm. Everything else is optional.
+
+Store your options in `.chat.yaml` to run `./chat.py` without command-line
+arguments. See `.chat.yaml.example` for details.
 """
 
     # -------- Stage 1: pre-parse (suppress defaults, ignore -h) --------
@@ -1017,20 +1106,24 @@ Chat can read a .chat.yaml file to import your arguments. See .chat.yaml.example
     merged = asdict(yaml_opts)
     merged.update({k: v for k, v in vars(partial).items() if v is not None})
 
+    _opts = ChatOptions._build(current_dir, merged, yaml_opts)
+
     # -------- Stage 2: real parser with merged defaults --------
     parser = argparse.ArgumentParser(
         description=about,
         epilog=epilog,
-        formatter_class=argparse.RawTextHelpFormatter
+        formatter_class=CustomWidthFormatter
     )
     # give it a proper -h/--help
-    _add_arguments(parser, argparse.Namespace(**merged), use_defaults=True)
+    # _add_arguments(parser, argparse.Namespace(**merged), use_defaults=True)
+    _add_arguments(parser, _opts, use_defaults=True)
 
     return verify_args(parser.parse_args(argv))
 
 if __name__ == '__main__':
-    args = parse_args(sys.argv[1:], ChatOptions.from_yaml(current_dir))
-    _opts = ChatOptions.from_args(current_dir, args)
+    opts = ChatOptions.from_yaml(current_dir)
+    args = parse_args(sys.argv[1:], opts)
+    _opts = ChatOptions.from_args(current_dir, args, opts)
     dark_rich_142_styles = Theme({
             "markdown.h1": "bold #FFFFFF",
             "markdown.h2": "bold #CCCCCC",

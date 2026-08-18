@@ -8,7 +8,7 @@ import pickle
 import json
 import datetime
 import secrets
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Any, Mapping, Optional
 from typing import NamedTuple
@@ -40,50 +40,59 @@ class StandardAttributes:
 @dataclass(slots=True, kw_only=True)
 class ChatOptions:
     """ Chat arguments dataclass """
-    # ---------- Story servers
-    host: str = 'http://localhost:11434/v1'
-    pre_host: str = host
-    emb_host: str = host
-    polisher_host: str = host
-    entity_host: str = host
-    agent_host: str = host
-    vision_host: str = host
+    # ---------- Servers
+    # host: str = 'http://localhost:11434/v1'
+    host: str | None = None
+    pre_host: str | None = None
+    emb_host: str | None = None
+    polisher_host: str | None = None
+    entity_host: str | None = None
+    agent_host: str | None = None
+    vision_host: str | None = None
+    casual_host: str | None = None
+    coder_host: str | None = None
+    structured_host: str | None = None
+    general_host: str | None = None
+    nsfw_host: str | None = None
 
-    # ---------- Story Models
-    model: str = 'gemma3:12b'
-    preconditioner: str = 'gemma3:1b'
-    embeddings: str = 'nomic-embed-text'
+    # ---------- Models
+    model: str | None = None
+    preconditioner: str | None = None
+    embeddings: str | None = None
     polisher_llm: Optional[str] = 'None'
-    entity_llm: Optional[str] = 'gemma3:1b'
+    entity_llm: Optional[str] = 'None'
     agent_llm: Optional[str] = 'None'
     vision_llm: Optional[str] = 'None'
-
-    # ---------- “orchestration” options
-    casual_host: str = host
-    coder_host: str = host
-    structured_host: str = host
-    general_host: str = host
-    nsfw_host: str = host
-    casual_llm: Optional[str] = 'None'
-    coder_llm: Optional[str] = 'None'
-    structured_llm: Optional[str] = 'None'
-    general_llm: Optional[str] = 'None'
-    nsfw_llm: Optional[str] = 'None'
+    casual_llm: str | None = None
+    coder_llm: str | None = None
+    structured_llm: str | None = None
+    general_llm: str | None = None
+    nsfw_llm: str | None = None
 
     # ---------- model settings
     model_temp: float = 1.0
+    model_topp: float = 0.95
     pre_temp: float = 0.7
+    pre_topp: float = 0.95
     nsfw_temp: float = 1.0
+    nsfw_topp: float = 0.95
     polisher_temp: float = 1.0
+    polisher_topp: float = 0.95
     entity_temp: float = 0.7
+    entity_topp: float = 0.95
     agent_temp: float = 0.6
+    agent_topp: float = 0.95
     vision_temp: float = 0.9
+    vision_topp: float = 0.95
     casual_temp: float = 0.9
+    casual_topp: float = 0.95
     general_temp: float = 0.9
+    general_topp: float = 0.95
     coder_temp: float = 0.7
+    coder_topp: float = 0.95
     structured_temp: float = 0.7
+    structured_topp: float = 0.95
     completion_tokens: int = 4000
-    top_p: float = 0.95
     repeat_penalty: float = 1.10
     frequency_penalty: float = 0.4
     presence_penalty: float = 0.2
@@ -117,6 +126,7 @@ class ChatOptions:
     unmolested_sessions: int = 4
     polisher_cnt: int = 1
     distrust_confidence: float = 0.6
+    lookback: int | None = None
 
     # ---------- UI ----------
     syntax_theme: str = 'fruity'
@@ -133,6 +143,25 @@ class ChatOptions:
         # derive colour from light/dark mode
         object.__setattr__(self, 'color', 245 if self.light_mode else 236)
 
+        # If the specialized host wasn't explicitly supplied,
+        # inherit the main model server.
+        host_fields = (
+            'pre_host',
+            'emb_host',
+            'polisher_host',
+            'entity_host',
+            'agent_host',
+            'vision_host',
+            'casual_host',
+            'coder_host',
+            'structured_host',
+            'general_host',
+            'nsfw_host',
+        )
+
+        for field_name in host_fields:
+            if not getattr(self, field_name):
+                object.__setattr__(self, field_name, self.host)
         # Set Orchestration models to default model if not set
         mode_fields = {
             "casual": ("casual_llm", "casual_host"),
@@ -172,14 +201,24 @@ class ChatOptions:
     }
 
     _INT_FIELDS = {'matches', 'completion_tokens', 'chat_history', 'history_sessions'}
+    _IGNORED_FIELDS = {'color'}
     @classmethod
-    def _build(cls, current_dir: str | Path, raw: Mapping[str, Any]) -> "ChatOptions":
+    def _build(cls,
+               current_dir: str | Path,
+               raw: Mapping[str, Any],
+               base: "ChatOptions | None" = None,) -> "ChatOptions":
         """
         Convert *any* dict-like object (from YAML or argparse)
         into valid kwargs for the dataclass.
         """
-        data: dict[str, Any] = {}
+        if base is None:
+            base = cls()
+
+        data = asdict(base)
+        data.pop('color')
         for key, value in raw.items():
+            if key in cls._IGNORED_FIELDS:
+                continue
             field_name = cls._ALIASES.get(key, key)
             if field_name in cls._INT_FIELDS:
                 value = int(value)
@@ -200,9 +239,9 @@ class ChatOptions:
         return cls._build(current_dir, raw)
 
     @classmethod
-    def from_args(cls, current_dir: str | Path, args_namespace) -> 'ChatOptions':
+    def from_args(cls, current_dir: str | Path, args_namespace, base) -> 'ChatOptions':
         """Build from an `argparse.Namespace`."""
-        return cls._build(current_dir, vars(args_namespace))
+        return cls._build(current_dir, vars(args_namespace), base)
 # pylint: enable=too-many-instance-attributes
 
 @dataclass

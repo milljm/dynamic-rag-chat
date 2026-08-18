@@ -15,6 +15,7 @@ class Orchestration():
                          "enable_thinking": think,
                          "include_reasoning": think,
                          "think": think,
+                         "top_k": 50,
                        }
                      }
         model_specs = {
@@ -22,46 +23,55 @@ class Orchestration():
                 "base_url": args.host,
                 "model": args.model,
                 "temperature": args.model_temp,
+                "top_p": args.model_topp,
             },
             "polisher": {
                 "base_url": args.polisher_host,
                 "model": args.polisher_llm,
                 "temperature": args.polisher_temp,
+                "top_p": args.polisher_topp
             },
             "vision": {
                 "base_url": args.vision_host,
                 "model": args.vision_llm,
                 "temperature": args.vision_temp,
+                "top_p": args.vision_topp
             },
             "agent": {
                 "base_url": args.agent_host,
                 "model": args.agent_llm,
                 "temperature": args.agent_temp,
+                "top_p": args.agent_topp
             },
             "nsfw": {
                 "base_url": args.nsfw_host,
                 "model": args.nsfw_llm,
                 "temperature": args.nsfw_temp,
+                "top_p": args.nsfw_topp
             },
             "casual": {
                 "base_url": args.casual_host,
                 "model": args.casual_llm,
                 "temperature": args.casual_temp,
+                "top_p": args.casual_topp
             },
             "coding": {
                 "base_url": args.coder_host,
                 "model": args.coder_llm,
                 "temperature": args.coder_temp,
+                "top_p": args.coder_topp
             },
             "structured": {
                 "base_url": args.structured_host,
                 "model": args.structured_llm,
                 "temperature": args.structured_temp,
+                "top_p": args.structured_topp
             },
             "general": {
                 "base_url": args.general_host,
                 "model": args.general_llm,
                 "temperature": args.general_temp,
+                "top_p": args.general_topp
             },
         }
         self.__llm = {}
@@ -69,7 +79,6 @@ class Orchestration():
             # TODO: allow more individual settings in YAML resource file (top_k,
             # top_p, repeat_penalty... comes to mind)
             self.__llm[model] = ChatOpenAI(**dict_meta,
-                                        top_p=args.top_p,
                                         frequency_penalty=args.frequency_penalty,
                                         presence_penalty=args.presence_penalty,
                                         streaming=True,
