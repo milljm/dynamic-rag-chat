@@ -272,7 +272,7 @@ class RenderWindow(PromptManager):
         # print(f'DEBUG: think_once: {self.think_once}, {stream.thinking} TOK:>{content}<')
 
         # End of <think> block
-        if stream.thinking and ('</think>' in content or '</thinking>' in content):
+        if stream.thinking and ('think>' in content or 'thinking>' in content):
             self.common.save_thinking(self.thinking_chunk)
             self.thinking_chunk = ''
             stream.thinking = False
@@ -282,8 +282,8 @@ class RenderWindow(PromptManager):
             return chunk
 
         # Start of <think> block
-        if not stream.thinking and ('<think>' in content
-                                    or '<thinking>' in content
+        if not stream.thinking and ('think>' in content
+                                    or 'thinking>' in content
                                     or stream.no_think_bug):
             stream.no_think_bug = False
             stream.thinking = True

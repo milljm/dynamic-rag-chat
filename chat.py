@@ -950,8 +950,8 @@ def _add_arguments(parser: argparse.ArgumentParser, defaults, *, use_defaults: b
     context_args = parser.add_argument_group("Context / RAG / History Options")
     context_args.add_argument('--rag-matches', metavar='', dest='matches', type=int,
                               default=D('matches'),
-                              help='Number of results to pull from *each* RAG (there are 3 RAGs)\n'
-                                   '(default: %(default)s)')
+                              help='Number of results to pull from *each* RAG (USER\'s, and AI\'s)'
+                              '\n(default: %(default)s)')
     context_args.add_argument('--history-sessions', metavar='', type=int,
                               default=D('history_sessions'),
                               help='Chat history responses available in context\n'
@@ -966,7 +966,9 @@ def _add_arguments(parser: argparse.ArgumentParser, defaults, *, use_defaults: b
                                    '(default: %(default)s)')
     context_args.add_argument('--history-dir', metavar='', dest='vector_dir', type=str,
                               default=D('vector_dir'),
-                              help='History directory (default: %(default)s)')
+                              help='Your RAG and Chat History directory. It is dynamically\n'
+                              'generated and therefore safe to delete if you wish to physically\n'
+                              'remove all past information.\n(default: %(default)s)')
 
     # =========================================================================
     # IMPORTING
@@ -1070,12 +1072,10 @@ def _add_arguments(parser: argparse.ArgumentParser, defaults, *, use_defaults: b
 def parse_args(argv, yaml_opts):
     """Two-stage parse so help shows effective defaults: CLI > YAML > dataclass."""
     about = """
-A tool capable of dynamically creating/instancing RAG collections using quick
-1B parameter summarizers to 'tag' items of interest that will be fed back into
-the context window for your favorite heavy-weight LLM to draw upon.
+ Terminal-native AI chat with dynamic RAG-powered memory. Your conversations,
+ lore, and context stay organized automatically — so your LLM never forgets.
 
-This allows for long-term memory, and fast relevant
-content generation.
+ Navigate to https://github.com/milljm/dynamic-rag-chat for more information.
 """
     epilog = f"""
 example:

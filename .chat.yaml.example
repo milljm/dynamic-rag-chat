@@ -23,10 +23,12 @@
 
    model: gemma3:27b                    # Heavy-weight LLM, your main go-to
    model_temp: 1.0
+   model_topp: 0.95
 
-   pre_llm: gemma3:1b                   # Light-weight LLM, used for metadata tagging,
-                                        # NSFW/SFW detection, routing decisions, etc
+   pre_llm: gemma3:1b                   # Light-weight LLM, used for metadata tagging, model
+                                        # routing, etc
    pre_temp: 0.7
+   pre_topp: 0.95
 
    embedding_llm: nomic-embed-text      # Embeddings for RAG vector database work
 
@@ -56,40 +58,55 @@
                                         # leave this option unset. The separate configuration
                                         # exists for experimentation or dynamic routing setups.
    nsfw_temp: 1.0
+   nsfw_topp: 0.95
 
-   polisher_llm:                        # (Optional) Beautiful story prose
-                                        # Example: midnight-miqu-103b-v1.0
+   polisher_llm:                        # (Optional) Beautiful story prose. Example:
+                                        # midnight-miqu-103b-v1.0
    polisher_temp: 1.0
+   polisher_topp: 0.95
 
    entity_llm:                          # (Optional) Story/NPC character metadata extraction
                                         # Example: qwen2.5-coder-7b-instruct
    entity_temp: 0.7
+   entity_topp: 0.95
 
    # ---------------------------------------------------------------------------
    # Assistant Mode Models (Optional Specializations)
    # ---------------------------------------------------------------------------
+   # Note: If you only use one model (model or --model), the following will
+   # inherit that value (except agent and vision, so as not to break if your 'one'
+   # model happens to not be tool/vision capable)
 
    agent_llm:                           # (Optional) Agentic tooling tasks
    agent_temp: 0.6
+   agent_topp: 0.95
 
    vision_llm:                          # (Optional) Image processing
    vision_temp: 0.9
+   vision_topp: 0.95
 
    casual_llm:                          # (Optional) Simple queries or comments
    casual_temp: 0.9
+   casual_topp: 0.95
 
    general_llm:                         # (Optional) General purpose Q&A
    general_temp: 0.9
+   general_topp: 0.95
 
    coder_llm:                           # (Optional) Coding specific tasks
    coder_temp: 0.7
+   coder_topp: 0.95
 
    structured_llm:                      # (Optional) Analysis and reasoning
    structured_temp: 0.7
+   structure_topp: 0.95
 
    # ---------------------------------------------------------------------------
    # Server Configuration
    # ---------------------------------------------------------------------------
+   # Note: If you are running all your models on the same sever, you only then
+   # need to supply llm_server (or --model-server). The rest of the models will
+   # inherit that value.
 
    llm_server: https://api.openai.com/v1    # Or an OpenAI compatible API server address
    pre_server:                              # (OpenAI API capable server address)
