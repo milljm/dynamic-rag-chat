@@ -23,17 +23,6 @@ from .model_orchestrator import Orchestration
 from .agent_tools import DuckDuckGoSearchTool
 from openai import APIError # For exception handling
 
-# REASONING/THINKING RE
-THINK_END_RE = re.compile(
-    r'</\s*(?:mm:)?(?:think|thinking|reasoning)\s*>',
-    re.IGNORECASE
-)
-
-THINK_START_RE = re.compile(
-    r'<\s*(?:mm:)?(?:think|thinking|reasoning)\s*>',
-    re.IGNORECASE
-)
-
 # pylint: disable=too-many-instance-attributes  # this is what a dataclass is for
 @dataclass
 class StreamState:
@@ -277,17 +266,16 @@ class RenderWindow(PromptManager):
         If `show` is False, replaces it with '' at start, then hides remaining.
         """
         stream = self.state.stream
-        content = '' if getattr(chunk, 'content', None) is None else str(chunk.content)
+        content = str(chunk.content)
 
-        is_end_tag   = bool(THINK_END_RE.search(content))
-        is_start_tag = bool(THINK_START_RE.search(content))
         # Allow the model to print <think> </think> tags after it is finished reasoning
         if self.think_once is False:
             return chunk
-        # print(f'DEBUG: think_once: {self.think_once}, {stream.thinking} TOK:>{content}<')
+        # print(f'DEBUG: think_once: {self.think_once},{stream.thinking} TOK:>{content}<')
 
         # End of <think> block
-        if (stream.thinking and is_end_tag) or (stream.shadow_think and content):
+        if (stream.thinking and ('think>' in content or 'thinking>' in content)
+            or stream.shadow_think and content):
             self.common.save_thinking(self.thinking_chunk)
             self.thinking_chunk = ''
             stream.thinking = False
@@ -300,9 +288,11 @@ class RenderWindow(PromptManager):
             chunk.content = ''
             return chunk
 
-        # Start of <think> block
-        if (not stream.thinking and (is_start_tag or stream.no_think_bug)
-                or (not stream.shadow_think and content == '')):
+        # Start of <think> / enter shadow
+        if (not stream.thinking and
+            ('<think>' in content or '<thinking>' in content or 'think>' in content
+             or stream.no_think_bug)
+             or (not stream.shadow_think and content == '')):
             if content == '':
                 stream.shadow_think = True
             stream.no_think_bug = False
