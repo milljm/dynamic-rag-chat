@@ -19,9 +19,20 @@ from langchain_tavily import TavilySearch
 from .prompt_manager import PromptManager
 from .context_manager import ContextManager # For Type Hinting
 from .chat_utils import CommonUtils, ChatOptions, RAGTag # For Type Hinting
-from .model_orchestrator import Orchestration # For Type Hinting
+from .model_orchestrator import Orchestration
 from .agent_tools import DuckDuckGoSearchTool
 from openai import APIError # For exception handling
+
+# REASONING/THINKING RE
+THINK_END_RE = re.compile(
+    r'</\s*(?:mm:)?(?:think|thinking|reasoning)\s*>',
+    re.IGNORECASE
+)
+
+THINK_START_RE = re.compile(
+    r'<\s*(?:mm:)?(?:think|thinking|reasoning)\s*>',
+    re.IGNORECASE
+)
 
 # pylint: disable=too-many-instance-attributes  # this is what a dataclass is for
 @dataclass
@@ -34,6 +45,7 @@ class StreamState:
     meta_hiding: bool = False
     thinking: bool = False
     no_think_bug: bool = False
+    shadow_think: bool = False
     do_once: bool = False
     pulse_index: int = 0
     pulsing_chars: list[str] = field(default_factory=lambda: ["⠇", "⠋", "⠙", "⠸", "⠴", "⠦"])
@@ -151,10 +163,10 @@ class RenderWindow(PromptManager):
         self.namepulse_active: bool = False
         self.namepulse_thread = Thread(target=self.animate_namepulse)
         key = (self.opts.tavily_key or "").strip().lower()
-        self.agent_tools = [DuckDuckGoSearchTool()]
-        if key and key != "none":
-            self.agent_tools.append(
-                TavilySearch(tavily_api_key=self.opts.tavily_key)
+        self.agent_tools = (
+                [TavilySearch(tavily_api_key=self.opts.tavily_key)]
+                if key and key != "none"
+                else [DuckDuckGoSearchTool()]
             )
 
     def _load_states(self, current_dir, context, args):
@@ -265,26 +277,34 @@ class RenderWindow(PromptManager):
         If `show` is False, replaces it with '' at start, then hides remaining.
         """
         stream = self.state.stream
-        content = str(chunk.content)
+        content = '' if getattr(chunk, 'content', None) is None else str(chunk.content)
+
+        is_end_tag   = bool(THINK_END_RE.search(content))
+        is_start_tag = bool(THINK_START_RE.search(content))
         # Allow the model to print <think> </think> tags after it is finished reasoning
         if self.think_once is False:
             return chunk
         # print(f'DEBUG: think_once: {self.think_once}, {stream.thinking} TOK:>{content}<')
 
         # End of <think> block
-        if stream.thinking and ('think>' in content or 'thinking>' in content):
+        if (stream.thinking and is_end_tag) or (stream.shadow_think and content):
             self.common.save_thinking(self.thinking_chunk)
             self.thinking_chunk = ''
             stream.thinking = False
             self.think_once = False
             self.stop_thinking()
+            if stream.shadow_think:
+                stream.shadow_think = False
+                stream.do_once = False
+                return chunk
             chunk.content = ''
             return chunk
 
         # Start of <think> block
-        if not stream.thinking and ('think>' in content
-                                    or 'thinking>' in content
-                                    or stream.no_think_bug):
+        if (not stream.thinking and (is_start_tag or stream.no_think_bug)
+                or (not stream.shadow_think and content == '')):
+            if content == '':
+                stream.shadow_think = True
             stream.no_think_bug = False
             stream.thinking = True
             stream.do_once = True
@@ -369,7 +389,8 @@ class RenderWindow(PromptManager):
                     break  # Only handle first HumanMessage
         return messages
 
-    def get_messages(self, meta_data: RAGTag,
+    def get_messages(self,
+                     meta_data: RAGTag,
                      documents: dict,
                      polish: bool = False)->list[Document]:
         """ return formatted message to be sent to LLM stream """
@@ -380,6 +401,10 @@ class RenderWindow(PromptManager):
             self.console.print(f'Model Chosen: {self.llm.model_name}',
                           style=f'color({self.state.color})',
                           highlight=False)
+
+        # Populate current selected model
+        documents['model_name'] = self.llm.model_name
+
         # One shot OOC population
         diag = (self.ooc_response or '').strip()
         if diag:
@@ -618,7 +643,9 @@ class RenderWindow(PromptManager):
                                                                 time.time() - start_time,
                                                                 **footer_meta)
                     # replace 'thinking' output with Model's Markdown response
-                    if isinstance(self.renderable.response, Markdown) and stream.do_once:
+                    if (isinstance(self.renderable.response, Markdown)
+                            and stream.do_once
+                            and not stream.shadow_think):
                         stream.do_once = False
                         # Reset (erase) the thinking output
                         current_response = ''

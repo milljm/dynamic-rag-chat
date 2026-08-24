@@ -24,84 +24,94 @@ Return ONE valid JSON object only
 If unsure, choose a reasonable general tag instead of leaving fields empty
 
 ## 2) document_topics must NEVER be empty
+document_topics: [string array]
 High-level subjects of the text
 Rules:
 - 1–5 items
 - Use broad concepts, not specific tools
-- Choose topics based on the main subject, not the system this will be stored in
-- Do NOT assume the text is about RAG, AI, or LLM unless it is explicitly discussed
-- Do NOT default to "rag" unless the text clearly discusses retrieval, embeddings, vector databases, or context retrieval
+- Choose topics based on main subject
 
-When unsure, use general topics such as:
+When unsure, use general topics:
 - technology
 - software
 - programming
 - computing
 
-Use 1–5 topics.
-
-## 3) Be general when uncertain
+Use 1–5 topics. Be general when uncertain:
 Bad: []
 Good: ["technology"]
 Better: ["ai", "programming"]
 
-## 4) keywords_entities
+## 3) keywords_entities
 keyword_entities: [string array]
 Include specific tools, libraries, services, frameworks, or product names mentioned
 If none are clearly present, return []
 
-## 5) method
+## 4) method
 method: [string array]
 Include explicit function names, classes, commands, variables, or code identifiers
 Only include items that appear literally in the text
 Otherwise []
 
-## 6) language
+## 5) language
 language: string
 Primary programming language if clearly indicated
 Examples: python, javascript, bash, json
 If unclear, use ""
 
-## 7) assistant_mode
+## 6) assistant_mode
 assistant_mode: string
 Classify the primary interaction type
 Allowed values (choose exactly one):
 - general → definitions, explanations, factual non-time-sensitive questions
 - casual → anything light weight and simple
 - coding → debugging, writing code, stack traces, refactoring, programming questions, programming languages
-- structured → system design, deep arguments, architectural thinking, analysis
+- structured → engineering, system design, deep arguments, architectural thinking, analysis
 - vision → user attached an image to scrutinize
 
 Never output multiple assistant_mode values
 assistant_mode must be exactly one of the allowed strings
 
-## 8)
+## 7)
 assistant_mode_reason: string
-Add your reasoning for selecting the assistant_mode you did concisely and with as few words as possible
+Add your reason for selecting the model you did, concisely and with as few words as possible
 
-## 9)
-model_confidence: float
-Rate your own confidence on selecting the right assistant_mode you choose
+## 8)
+assistant_mode_confidence: float
+Rate your own confidence selecting the right assistant_mode chosen
 Use:
 - 0.9–1.0 when category is very clear
 - 0.6–0.8 when some ambiguity exists
 - 0.3–0.5 when classification was difficult
-Avoid always using 1.0
 
-## 10)
+## 9)
 answer: string
 Add your own VERY SHORT answer for INPUT_TEXT to the best of your abilities, concisely and with as few words as possible.
 CRITICAL: If user is asking about images they are attaching, simply answer "routing to vision capable model"
 
-## 11)
-answer_confidence: float
-Rate your confidence in discussing INPUT_TEXT without needing the internet to form an accurate response
-Use:
-- 0.8–1.0: Factual, well-established, no search needed
-- 0.5–0.7: General knowledge but could benefit from verification with an internet search
-- 0.0–0.4: Time-sensitive, factual recall, or highly specific — definitely need internet search
-CRITICAL: If `answer` (from section 10) mentions needing additional information, then you MUST set your confidence to 0.4 or lower!
-CRITICAL: If INPUT_TEXT is asking about an image they are attaching, override your initial confidence *feelings* and set answer_confidence to 1.0 immediately. e.g.: Vision related queries will NEVER require agentic web searches
+ ## 10) answer_confidence: float
+
+ Score how confident you are that your training data contains a RELIABLE, CURRENT answer.
+ The system performs an internet search if score ≤ 0.5.
+
+ Guide:
+ - 0.8–1.0: Timeless / stable (math, history, well-established science)
+ - 0.5–0.7: General but verifiable (consider lowering toward threshold if possible)
+ - 0.0–0.4: Time-sensitive, recent releases, version-specific details
+
+ ASK YOURSELF:
+ "Would my answer still be correct 12 months from now?"
+ - If YES → score high (0.8+)
+ - If NO or DEPENDS ON DATE/VERSION → ≤ 0.4
+
+ HARD RULES (apply after scoring):
+ - "just released", "new version", specific recent product names → ≤ 0.3
+ - Stock prices, weather for a date/location, current events → ≤ 0.2
+ - "latest", "[recent year]", "as of" present in query → ≤ 0.4
+ - Attached image mentioned → override to 1.0 (vision handles it)
+ - Not 100% sure about answer → ≤ 0.5
+
+ CRITICAL: If `answer` mentions needing additional info, score MUST be ≤ 0.4.
 
 # JSON SCHEMA
 {
@@ -114,7 +124,7 @@ CRITICAL: If INPUT_TEXT is asking about an image they are attaching, override yo
     "assistant_mode_reason": string,
     "model_confidence": float,
     "answer": string,
-    "answer_confidence": float
+    "answer_confidence": float,
   }
 }
 
