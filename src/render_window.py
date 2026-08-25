@@ -35,6 +35,7 @@ class StreamState:
     thinking: bool = False
     no_think_bug: bool = False
     shadow_think: bool = False
+    never_think: bool = False
     do_once: bool = False
     pulse_index: int = 0
     pulsing_chars: list[str] = field(default_factory=lambda: ["⠇", "⠋", "⠙", "⠸", "⠴", "⠦"])
@@ -267,13 +268,13 @@ class RenderWindow(PromptManager):
         """
         stream = self.state.stream
         content = str(chunk.content)
-
-        # Allow the model to print <think> </think> tags after it is finished reasoning
-        if self.think_once is False:
-            return chunk
         # print(f'DEBUG: think_once: {self.think_once},{stream.thinking} TOK:>{content}<')
 
-        # End of <think> block
+        # Return chunk immediately
+        if not self.think_once or stream.never_think:
+            return chunk
+
+        # End of thinking/reasoning
         if (stream.thinking and ('think>' in content or 'thinking>' in content)
             or stream.shadow_think and content):
             self.common.save_thinking(self.thinking_chunk)
@@ -288,7 +289,7 @@ class RenderWindow(PromptManager):
             chunk.content = ''
             return chunk
 
-        # Start of <think> / enter shadow
+        # Start of thinking/reasoning
         if (not stream.thinking and
             ('<think>' in content or '<thinking>' in content or 'think>' in content
              or stream.no_think_bug)
@@ -302,8 +303,13 @@ class RenderWindow(PromptManager):
             chunk.content = ''
             return chunk
 
-        # Middle of thinking stream
-        if stream.thinking:
+        # Catch-all first token. If not thinking on first token, then never try to think
+        elif not stream.thinking and not stream.never_think:
+            stream.never_think = True
+            return chunk
+
+        # Middle of thinking/reasoning
+        if stream.thinking and not stream.never_think:
             chunk.content = content if show else ''
             self.thinking_chunk += content
             return chunk
@@ -561,6 +567,7 @@ class RenderWindow(PromptManager):
         stream = self.state.stream   # shorthand
         context = self.state.context # shorthand
         self.think_once = True
+        stream.never_think = False
 
         # pesky LLMs that have reasoning and don't generate a <think> token,
         # yet generate an ending </think> token!
