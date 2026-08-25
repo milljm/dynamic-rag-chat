@@ -2,6 +2,7 @@
 import os
 import sys
 import time
+import signal
 from datetime import timedelta
 import argparse # for type hinting
 from bs4 import BeautifulSoup
@@ -22,6 +23,7 @@ class ImportData:
         self.live = None   # rich live object
         self.parent_splitter = self.d_session.rag.parent_splitter
         self.child_splitter = self.d_session.rag.child_splitter
+        self._interrupt_requested = False
 
         self.g_branch = self.d_session.common.attributes.collections['gold']
         if self.d_session.common.opts.assistant_mode:
@@ -40,15 +42,52 @@ class ImportData:
             self.parent_split = f'Parent=[bold]2000[/]/[bold]1000[/] Split: [bold]{repr("\n\n")}[/]'
             self.child_split = f'Child=[bold]100[/]/[bold]100[/] Split: [bold]{repr(".")}[/]'
 
-    def estimate_eta(self, start_time, processed, total):
-        """Estimate time remaining based on progress"""
-        elapsed = time.time() - start_time
-        if processed == 0:
+    def _install_sigint(self):
+        """Install a graceful Ctrl-C handler. Call once before the Live context."""
+        signal.signal(signal.SIGINT, self._handle_sigint)
+
+    def _handle_sigint(self, signum, frame):
+        """First SIGINT sets a flag for graceful exit; second one forces immediate kill."""
+        if self._interrupt_requested:
+            # restore default handler so a second ctrl-c actually kills the process
+            signal.signal(signal.SIGINT, signal.default_int_handler)
+            raise KeyboardInterrupt
+        self._interrupt_requested = True
+
+    def estimate_eta(self, start_time,
+                    file_processed=None, file_total=None,
+                    parent_processed=None, parent_total=None):
+        """Estimate time remaining using measured per-chunk timings."""
+
+        chunk_times = self.state.get('chunk_times', [])
+        last_chunk_time = self.state.get('last_chunk_time')
+
+        # Prefer measured chunk timings once we have data
+        if len(chunk_times) >= 2 and parent_processed is not None and parent_total:
+            avg_per_chunk = sum(chunk_times) / len(chunk_times)
+
+            # Exponential bias toward recent chunk (catches drift in either direction)
+            if last_chunk_time is not None:
+                avg_per_chunk = 0.7 * avg_per_chunk + 0.3 * last_chunk_time
+
+            remaining_chunks = max(0, parent_total - parent_processed)
+            eta_seconds = int(remaining_chunks * avg_per_chunk)
+
+            # Add a rough estimate for remaining files (best-effort from current file pace)
+            if file_total is not None and file_processed is not None:
+                files_left = max(0, file_total - file_processed)
+                # Approximate each remaining file as ~ parent_total chunks at avg rate
+                eta_seconds += int(files_left * parent_total * avg_per_chunk)
+
+            return str(timedelta(seconds=max(0, eta_seconds)))
+
+        # Fallback: not enough data yet — use file-level
+        if not file_processed or file_total is None:
             return "Calculating..."
-        rate = elapsed / processed
-        remaining = total - processed
-        eta_seconds = int(rate * remaining)
-        return str(timedelta(seconds=eta_seconds))
+        elapsed = time.time() - start_time
+        rate = elapsed / file_processed
+        return str(timedelta(seconds=max(0, int(rate * (file_total - file_processed)))))
+
 
     def make_full_status(self)->Group:
         """
@@ -61,9 +100,14 @@ class ImportData:
             .. code-block:: python
                 return Group
         """
-        eta = self.estimate_eta(self.state['start_time'],
-                    self.state['file_idx'] + 1,
-                    self.state['file_total'])
+        parent_state = self.state.get('current_parent', None)
+        eta = self.estimate_eta(
+            self.state['start_time'],
+            self.state['file_idx'] + 1,
+            self.state['file_total'],
+            parent_state[0] if parent_state else None,
+            parent_state[1] if parent_state else None
+        )
 
         file_table = Table.grid(padding=(0, 1))
         for file_path in self.state['processed_files']:
@@ -156,11 +200,23 @@ class ImportData:
             .. code-block:: python
                 return (bool, '')
         """
-        split_docs = self.parent_splitter.split_text(data)
+        if isinstance(data, type([])):
+            split_docs = list(data)
+        else:
+            split_docs = self.parent_splitter.split_text(data)
+
+        self.state['current_parent'] = [0, len(split_docs)]
         meta_tags = []
         for cnt, split_doc in enumerate(split_docs):
+            if self._interrupt_requested:
+                print(f"\n[yellow]Interrupted. Skipping {len(split_docs) - cnt} "
+                    f"remaining parent chunks in [bold]{os.path.basename(file_path)}[/].[/]")
+                sys.exit(0)
+            chunk_start = time.time()
+            self.state['current_parent'] = [cnt+1, len(split_docs)]
             child_docs = self.child_splitter.split_text(split_doc)
             if self.live:
+                self.live.console.clear(home=True)
                 self.state['chunk_panel'] = self.make_status_table(
                                                             (cnt, len(split_docs), meta_tags),
                                                             (0, len(child_docs), 0, 0),
@@ -171,17 +227,19 @@ class ImportData:
             # Some times the LLM/RAG Tagging does not gibe well. And a simple 'try again' works
             for attempt in range(2):
                 try:
-                    (message,
-                     meta_tags,
-                     status) = self.d_session.context.pre_processor('',
-                                                                     {'user_query' : split_doc},
-                                                                    False)
+                    (_,
+                    meta_tags,
+                    status) = self.d_session.context.pre_processor(
+                                '',
+                                {'user_query' : split_doc},
+                                False)
                     if not status:
-                        raise RuntimeError(message)
+                        pass
                     _normal = self.d_session.common.normalize_for_dedup(split_doc)
                     self.d_session.rag.store_data(_normal,
-                                                  tags_metadata=meta_tags,
-                                                  collection=self.g_branch)
+                                                tags_metadata=meta_tags,
+                                                collection=self.g_branch,
+                                                quiet=True)
                     break
                 # pylint: disable=broad-exception-caught  # handling lots of possibilities here
                 except Exception as e:
@@ -206,8 +264,16 @@ class ImportData:
                                                                 )
                         self.live.update(self.make_full_status())
                     time.sleep(0.5)
+                except KeyboardInterrupt:
+                    sys.exit(1)
                 # pylint enable=broad-exception-caught
             self._do_childdocs(child_docs, file_path, (cnt, len(split_docs)), meta_tags)
+            elapsed_chunk = time.time() - chunk_start
+            self.state['last_chunk_time'] = elapsed_chunk
+            # Rolling window — keep the last 50 chunks so old data doesn't drag it down
+            if len(self.state['chunk_times']) >= 50:
+                self.state['chunk_times'].pop(0)
+            self.state['chunk_times'].append(elapsed_chunk)
         return (True, '')
 
     def _do_childdocs(self, child_docs: list[str],
@@ -249,7 +315,8 @@ class ImportData:
             _tmp_meta = [RAGTag(mode, _contents), *_meta]
             self.d_session.rag.store_data(child_doc,
                                             tags_metadata=_tmp_meta,
-                                            collection=self.g_branch)
+                                            collection=self.g_branch,
+                                            quiet=True)
             if self.live and self.state is not None:
                 self.state['chunk_panel'] = self.make_status_table(
                                     (parent_state[0], parent_state[1], _tmp_meta),
@@ -284,7 +351,7 @@ class ImportData:
         """
         return self.do_parentdocs(data, file_path)
 
-    def extract_text_from_dir(self, directory: str)->None:
+    def extract_text_from_dir(self, v_args: argparse.ArgumentParser)->None:
         """
         ### Recursive Import
 
@@ -297,22 +364,25 @@ class ImportData:
 
         *Key init args:*
             .. code-block:: python
-                directory: '/path/to/directory'
+                v_args.import_dir: '/path/to/directory'
         *Exits when finished:*
             .. code-block:: python
                 sys.exit()
         """
-        files_to_process = []
+        files_to_process = set()
         text_chars = bytearray({7,8,9,10,12,13,27} | set(range(0x20, 0x100)) - {0x7f})
         is_binary_string = lambda bytes: bool(bytes.translate(None, text_chars))
-        for fdir, _, files in os.walk(directory):
+        for fdir, _, files in os.walk(v_args.import_dir):
             for file in files:
                 if (not self.d_session.common.opts.assistant_mode
                     and file.endswith(('.md', '.html', '.txt', '.pdf', '.template'))):
-                    files_to_process.append((fdir, file))
+                    files_to_process.add((fdir, file))
                 elif self.d_session.common.opts.assistant_mode:
+                    if file.endswith(('.md', '.html', '.txt', '.pdf', '.template')):
+                        files_to_process.add((fdir, file))
                     if not is_binary_string(open(os.path.join(fdir, file), 'rb').read(1024)):
-                        files_to_process.append((fdir, file))
+                        files_to_process.add((fdir, file))
+        files_to_process = list(files_to_process)
 
         self.state = {
             'file_idx': 0,
@@ -322,8 +392,10 @@ class ImportData:
             'chunk_panel': None,
             'failed': set([]),
             'start_time': time.time(),
+            'chunk_times': [],
+            'last_chunk_time': None,
         }
-
+        self._install_sigint()
         with Live(self.make_full_status(), refresh_per_second=20) as self.live:
             for idx, (fdir, file) in enumerate(files_to_process):
                 _file = os.path.join(fdir, file)
@@ -335,32 +407,29 @@ class ImportData:
                     self.state['processed_files'] = self.state['processed_files'][-max_history:]
                 self.live.update(self.make_full_status())
                 if file.endswith('.pdf'):
-                    directory = file
-                    self.extract_text_from_pdf(directory, do_exit=False)
-                    continue
-                with open(_file, 'r', encoding='utf-8') as file_handle:
-                    document_content = file_handle.read()
-                if _file.endswith('.html'):
-                    soup = BeautifulSoup(document_content, 'html.parser')
-                    document_content = soup.get_text()
-                self.store_data(document_content, _file)
+                    v_args.import_pdf = _file
+                    self.extract_text_from_pdf(v_args, False)
+                else:
+                    with open(_file, 'r', encoding='utf-8') as file_handle:
+                        document_content = file_handle.read()
+                    if _file.endswith('.html'):
+                        soup = BeautifulSoup(document_content, 'html.parser')
+                        document_content = soup.get_text()
+                if document_content:
+                    self.store_data(document_content, _file)
         sys.exit()
 
     def extract_text_from_pdf(self, v_args: argparse.ArgumentParser, do_exit=True)->None:
         """ Store imported PDF text directly into the RAG """
-        print(f'Importing document: {v_args.import_pdf}')
+        if do_exit:
+            print(f'Importing document: {v_args.import_pdf}')
         loader = PyPDFLoader(v_args.import_pdf)
         pages = []
         try:
             for page in loader.lazy_load():
                 pages.append(page)
             page_texts = list(map(lambda doc: doc.page_content, pages))
-            for p_cnt, page_text in enumerate(page_texts):
-                if page_text:
-                    print(f'\tPage {p_cnt+1}/{len(page_texts)}')
-                    self.store_data(page_text, v_args.import_pdf)
-                else:
-                    print(f'\tPage {p_cnt+1}/{len(page_texts)} blank')
+            self.store_data(page_texts, v_args.import_pdf)
         except pypdf.errors.PdfStreamError as e:
             print(f'Error loading PDF:\n\n\t{e}\n\nIs this a valid PDF?')
             sys.exit(1)

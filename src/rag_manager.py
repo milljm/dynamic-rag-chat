@@ -232,7 +232,8 @@ class RAG():
 
     def store_data(self, data,
                          tags_metadata: list[RAGTag[str,str|list]] = None,
-                         collection: str = '')->None:
+                         collection: str = '',
+                         quiet: bool = False)->None:
         """ store data into the RAG with optional metadata tagged with it """
         if not collection:
             collection = self.common.attributes.collections['ai']
@@ -253,8 +254,9 @@ class RAG():
             retriever.add_documents([doc])
         # pylint: disable=bare-except  # Sometimes this can fail for a variety of reasons
         except:
-            print(f'\nERROR STORING DATA:\n{data}\n\nTAGS:\n{meta_dict}\n\n'
-                  'Check for malformed TAGS (no list items is usually the culprit)')
+            if not quiet:
+                print(f'\nERROR STORING DATA:\n{data}\n\nTAGS:\n{meta_dict}\n\n'
+                    'Check for malformed TAGS (no list items is usually the culprit)')
         # pylint: enable=bare-except
 
     def delete_collection(self, source: str)->None:

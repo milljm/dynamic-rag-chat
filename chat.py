@@ -18,7 +18,6 @@
 #     "pypdf",
 #     "pytz",
 #     "pillow"
-#     "requests",
 #     "cloudscraper",
 #     "beautifulsoup4",
 #     "pygments",
@@ -42,7 +41,7 @@ import hashlib
 from dataclasses import dataclass, asdict
 from copy import deepcopy
 from typing import List, Optional
-import requests
+import posthog
 import cloudscraper
 from rich.console import Console
 from rich.theme import Theme
@@ -58,6 +57,7 @@ from src import CommonUtils, ChatOptions
 from src import ImportData
 from src import SceneManager
 from src import Orchestration
+posthog.disabled = True
 dark_rich_142_styles = {
     "markdown.h1": "bold #FFFFFF",
     "markdown.h2": "bold #CCCCCC",
@@ -489,11 +489,12 @@ class Chat():
         c_session = PromptSession()
         kb = KeyBindings()
         @kb.add('escape', 'enter')
-        def _(event):
+        def handle_submit(event):
             buffer = event.current_buffer
             buffer.validate_and_handle()
+
         @kb.add('enter')
-        def _(event):
+        def handle_newline(event):
             buffer = event.current_buffer
             buffer.insert_text('\n')
 
@@ -1154,22 +1155,22 @@ if __name__ == '__main__':
     try:
         if args.import_txt:
             if os.path.exists(args.import_txt):
-                import_data.store_text(args.import_txt)
+                import_data.store_text(args)
             else:
                 print(f'Error: The file at {args.import_txt} does not exist.')
                 sys.exit(1)
         if args.import_pdf:
             if os.path.exists(args.import_pdf):
-                import_data.extract_text_from_pdf(args.import_pdf)
+                import_data.extract_text_from_pdf(args)
             else:
                 print(f"Error: The file at {args.import_pdf} does not exist.")
                 sys.exit(1)
         if args.import_web:
-            import_data.extract_text_from_web(args.import_web)
+            import_data.extract_text_from_web(args)
             sys.exit(0)
         if args.import_dir:
             if os.path.exists(args.import_dir):
-                import_data.extract_text_from_dir(args.import_dir)
+                import_data.extract_text_from_dir(args)
                 sys.exit(0)
         chat = Chat(session, _opts)
         chat.chat()
