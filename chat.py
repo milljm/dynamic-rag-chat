@@ -1012,9 +1012,6 @@ def _add_arguments(parser: argparse.ArgumentParser, defaults, *, use_defaults: b
     behavior_args.add_argument('--use-rags', action='store_true', default=D('no_rags'),
                                help='Use RAGs regardless of assistant-mode.\n'
                                     'No effect when not also using assistant-mode.')
-    behavior_args.add_argument('--no-think-tag', action='store_true', default=D('no_think_tag'),
-                               help='Use this if your model fails to produce a <think> tag\n'
-                                    'before it begins reasoning.')
 
     # =========================================================================
     # GENERATION

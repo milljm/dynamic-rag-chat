@@ -23,6 +23,17 @@ from .model_orchestrator import Orchestration
 from .agent_tools import DuckDuckGoSearchTool
 from openai import APIError # For exception handling
 
+# REASONING/THINKING RE
+THINK_END_RE = re.compile(
+    r'</\s*(?:mm:)?(?:think|thinking|reasoning)\s*>',
+    re.IGNORECASE
+)
+
+THINK_START_RE = re.compile(
+    r'<\s*(?:mm:)?(?:think|thinking|reasoning)\s*>',
+    re.IGNORECASE
+)
+
 # pylint: disable=too-many-instance-attributes  # this is what a dataclass is for
 @dataclass
 class StreamState:
@@ -31,9 +42,7 @@ class StreamState:
     meta_capture: str = ''
     meta_brace_count: int = 0
     meta_hide_attempt_count: int = 0
-    meta_hiding: bool = False
     thinking: bool = False
-    no_think_bug: bool = False
     shadow_think: bool = False
     never_think: bool = False
     do_once: bool = False
@@ -49,7 +58,6 @@ class RenderWindowState:
     disable_thinking: bool
     no_rags: bool
     light_mode: bool
-    no_think_tag: bool
     completion_tokens: int
     syntax_theme: str
     context: ContextManager
@@ -121,7 +129,6 @@ class RenderWindow(PromptManager):
         self.console = console
         self.common = common
         self.opts = args
-        self.think_once = True
         self.thinking_chunk = ''
         self.ooc_response = ''
         self.llm = None
@@ -168,7 +175,6 @@ class RenderWindow(PromptManager):
             disable_thinking = args.disable_thinking,
             no_rags=args.no_rags,
             light_mode = args.light_mode,
-            no_think_tag = args.no_think_tag,
             completion_tokens = args.completion_tokens,
             syntax_theme = args.syntax_theme,
             context = context,
@@ -267,52 +273,43 @@ class RenderWindow(PromptManager):
         If `show` is False, replaces it with '' at start, then hides remaining.
         """
         stream = self.state.stream
-        content = str(chunk.content)
-        # print(f'DEBUG: think_once: {self.think_once},{stream.thinking} TOK:>{content}<')
-
-        # Return chunk immediately
-        if not self.think_once or stream.never_think:
+        if stream.never_think or show:
             return chunk
 
-        # End of thinking/reasoning
-        if (stream.thinking and ('think>' in content or 'thinking>' in content)
-            or stream.shadow_think and content):
-            self.common.save_thinking(self.thinking_chunk)
-            self.thinking_chunk = ''
-            stream.thinking = False
-            self.think_once = False
-            self.stop_thinking()
-            if stream.shadow_think:
-                stream.shadow_think = False
-                stream.do_once = False
-                return chunk
-            chunk.content = ''
-            return chunk
-
-        # Start of thinking/reasoning
-        if (not stream.thinking and
-            ('<think>' in content or '<thinking>' in content or 'think>' in content
-             or stream.no_think_bug)
-             or (not stream.shadow_think and content == '')):
-            if content == '':
+        is_start_tag = bool(THINK_START_RE.search(chunk.content))
+        is_end_tag   = bool(THINK_END_RE.search(chunk.content))
+        # -------- FIRST/(AND SHADOW LAST) REASON TOKEN DISCOVERY IF/ELIF
+        # First chunk has reasoning content: ('' || <*ing> || <*think>)
+        if not stream.thinking and (not chunk.content or is_start_tag):
+            if not chunk.content:
                 stream.shadow_think = True
-            stream.no_think_bug = False
             stream.thinking = True
             stream.do_once = True
             self.start_thinking()
+            self.thinking_chunk = ''
             chunk.content = ''
-            return chunk
 
-        # Catch-all first token. If not thinking on first token, then never try to think
-        elif not stream.thinking and not stream.never_think:
+        # While shadow thinking, the next non-empty chunk of any kind ends thinking
+        elif stream.shadow_think and chunk.content:
+            stream.thinking = False
             stream.never_think = True
-            return chunk
+            self.stop_thinking()
 
-        # Middle of thinking/reasoning
-        if stream.thinking and not stream.never_think:
-            chunk.content = content if show else ''
-            self.thinking_chunk += content
-            return chunk
+        # First token is non-thinking token. Prevent future thinking discovery.
+        elif not stream.thinking:
+            stream.never_think = True
+
+        # -------- WITHIN REASONING TOKENS
+        if stream.thinking and is_end_tag:
+            stream.never_think = True
+            stream.do_once = False
+            self.stop_thinking()
+            chunk.content = ''
+
+        # Reasoning chunk
+        elif stream.thinking and not stream.shadow_think:
+            self.thinking_chunk += str(chunk.content)
+            chunk.content = ''
 
         return chunk
 
@@ -555,7 +552,7 @@ class RenderWindow(PromptManager):
         stream = self.state.stream # shorthand
         if stream.thinking and self.state.verbose:
             chat_content = Text(current_stream, style=f'color({self.state.color})')
-        elif stream.do_once and (stream.thinking or stream.meta_hiding):
+        elif stream.do_once and stream.thinking:
             color = self.state.color-5 if self.state.light_mode else self.state.color
             chat_content = Text('Thinking...', style=f'color({color}')
         else:
@@ -566,13 +563,8 @@ class RenderWindow(PromptManager):
         """ Handle the Rich Live updating process """
         stream = self.state.stream   # shorthand
         context = self.state.context # shorthand
-        self.think_once = True
         stream.never_think = False
-
-        # pesky LLMs that have reasoning and don't generate a <think> token,
-        # yet generate an ending </think> token!
-        if self.opts.no_think_tag:
-            stream.no_think_bug = True
+        stream.shadow_think = False
 
         history = self.common.load_chat()
         pre_process_time = float(documents['pre_process_time'])

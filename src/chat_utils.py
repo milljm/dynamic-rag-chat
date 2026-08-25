@@ -98,7 +98,7 @@ class ChatOptions:
     presence_penalty: float = 0.2
     context_window: int = 32768
     disable_thinking: bool = False
-    no_think_tag: bool = False
+
     seed: Optional[str] = str(secrets.randbits(32))
 
     time_zone: str = 'GMT'
