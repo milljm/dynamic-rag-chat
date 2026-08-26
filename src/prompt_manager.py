@@ -13,13 +13,15 @@ class PromptManager():
     def __init__(self, console, current_dir, args: ChatOptions, prompt_model: str = 'default'):
         self.console = console
         self.assistant_prompt = args.assistant_mode
+        self.args = args
         self.debug = args.debug
+        self.prompt_model = prompt_model
         self.model = self._match_model(prompt_model)
         self.current_dir = current_dir
 
     def _match_model(self, model: str)->str:
         """ attempt to match model, default to 'default' """
-        if self.assistant_prompt:
+        if self.args.assistant_mode:
             return 'nostory'
         supported = ['gemma', 'llama', 'qwen', 'deepseek', 'mixtral']
         return next((x for x in supported if x in model.lower()), 'default')
@@ -30,6 +32,7 @@ class PromptManager():
         {key : value} pairs become self.key_* : contents-of-file
         file naming convention: {value}_system.md / {value}_human.md
         """
+        self.model = self._match_model(self.prompt_model)
         prompt_files = {
             'ooc_prompt'    :f'ooc_{self.model}',
             'pre_prompt'    :f'pre_conditioner_prompt_{self.model}',
@@ -48,6 +51,7 @@ class PromptManager():
 
     def get_prompt(self, path):
         """ Keep the prompts as files for easier manipulation """
+        self.model = self._match_model(self.prompt_model)
         if os.path.exists(path):
             with open(path, 'r', encoding='utf-8') as prompt:
                 return prompt.read()

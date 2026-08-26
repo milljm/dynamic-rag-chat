@@ -279,9 +279,12 @@ class CommonUtils():
                 sys.exit(1)
 
         # Session's Chat History dictionary
-        self.chat_history_session = {'default': [],
-                                    'assistant': [],
-                                    'current': 'default'}
+        self.chat_history_session = {'story': [],
+                                     'assistant': [],
+                                     'current': 'assistant' if args.assistant_mode else 'story',
+                                     'branch_modes': {},
+                                     'assistant_mode': args.assistant_mode,
+                                     }
         self.chat_history_session = self.load_chat()
 
         # Heat Map

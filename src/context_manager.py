@@ -258,7 +258,7 @@ class ContextManager(PromptManager):
         if self.opts.assistant_mode:
             branch = 'assistant'
         else:
-            branch = history.get('current', 'default')
+            branch = history.get('current', 'story')
         collection = f'{branch}_{collection}'
 
         # list_rag_tags: list[RAGTag] = self.common.get_tags(response)
@@ -598,7 +598,7 @@ class ContextManager(PromptManager):
             if self.opts.assistant_mode:
                 branch = 'assistant'
             else:
-                branch = history.get('current', 'default')
+                branch = history.get('current', 'story')
             collection_list = [self.common.attributes.collections[x] for
                                 x in self.common.attributes.collections]
 

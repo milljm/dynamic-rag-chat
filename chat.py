@@ -121,11 +121,19 @@ HELP_TEXT = (
 )
 
 # history migration helpers
+HISTORY_META_KEYS = frozenset({"current", "assistant_mode", "branch_modes"})
+
+
 def is_message_list(history_branch: list) -> bool:
     """Detect whether we are on the new format."""
     return (bool(history_branch)
             and isinstance(history_branch[0], dict)
             and "role" in history_branch[0])
+
+
+def is_history_branch(history: dict, name: str) -> bool:
+    """True when `name` is a real message-list branch, not metadata."""
+    return name not in HISTORY_META_KEYS and isinstance(history.get(name), list)
 
 
 def turn_count(messages: list) -> int:
@@ -291,7 +299,7 @@ class Chat():
         return documents, meta_data
 
     def _branch_exists(self, history, name):
-        return name in history and name != 'current'
+        return is_history_branch(history, name)
 
     def _slice_upto(self, lst, n):
         n = max(0, min(n, len(lst)))
@@ -585,46 +593,49 @@ class Chat():
                             history[self.chat_branch] = delete_last_turn(history[self.chat_branch])
                             self.session.common.save_chat(history)
                             self.session.renderer.clear_ooc()
-                            console.print("[green]Deleted last turn.[/green]", highlight=False)
+                            console.print('[green]Deleted last turn.[/green]', highlight=False)
                         except IndexError:
-                            console.print("[yellow]History empty.[/yellow]")
+                            console.print('[yellow]History empty.[/yellow]')
                         continue
 
-                    elif cmd == "turn":
+                    elif cmd == 'turn':
                         console.print(turn_count(history[self.chat_branch]))
                         continue
 
-                    elif cmd == "rewind":
+                    elif cmd == 'rewind':
                         try:
                             n = int(arg)
                             cur = history[self.chat_branch]
                             total = turn_count(cur)
                             if not (1 <= n <= total):
-                                console.print(f"[red]usage: \\rewind N  (1 ≤ N ≤ {total})[/red]")
+                                console.print(f'[red]usage: \\rewind N  (1 ≤ N ≤ {total})[/red]')
                                 continue
                             history[self.chat_branch] = slice_to_turn(cur, n)
                             self.session.common.save_chat(history)
-                            console.print(f"[green]Rewound to turn {n} of {total}.[/green]", highlight=False)
+                            console.print(f'[green]Rewound to turn {n} of {total}.[/green]',
+                                          highlight=False)
                             self.session.renderer.clear_ooc()
                         except ValueError:
-                            console.print("[red]usage: \\rewind N[/red]")
+                            console.print('[red]usage: \\rewind N[/red]')
                         continue
                     elif cmd == "dbranch":
                         if self.opts.assistant_mode:
-                            console.print("[red]Cannot manage branches in assistant mode[/red]")
+                            console.print('[red]Cannot manage branches in assistant mode[/red]')
                             continue
                         for branch in history.keys():
-                            if branch == 'current':
+                            if not is_history_branch(history, branch):
                                 continue
                             if arg == self.chat_branch:
-                                console.print("[red]Cannot delete current branch you are on. "
-                                              "Use '/reset' instead")
+                                console.print('[red]Cannot delete current branch you are on. '
+                                              'Use "/reset" instead')
                                 break
-                            if arg == 'default':
-                                console.print("[red]Cannot delete default branch.[/red]")
-                                break
-                            if arg == 'assistant':
-                                console.print("[red]Cannot delete assistant branch.[/red]")
+                            if arg in ['story',
+                                       'assistant',
+                                       'current',
+                                       'assistant_mode',
+                                       'branch_modes']:
+                                console.print(f'[red]Cannot delete {arg} branch.'
+                                              ' (protected)[/red]')
                                 break
                             if arg == branch and arg != 'current':
                                 history.pop(arg)
@@ -638,10 +649,10 @@ class Chat():
                                 # Delete Chroma collection corresponding to branch name
                                 self.session.rag.delete_collection(arg)
                                 self.session.common.save_chat(history)
-                                console.print(f"[green]Deleted: [/green]{arg}", highlight=False)
+                                console.print(f'[green]Deleted: [/green]{arg}', highlight=False)
                                 break
                         continue
-                    elif cmd == "reset":
+                    elif cmd == 'reset':
                         self.session.rag.delete_collection(self.chat_branch)
                         history[self.chat_branch] = []
                         for path in glob.glob(
@@ -653,9 +664,11 @@ class Chat():
                                       highlight=False)
                         self.session.common.save_chat(history)
                         continue
-                    elif cmd == "branch":
+                    elif cmd == 'branch':
                         if not arg:
-                            branches = sorted([k for k in history.keys() if k != 'current'])
+                            branches = sorted(
+                                [k for k in history.keys() if is_history_branch(history, k)]
+                            )
                             maxlen = max((len(n) for n in branches), default=0)
 
                             if self.chat_branch in branches:
@@ -663,24 +676,24 @@ class Chat():
                                 branches.insert(0, self.chat_branch)
 
                             for name in branches:
-                                count = int(len(history[name]) / 2)
+                                count = turn_count(history[name])
                                 preview = ""
                                 if count > 0:
-                                    last = history[name][-1].get("content", "")
+                                    last = history[name][-1].get('content', '')
                                     # collapse any newlines / excess whitespace
-                                    last = " ".join(last.split())
-                                    preview = last[:40] + ("…" if len(last) > 40 else "")
-                                    preview = f"[dim]{preview}[/dim]"
+                                    last = ' '.join(last.split())
+                                    preview = last[:40] + ('…' if len(last) > 40 else '')
+                                    preview = f'[dim]{preview}[/dim]'
 
                                 if name == self.chat_branch:
                                     console.print(
-                                        f"\t➡ [green]{name:<{maxlen}}[/green] : "
-                                        f"[{count:>3}] {preview}",
+                                        f'\t➡ [green]{name:<{maxlen}}[/green] : '
+                                        f'[{count:>3}] {preview}',
                                         highlight=False
                                     )
                                 else:
                                     console.print(
-                                        f"\t  {name:<{maxlen}} : [{count:>3}] {preview}",
+                                        f'\t  {name:<{maxlen}} : [{count:>3}] {preview}',
                                         highlight=False
                                     )
                             continue
@@ -688,19 +701,22 @@ class Chat():
                         # examples: "\branch testing@5" or just "\branch testing"
                         raw = arg.strip()
                         if self.opts.assistant_mode:
-                            console.print("[red]Not allowed while in assistant mode.[/red]",
+                            console.print('[red]Not possible while in assistant mode. If you wish '
+                                          'to use this feature,\nrun the streamlit version instead'
+                                          ':[/red]\n\n\tstreamlit run streamlit_chat.py -- '
+                                          '--assistant-mode',
                                           highlight=False)
                             continue
-                        if raw == "current" or raw == "" or raw == "assistant":  # guard
-                            console.print("[red]Invalid branch name.[/red]", highlight=False)
+                        if raw in ['current', 'assistant', 'assistant_mode', 'branch_modes']:
+                            console.print('[red]Invalid branch name.[/red]', highlight=False)
                             continue
 
-                        if "@" in raw:
-                            name, n_str = raw.split("@", 1)
+                        if '@' in raw:
+                            name, n_str = raw.split('@', 1)
                             try:
                                 cut = int(n_str)*2
                             except ValueError:
-                                console.print("[red]usage: \\branch NAME[@N][/red]",
+                                console.print('[red]usage: \\branch NAME[@N][/red]',
                                                highlight=False)
                                 continue
                         else:
@@ -709,12 +725,12 @@ class Chat():
                         # switching if it exists, else create from current up to cut (or full)
                         if self._branch_exists(history, name):
                             if name == self.chat_branch:
-                                console.print(f"[green]Already on branch:[/green] {name}",
+                                console.print(f'[green]Already on branch:[/green] {name}',
                                                highlight=False)
                             else:
                                 self.chat_branch = name
                                 history['current'] = name
-                                console.print(f"[green]Switched to :[/green] {name}",
+                                console.print(f'[green]Switched to :[/green] {name}',
                                                highlight=False)
                             self.session.common.save_chat(history)
                             continue
@@ -739,12 +755,11 @@ class Chat():
                                 self.session.rag.build_collection_from_texts(
                                     name, new_list, overwrite=True)
 
-                            console.print(f"[green]Branched to:[/green] {name}", highlight=False)
-                        # pylint: disable=broad-exception-caught
+                            console.print(f'[green]Branched to:[/green] {name}', highlight=False)
+                        # pylint: disable-next=broad-exception-caught
                         except Exception as e:
-                        # pylint: enable=broad-exception-caught
-                            console.print(f"[red]RAG sync failed for '{name}':[/red] "
-                                          f"{e}", highlight=False)
+                            console.print(f'[red]RAG sync failed for "{name}":[/red] '
+                                          f'{e}', highlight=False)
                             # optional: rollback history on failure
                             # history.pop(name, None)
                             # history['current'] = src
@@ -752,9 +767,9 @@ class Chat():
                             # self.session.common.save_chat()
                         # ----------------------------------------------------------------
                         continue
-                    elif cmd == "history":
+                    elif cmd == 'history':
                         try:
-                            n = int(arg or "5")
+                            n = int(arg or '5')
                         except ValueError:
                             n = 5
 
@@ -762,7 +777,7 @@ class Chat():
                         turns = get_last_n_turns(messages, n)
 
                         if not turns:
-                            console.print("[yellow]No history yet.[/yellow]")
+                            console.print('[yellow]No history yet.[/yellow]')
                             continue
 
                         # Calculate the starting turn number
@@ -772,28 +787,28 @@ class Chat():
                         for msg in turns:
                             if not isinstance(msg, dict):
                                 # fallback for any leftover old-format items
-                                console.print(f"\n\n{msg}")
+                                console.print(f'\n\n{msg}')
                                 continue
 
-                            role = msg.get("role", "?").lower()
-                            content = msg.get("content", "")
+                            role = msg.get('role', '?').lower()
+                            content = msg.get('content', '')
 
-                            if role == "user":
+                            if role == 'user':
                                 turn_num += 1
                                 console.print()
-                                console.print(f"[bold cyan]⬇  TURN {turn_num}  ⬇[/bold cyan]")
-                                console.print(f"[bold]USER:[/bold] {content}")
-                            elif role == "assistant":
-                                console.print(f"\n[bold]AI:[/bold] {content}")
+                                console.print(f'[bold cyan]⬇  TURN {turn_num}  ⬇[/bold cyan]')
+                                console.print(f'[bold]USER:[/bold] {content}')
+                            elif role == 'assistant':
+                                console.print(f'\n[bold]AI:[/bold] {content}')
                             else:
                                 # system / tool / etc.
-                                console.print(f"\n[dim]{role.upper()}:[/dim] {content}")
+                                console.print(f'\n[dim]{role.upper()}:[/dim] {content}')
 
                         console.print()  # trailing newline
                         continue
-                    elif cmd in ("no-context", "include", "agent"):
+                    elif cmd in ('no-context', 'include', 'agent'):
                         if not self.opts.assistant_mode:
-                            console.print("[red]Only available while in assistant mode.[/red]")
+                            console.print('[red]Only available while in assistant mode.[/red]')
                             continue
                     elif cmd in ('regenerate'):
                         try:
@@ -803,10 +818,10 @@ class Chat():
                             parsed = parse_user_input(match[0])
                             # pass
                         except IndexError:
-                            console.print("[yellow]History empty.[/yellow]")
+                            console.print('[yellow]History empty.[/yellow]')
                             continue
                     else:
-                        console.print(f"[red]Unknown command:[/red] \\{cmd}")
+                        console.print(f'[red]Unknown command:[/red] \\{cmd}')
                         continue
 
                 # Build documents (with or without context)
@@ -820,27 +835,27 @@ class Chat():
                 else:
                     documents, meta_data = self.get_documents(parsed.clean_text)
                 if not documents:
-                    console.print("[red]There was an error while running pre-processor work.[/red]"
-                                  "In many cases, re-submitting your query again solves the issue.")
+                    console.print('[red]There was an error while running pre-processor work.[/red]'
+                                  'In many cases, re-submitting your query again solves the issue.')
                     continue
 
-                if parsed.command == "include":
+                if parsed.command == 'include':
                     val = parsed.args
                     if val in history:
                         include_branch = ' '.join(history[val][-self.opts.history_sessions:])
                     else:
-                        console.print(f"[red]Unknown branch[/red] \\{val}")
+                        console.print(f'[red]Unknown branch[/red] \\{val}')
                         continue
                     documents['include_branch'] = str(include_branch)
 
-                if parsed.command == "agent":
+                if parsed.command == 'agent':
                     documents['use_agent'] = True
                     documents['agent_ran'] = False
 
                 # Add any inline includes as context (files/URLs)
                 if parsed.includes:
                     inc_docs = self.load_content_as_context(
-                        " ".join(f"{{{{{x}}}}}" for x in parsed.includes))
+                        ' '.join(f'{{{{{x}}}}}' for x in parsed.includes))
                     documents.update(inc_docs)
                     documents['user_query'] = f'{raw} \n\nattachments:{documents["user_query"]}'
 
@@ -856,10 +871,7 @@ class Chat():
 
 def seed_from_string(user_input: str) -> int:
     """ generate a valid 32bit int based on incoming text """
-    return int.from_bytes(
-        hashlib.sha256(user_input.encode("utf-8")).digest()[:4],
-        "big"
-    )
+    return int.from_bytes(hashlib.sha256(user_input.encode('utf-8')).digest()[:4], 'big')
 
 def verify_args(p_args):
     """ verify arguments are correct """

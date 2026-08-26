@@ -47,7 +47,7 @@ class StreamState:
     never_think: bool = False
     do_once: bool = False
     pulse_index: int = 0
-    pulsing_chars: list[str] = field(default_factory=lambda: ["⠇", "⠋", "⠙", "⠸", "⠴", "⠦"])
+    pulsing_chars: list[str] = field(default_factory=lambda: ['⠇', '⠋', '⠙', '⠸', '⠴', '⠦'])
 
 @dataclass
 class RenderWindowState:
@@ -474,11 +474,11 @@ class RenderWindow(PromptManager):
                           style=f'color({self.state.color})',
                           highlight=False)
 
+        documents['agent_error'] = 'FALSE'
         if self.orchestrator.requires_agent(meta_data, documents):
             # Let LangChain create the proper prompt template for the agent
             agent = create_openai_tools_agent(self.llm, self.agent_tools, self.agent_prompt)
             documents['agent_ran'] = True
-            documents['agent_error'] = 'FALSE'
             agent_executor = AgentExecutor(agent=agent, tools=self.agent_tools, verbose=False)
             try:
                 self.console.print('Agent Tool Web Search (ctl-c to cancel)...',
@@ -503,6 +503,7 @@ class RenderWindow(PromptManager):
                     )
                 documents['agent_error'] = 'TRUE'
                 return self.get_messages(meta_data, documents, polish=polish)
+        self.common.write_debug(f'live_stream-{self.llm.model_name}', messages)
         return messages
 
     # Stream response as chunks
@@ -578,7 +579,6 @@ class RenderWindow(PromptManager):
         messages = self.get_messages(meta_data, documents)
         # Run orchestrator again after grabbing messages (sets appropriate model after agent runs)
         self.llm = self.orchestrator.route(meta_data, documents)
-        self.common.write_debug(f'live_stream-{self.llm.model_name}', messages)
 
         pre_process_time += time.time()-start_time
         token_total = documents['prompt_tokens']
@@ -588,7 +588,7 @@ class RenderWindow(PromptManager):
         if self.opts.assistant_mode:
             branch = 'assistant'
         else:
-            branch = history.get('current', 'default')
+            branch = history.get('current', 'story')
         footer_meta = {'token_savings'   : documents['token_savings'],
                        'prompt_tokens'   : token_total,
                        'cleaned_color'   : documents['cleaned_color'],
@@ -707,72 +707,47 @@ class RenderWindow(PromptManager):
         stream = self.state.stream
         history = self.common.load_chat()
 
-        # ── Determine current branch ──────────────────────────────────────
-        if self.opts.assistant_mode:
-            branch = "assistant"
-        else:
-            branch = history.get("current_branch", "default")
-
-        # Make sure the branch exists.
-        if branch not in history:
+        # ── Resolve active branch (now branches work in both modes) ─────
+        branch = history.get('current', 'story')
+        if not isinstance(history.get(branch), list):
             history[branch] = []
 
-        # ── OOC handling ──────────────────────────────────────────────────
-        ooc_prefix = self.common.regex.ooc_prefix
+        # ── Persist mode metadata alongside the save ────────────────────
+        history["assistant_mode"] = bool(self.opts.assistant_mode)
+        history.setdefault('branch_modes', {})
+        history["branch_modes"][branch] = bool(self.opts.assistant_mode)
 
+        # ── OOC handling (unchanged) ─────────────────────────────────────
+        ooc_prefix = self.common.regex.ooc_prefix
         if ooc_prefix.search(current_response) or ooc_prefix.search(
             documents["user_query"]
         ):
             if not ooc_prefix.search(current_response):
                 self.console.print(
-                    "\nNOTE:\tBad LLM response. LLM ignored OOC request. "
-                    "This turn not saved.",
+                    "\nNOTE:\tBad LLM response. LLM ignored OOC request.",
                     style=f"color({self.state.color})",
-                    highlight=False,
                 )
                 return
-
             self.ooc_response = current_response
             return
 
-        # ── Context handling ─────────────────────────────────────────────
+        # ── Context handling (unchanged) ────────────────────────────────
         documents['llm_response'] = current_response
         self.state.context.handle_context(documents, direction="store")
-
-        # Sanitize before storing the response.
         current_response = self.common.sanitize_response(current_response)
 
         if self.state.disable_thinking:
-            documents["user_query"] = documents["user_query"].replace(
-                "</think>", ""
-            )
+            documents["user_query"] = documents["user_query"].replace("", "")
 
-        # ── Build messages ────────────────────────────────────────────────
-        history[branch].append({
-            "role": "user",
-            "content": documents["user_query"],
-        })
+        # ── Append user/assistant pair to active branch (unchanged) ─────
+        history[branch].append({"role": "user",      "content": documents["user_query"]})
+        history[branch].append({"role": "assistant", "content": current_response})
 
-        history[branch].append({
-            "role": "assistant",
-            "content": current_response,
-        })
-
-        # ── Bookkeeping ──────────────────────────────────────────────────
         stream.meta_capture = ""
-
         if self.debug:
-            self.console.print(
-                "DEBUG: saving to RAG...",
-                style=f"color({self.state.color})",
-                highlight=False,
-            )
+            self.console.print("DEBUG: saving to RAG...", highlight=False)
 
         self.common.save_chat(history)
 
         if self.debug:
-            self.console.print(
-                "DEBUG: live finished",
-                style=f"color({self.state.color})",
-                highlight=False,
-            )
+            self.console.print("DEBUG: live finished", highlight=False)

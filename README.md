@@ -1,95 +1,82 @@
 # 🧠 dynamic-rag-chat
 
-**A Terminal-first, orchestrated, context-aware chat system powered by LLMs, RAGs, and context management.**
-*Built for immersive role-playing with evolving memory and rich, relevant context.*
+**A terminal-first, orchestrated, context-aware chat system powered by LLMs, RAG, and a tagging pre-processor.**
+Built for long-running story work and a capable local assistant — with memory that actually persists.
 
-New: [Streamlit](https://streamlit.io/) capable (WIP)
-```pre
+Also ships a **Streamlit** UI (`streamlit_chat.py`) for the same backend.
+
+```bash
+# Terminal
+./chat.py --assistant-mode
+./chat.py                       # story mode
+
+# Streamlit (same flags after --)
 streamlit run streamlit_chat.py -- --assistant-mode
+streamlit run streamlit_chat.py
 ```
-*Note: Has only been tested in Assistant mode*
 
 ---
 
-## ✨ What is it?
+## What it is
 
-`dynamic-rag-chat` is a Terminal UI, open-source chat tool built around retrieval-augmented generation (RAG), using metadata field filtering and context tagging. A lightweight pre-conditioner extracts and tags relevant information based on the user's query, enabling a highly targeted context window. The resulting context is then routed to specialized LLMs based on the task at hand.
+Most chat UIs are a sliding token window. When the window fills, facts fall out or get invented.
 
-This allows the LLM to:
+`dynamic-rag-chat` keeps a tagged memory store next to the conversation:
 
-- Recall plot points, characters, and lore across long sessions
-- Provide narrative nuance often lost in general-purpose chat tools
-- Avoid clutter and hallucination while generating responses more quickly
+1. A **lightweight pre-conditioner** reads the turn and emits metadata tags (entities, topics, scene, whether to search the web, …).
+2. Those tags **field-filter** Chroma collections (user / AI / optional gold “canon”).
+3. Hits are mixed with **similarity + BM25 + parent-document** retrieval, then **deduped** against recent chat history.
+4. History itself is **staggered** (recent turns intact, older turns sampled with exponential decay).
+5. The resulting context is routed to the model that fits the job (story, coder, vision, agent, …).
 
-Perfect for storytelling, world-building, AI role-play, and narrative design — or just a powerful tool for tinkering with LLMs and RAGs.
+That is the whole product: targeted context, not a bigger window.
 
 ---
 
-## 🧩 Features (some of the following only work in either Assistant mode or Story mode)
+## Features
 
-- ⌨️ **Terminal-first UI**: Clean CLI using `prompt_toolkit` and `rich` (Markdown in Terminal)
-- 🔁 **Streaming responses**: Token-level generation, async-ready
-- 🧾 **Persistent chat history**: Your context survives between runs
-- 🧠 **Multiple RAGs**: Retrieval is triggered by user input and LLM output
-- ♻️ **Assistant Swap**: Switch between story-teller and assistant mode with an argument (In assistant mode, the chat behaves more like a utility tool, with vision and web-search agent support enabled.)
-- ✍️ **Pre-Processing Layer**: Lightweight LLM processes your query for real model orchestration (casual->general->coding->analysis)
-- ✍️ **Post-Processing Layer**: Lightweight LLM processes Heavyweight LLM's response for dynamic NPC character creation  (work in progress, sorta works. Could be better!)
-- 🧩 **Recursive RAG import**: Pre-populate your RAG with "Gold" documents or "Canon Lore" (Currently supports loading: `*.md *.html *.txt *.pdf *.template` files)
-- 🧪 **Debug mode**: View prompt assembly, RAG matches, and context composition, LLM raw output, etc
-- 🛠️ **Agents**: Based on your query, the Lightweight LLM will attempt to decide when to use an agent (threshold is user configurable). Or you can always force an agent web search with in-line commands (`\agent How are the stocks doing today`)
-- 📂 **Inline file & image context aware loading**:
-    The chat tool supports inline resource references, letting you embed files, images, or URL(s) content directly in your message using double braces:
+- **Terminal UI** — `prompt_toolkit` + `rich` (Markdown in the terminal, optional `--light-mode`)
+- **Streamlit UI** — branch cards, mode toggle, attachments, slash commands, reasoning panel (same `Chat` / `RenderWindow` stack)
+- **Streaming** — token-level generation
+- **Persistent history** — JSON on disk, role/content messages per branch
+- **Branches** — fork / switch / delete; RAG collections clone with the fork (`\branch`, `\dbranch`, or the Streamlit cards)
+- **Two flavors**
+  - **Story** — role-play prompts, scene grounding, optional NPC sheets + polisher
+  - **Assistant** — tool-style prompts, optional vision + web-search agent, RAG off unless you pass `--use-rags`
+- **Pre-processor** — lightweight LLM for tags *and* model routing (casual → general → coder → analysis)
+- **Optional post-process** — threaded RAG write-back; story mode can mint entity files
+- **Gold / canon import** — pre-load a read-oriented collection from `.md`, `.html`, `.txt`, `.pdf`, `.template`
+- **Inline context** — files, images, and URLs in the message:
+  ```text
+  Compare {{/home/user/a.txt}} and {{/home/user/b.txt}}
+  What is this? {{/Users/me/Pictures/tree.png}}
+  Summarize {{https://example.com/article}}
+  ```
+- **Agents** — pre-processor can request a web search (threshold via `--distrust-confidence`), or force it with `\agent …`
+- **Debug** — `--debug` / `--prompts-debug` dumps prompts, tags, and RAG payloads
 
-    ```text
-    images: {{/path/to/image.png}}
-    files: {{/path/to/textfile.txt}}
-    url: {{https://example.com}}
-    ```
+### In-line commands
 
-    Example:
-
-    ```text
-    Compare these two docs: {{/home/user/doc1.txt}} and {{/home/user/doc2.txt}}
-    What do you make of this photo? {{/Users/me/Pictures/tree.png}}
-    Summarize this page: {{https://somenewssite.com/article123}}
-    ```
-
-    Supported file types:
-
-    - ✅ `.txt`, `.md`, `.html`, `.pdf`
-    - ✅ `.png`, `.jpg`, `.jpeg` (base64 encoded and injected for vision models)
-    - ✅ URLs (scraped via BeautifulSoup for readable text)
-- ？**In-line commands**: An extensive in-line command system:
-```pre
->>> \?
-in-command switches you can use:
-
-        \regenerate                  - regenerate last turn
-        \no-context msg              - perform a query with no context
-        \agent msg                   - enable agent (web search)
-        \delete-last                 - delete last message from history
-        \turn                        - show turn/status
-        \rewind N                    - rewind to turn N (keep 0..N)
-        \branch NAME@N               - set/fork branch name, if empty list branches;
-                                       optional @N to fork from first N turns
-        \dbranch NAME                - delete chat history branch
-        \history [N]                 - show last N user inputs (default 5)
-        \include branch              - include branch as attachment
-        \reset                       - resets history/RAG for current branch
-
-context injection
-    {{/absolute/path/to/file}}       - include a file as context
-    {{https://somewebsite.com/}}     - include URL as context
-
-keyboard shortcuts (terminal):
-
-    Ctrl-W - delete word left of cursor
-    Ctrl-U - delete everything left of cursor
-    Ctrl-K - delete everything right of cursor
-    Ctrl-A - move to beginning of line
-    Ctrl-E - move to end of line
-    Ctrl-L - clear screen
+```text
+\?                          help
+\regenerate                 regenerate last turn
+\no-context msg             query with no RAG / history context
+\agent msg                  force web-search agent
+\delete-last                drop the last user+assistant pair
+\turn                       print current turn count
+\rewind N                   keep turns 1..N
+\branch                     list branches
+\branch NAME                switch or create a full fork
+\branch NAME@N              fork from the first N turns
+\dbranch NAME               delete a non-protected branch (+ its RAG)
+\include branch             attach another branch as context
+\reset                      wipe history + RAG for the current branch
+\history [N]                last N user inputs (default 5)
 ```
+
+Protected branch names: `story`, `assistant`. Metadata keys (`current`, `assistant_mode`, `branch_modes`) are not branches.
+
+Terminal shortcuts: Ctrl-W / U / K / A / E / L.
 
 <img width="764" alt="light_mode" src="https://github.com/user-attachments/assets/df7bd018-0354-45e7-8451-903d2834fcfd" />
 
@@ -97,94 +84,117 @@ https://github.com/user-attachments/assets/07976c98-3935-4b24-a1c0-e09dcd8bf07b
 
 ---
 
-## 🚀 Getting Started
+## How context is built
 
-### 🔧 Installation
+```
+[User input]
+  ↳ {{path}} / {{url}} / \agent
+        file → inject text
+        image → base64 for a vision route
+        URL → BeautifulSoup text
+        \agent → tool model web search
+     ↓
+[Pre-conditioner]  tags + route
+     ↓
+[RAG]  field filter → similarity → BM25 → parent docs
+     ↓
+[Context manager]  dedupe vs history, stagger old turns,
+                   scene / entity sheets (story), explicit flag
+     ↓
+[Routed generator]  vision / NSFW / coder / … / default story or assistant model
+     ↓
+[Optional polisher]  story mode only
+     ↓
+[Screen]
+     ↓  (background thread)
+[Write AI turn into the AI collection; maybe mint an NPC sheet]
+```
 
-The recommended setup is a Conda environment with `uv` for clean dependency management.
+### RAG layout (what the code actually does)
 
-> 🛑 You *can* use your system Python, but that’s a quick path to dependency conflicts. Don't do it.
+Each **branch** owns collections named `{branch}_user_documents` and `{branch}_ai_documents`. Story mode can also read an un-prefixed **gold** collection (import-only; not cloned on fork).
 
-1. Install [Miniforge](https://github.com/conda-forge/miniforge)
-2. Create your environment:
+Chunking is parent/child, not a single 100/50 split:
+
+| Mode      | Parent chunk / overlap / split | Child chunk / overlap / split |
+|-----------|--------------------------------|-------------------------------|
+| Story     | 1000 / 500 / `\n\n`            | 100 / 50 / `.`                |
+| Assistant | 2000 / 1000 / `\n\n`           | 1000 / 500 / `.`              |
+
+Retrieval is an ensemble (filter + similarity), then BM25 on that set, then parent-document expansion. Dedupe drops chunks that overlap history or each other (~65% containment).
+
+`--rag-matches 0` disables retrieval. Assistant mode **skips RAG unless `--use-rags`**.
+
+### Models
+
+**Required (3):**
+
+- Generation model (`--model`)
+- Pre-conditioner (`--pre-llm`)
+- Embeddings (`--embedding-llm`)
+
+**Optional routes** (only used if configured and the pre-processor / flags say so):
+
+- Vision, agent/web-search, casual, general, coder, structured
+- Story extras: polisher, NSFW, entity/NPC writer
+
+You do not need seven models running. Three is enough; the rest are sockets you can fill.
+
+---
+
+## Getting started
+
+### Install
+
+Conda + `uv` is the intended path. System Python will fight you.
 
 ```bash
 conda create -n dynamic-rag python=3.13 uv pip
 conda activate dynamic-rag
-```
-_you will need to activate this environment each time you wish to use this tool_
-
-_and then proceed to do the following_
-```bash
 git clone https://github.com/milljm/dynamic-rag-chat.git
 cd dynamic-rag-chat
 uv pip install -r requirements.txt
 ```
-*Reminder: you’ll need to `conda activate dynamic-rag` before using the tool each time.*
 
-### 🦙 Ollama (Recommended for Local Models)
+### Ollama (local models)
 
-This tool requires three LLMs at a minimum: a model for response generation, a pre-conditioner lightweight model for metadata tag extraction, and an embedding model for RAG work.
+You need a generator, a small pre-conditioner, and an embedding model.
 
-Install and run Ollama (via Conda or manual method):
-```bash
-conda activate dynamic-rag   # if not already active
-conda install ollama=0.24.0
-export OLLAMA_MAX_LOADED_MODELS=3
-ollama serve
-```
-*`OLLAMA_MAX_LOADED_MODELS=3` is encouraged, as this tool uses three+ models simultaneously*
-
-Note: You will need to launch Ollama each time you wish to use chat:
 ```bash
 conda activate dynamic-rag
+conda install ollama=0.24.0          # or install Ollama yourself
 export OLLAMA_MAX_LOADED_MODELS=3
 ollama serve
 ```
 
-Then, in another terminal (do only once):
+Other terminal, once:
+
 ```bash
-conda activate dynamic-rag   # if not already active
-ollama list  # Will either return all your hosted models, or nothing. But should NOT fail
+conda activate dynamic-rag
 ollama pull nomic-embed-text
-ollama pull gemma3:1b   # lightweight pre-processor model
-ollama pull gemma3:12b  # heavyweight model that should work on most hardware
+ollama pull gemma3:1b                # pre-processor
+ollama pull gemma3:12b               # generator that fits most boxes
 ```
 
-#### Experiment
+Then:
 
-There are thousands of models to choose from. I encourage you to experiment! Mix'n match, explore and have fun! Search the internet for Ollama library, or head on over to https://huggingface.co and begin your journey into LLMs. If you are already a fan of HuggingFace, I highly recommend using this chat tool with LM Studio instead of Ollama (more models to choose from).
-
-If you are interested in making full use of all capabilities, you'll want to look at `.chat.yaml.examples` for all the available model routes you can have this tool use simultaneously (model orchestration).
-
-#### ⚙️ Example usage
-
-Once Ollama is running, and you have pulled the default models above, launch `./chat.py` with the following arguments:
 ```bash
-conda activate dynamic-rag   # if not already active
-# Story Mode:
 ./chat.py \
-  --model gemma3-27b \
-  --pre-llm gemma3-1b \
-  --embedding-llm nomic-embed-text \
-  --model-server http://localhost:11434/v1
-
-# Assistant Mode:
-./chat.py \
-  --assistant-mode \
-  --model gemma3-27b \
-  --pre-llm gemma3-1b \
+  --model gemma3:12b \
+  --pre-llm gemma3:1b \
   --embedding-llm nomic-embed-text \
   --model-server http://localhost:11434/v1
 ```
-Use `./chat.py --help` to display all options.
-You can also configure arguments in .chat.yaml. See .chat.yaml.example for examples.
 
-### 🧠 Using OpenAI or ChatGPT
+Add `--assistant-mode` for the utility flavor. `./chat.py --help` lists every flag. Defaults can live in `.chat.yaml` (see `.chat.yaml.example`).
 
-If you have an OpenAI account (note: **not** https://chatgpt.com, but https://platform.openai.com), create a .chat.yaml like this:
+LM Studio works the same way — point `--model-server` at its OpenAI-compatible URL. Handy if you want Hugging Face weights Ollama does not ship.
 
-```pre
+### OpenAI for generation, local for the rest
+
+`.chat.yaml`:
+
+```yaml
 chat:
   model: gpt-4o
   llm_server: https://api.openai.com/v1
@@ -192,72 +202,19 @@ chat:
   pre_server: http://localhost:11434/v1
   embedding_llm: nomic-embed-text
   embedding_server: http://localhost:11434/v1
-  time_zone: 'America/Denver'
-  debug: False
+  time_zone: America/Denver
   name: Mr. Knowitall
   context_window: 16384
   api_key: YOUR_API_KEY
 ```
-The above will leverage the powerful GPT-4o model, while using your local machine to provide pre-processing and embeddings through Ollama. With the above set, you would simple run:
+
 ```bash
-conda activate dynamic-rag   # if not already active
+conda activate dynamic-rag
 ./chat.py
 ```
 
-### The orchestration process
+---
 
-```
-[User Input]
-     ↳ [Inline resource detected: {{/path/to/file}}, {{https://url}}, etc]
-          ↳ If text file: open and inject content into context
-          ↳ If image: base64-encode and embed for LLM vision support
-          ↳ If URL: fetch and extract readable text via BeautifulSoup
-          ↳ [If \agent: perform web search using dedicated Tool Model]
-     ↓
-[Pre-conditioner (Lightweight LLM extracts metadata tags, routes model)]
-     ↓
-[Metadata tags parsed → RAG retrieval: field-filtered, BM25, similarity matching]
-     ↓
-[Context Manager: RAG result deduplication, chat history, scene/meta injection]
-     ↳ [If Image detected: Use dedicated Vision Model to produce response]
-     ↳ [If content rating is NSFW: use dedicated NSFW Model]
-     ↳ [Else: Heavyweight LLM Generates Response]
-          ↓
-[If Polisher enabled - post-process output for better prose (story mode only)]
-     ↓
-[Output to Screen]
-     ↓ ↳ (threaded non-blocking: RAG collections updated / NPC character sheet creation)
-[User Input]
-```
+## Why this exists
 
-This tool can be configured to use up to 7 different models, for different tasks:
-Story Mode (5 models involved):
-- Pre-conditioner (Metadata/RAG):
-     - SFW or NSFW
-     - Polisher
-- Post-Process:
-     -  RAG updated (Metadata/RAG)
-     -  NPC character sheet creation
-
-Assistant Mode (7 models involved):
-- Pre-conditioner (Metadata/RAG, Model Routing (Orchestration)):
-     - Agent Tool (web search)
-     - Vision
-     - Casual
-     - General
-     - Coder
-     - Structured
-- Post-Process (RAG updated)
-
-### ❓ Why Use This
-
-Most chat tools treat conversation as a sliding window of tokens. Once the window fills, memory collapses, the model forgets key facts, or worse: invents new ones you never discussed...
-
-I wanted to create a tool that basically felt like talking to world-class tools such as ChatGPT, Grok, etc, which makes use of RAGs and multiple LLMs to achieve specialized relevant output on my own personal device.
-
-- RAG Uses 100/50 '.' split chunking for high-granularity tagging suitable for chatting/story telling
-     - Both USER and AI utilize their own RAG.
-     - RAGs are maintained dynamically (\branch cool_story_so_far) will copy existing RAG artifacts into a new RAG collection as you branch (fork) from a current conversation.
-- Employs preconditioned filtering to keep only high-value content for a pruned healthy context token count. (deduplication/fuzzy match removal)
-- Utilizes multiple LLMs for their individual strengths (model orchestration).
-
+Sliding-window chats forget or hallucinate once the window is full. This tool keeps **user** and **AI** memory in separate, tagged collections, prunes duplicates, and only pulls what the pre-processor tagged as relevant — so a 12B local model can stay coherent across a long story or a working assistant session on one machine.
