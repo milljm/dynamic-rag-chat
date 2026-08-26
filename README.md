@@ -3,6 +3,12 @@
 **A Terminal-first, orchestrated, context-aware chat system powered by LLMs, RAGs, and context management.**
 *Built for immersive role-playing with evolving memory and rich, relevant context.*
 
+New: [Streamlit](https://streamlit.io/) capable (WIP)
+```pre
+streamlit run streamlit_chat.py -- --assistant-mode
+```
+*Note: Has only been tested in Assistant mode*
+
 ---
 
 ## ✨ What is it?

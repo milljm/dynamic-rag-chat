@@ -25,6 +25,7 @@
 #     "duckduckgo-search",
 #     "ddgs",
 #     "langchain-tavily",
+#     "streamlit",
 # ]
 # ///
 import os
@@ -232,6 +233,13 @@ class Chat():
         elif opts.no_rags and opts.assistant_mode:
             console.print('[italic dim grey30]Assistant mode enabled.[/]')
 
+    def prepare_turn(self, raw_user_input: str):
+        """
+        Returns everything Streamlit needs for one turn.
+        """
+        documents, meta_data = self.get_documents(raw_user_input)
+        return documents, meta_data
+
     def _branch_exists(self, history, name):
         return name in history and name != 'current'
 
@@ -400,9 +408,13 @@ class Chat():
                     icon = "🌍"
                 elif mime == 'text':
                     icon = "📄"
-                with open(included_file, 'r', encoding='utf-8') as f:
-                    data = f.read()
+                data = self._process_text(included_file)
         return data, icon
+
+    def _process_text(self, included_file: str):
+        with open(included_file, 'r', encoding='utf-8') as f:
+            data = f.read()
+        return data
 
     def _process_image(self, included_file: str, _format: str) -> tuple:
         """Process image files."""

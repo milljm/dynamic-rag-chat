@@ -2,6 +2,7 @@
 from dataclasses import dataclass, field
 import time
 import re
+import traceback
 from datetime import datetime
 from threading import Thread
 from rich.live import Live
@@ -21,7 +22,6 @@ from .context_manager import ContextManager # For Type Hinting
 from .chat_utils import CommonUtils, ChatOptions, RAGTag # For Type Hinting
 from .model_orchestrator import Orchestration
 from .agent_tools import DuckDuckGoSearchTool
-from openai import APIError # For exception handling
 
 # REASONING/THINKING RE
 THINK_END_RE = re.compile(
@@ -478,6 +478,7 @@ class RenderWindow(PromptManager):
             # Let LangChain create the proper prompt template for the agent
             agent = create_openai_tools_agent(self.llm, self.agent_tools, self.agent_prompt)
             documents['agent_ran'] = True
+            documents['agent_error'] = 'FALSE'
             agent_executor = AgentExecutor(agent=agent, tools=self.agent_tools, verbose=False)
             try:
                 self.console.print('Agent Tool Web Search (ctl-c to cancel)...',
@@ -505,10 +506,9 @@ class RenderWindow(PromptManager):
         return messages
 
     # Stream response as chunks
-    def stream_response(self, messages: Document):
-        """ Parse LLM Prompt """
+    def stream_response(self, messages: Document)->object:
+        """ Invoke LLM and stream response """
         for chunk in self.llm.stream(messages):
-            chunk = self.reveal_thinking(chunk, self.state.verbose)
             yield chunk
 
     def render_footer(self, time_taken: float = 0, generation_time: float = 0, **kwargs) -> Text:
@@ -559,19 +559,21 @@ class RenderWindow(PromptManager):
             chat_content = Markdown(current_stream, code_theme=self.state.syntax_theme)
         return chat_content
 
+    def set_llm(self, meta_data: RAGTag, documents: dict)->None:
+        """ Run Orchestrator to properly, globally set LLM """
+        self.llm = self.orchestrator.route(meta_data, documents)
+
     def live_stream(self, documents: dict, meta_data: RAGTag)->None:
         """ Handle the Rich Live updating process """
         stream = self.state.stream   # shorthand
         context = self.state.context # shorthand
         stream.never_think = False
         stream.shadow_think = False
-
         history = self.common.load_chat()
         pre_process_time = float(documents['pre_process_time'])
         start_time = time.time()
 
         # Grab suitable llm model from orchestrator (sets agent tool if needed)
-        documents['agent_error'] = 'FALSE'
         self.llm = self.orchestrator.route(meta_data, documents)
         messages = self.get_messages(meta_data, documents)
         # Run orchestrator again after grabbing messages (sets appropriate model after agent runs)
@@ -617,6 +619,7 @@ class RenderWindow(PromptManager):
             self.start_namepulse()
             try:
                 for piece in self.stream_response(messages):
+                    piece = self.reveal_thinking(piece, self.state.verbose)
                     if start_time == 0:
                         start_time = time.time()
                     current_response += piece.content
@@ -642,17 +645,14 @@ class RenderWindow(PromptManager):
                     self.renderable.assistant = Text(documents["name"],
                                                     style=f'bold color({name_color})')
                     self.render_chat(live)
+            # pylint: disable-next=broad-exception-caught  # too many ways for LLMs to fail
             except Exception as e:
                 error_text = (
                     f"**LLM Error**: {e}\n\nThe model backend may need to be reloaded.")
-
                 self.renderable.response = self.build_content(error_text)
                 self.render_chat(live)
-
                 if self.state.debug:
-                    import traceback
                     traceback.print_exc()
-
                 return
 
             # Polisher + polishing cnt
@@ -669,6 +669,7 @@ class RenderWindow(PromptManager):
                     messages = self.get_messages(meta_data, documents, polish=True)
                     current_response = ''
                     for piece in self.stream_response(messages):
+                        piece = self.reveal_thinking(piece, self.state.verbose)
                         current_response += piece.content
                         footer_meta['token_count'] += self.response_count(piece.content)
                         if int(self.opts.polisher_cnt) == pass_num+1:
@@ -697,14 +698,20 @@ class RenderWindow(PromptManager):
         # Do not save any output if \no-context was used
         if documents.get('no_context', False):
             return
+        return self.save_response(documents, current_response)
 
-        # Finish by saving chat history, finding and storing new RAG/Tags or
-        # llm_prompt changes, then reset it.
+    def save_response(self, documents: dict, current_response: str)->None:
+        """ Save Turn """
+        stream = self.state.stream
+        history = self.common.load_chat()
+        if self.opts.assistant_mode:
+            branch = 'assistant'
+        else:
+            branch = history.get('current', 'default')
+
         if self.debug and self.state.no_rags and self.state.assistant_mode:
             self.console.print(f'DEBUG: storing meta\n{stream.meta_capture}\n\n',
                                 style=f'color({self.state.color})',highlight=False)
-        # current_response += f'\n\n{stream.meta_capture}'
-
         # Attache OOC's response for next system/human prompt message usage
         ooc_prefix = self.common.regex.ooc_prefix  # shorthand
         if ooc_prefix.search(current_response) or ooc_prefix.search(documents['user_query']):
