@@ -17,14 +17,13 @@ from chat import (Chat,
                   ChatOptions,
                   parse_args,
                   seed_from_string)
-from src .chat_utils import RAGTag
+from src.chat_utils import RAGTag
 
-# REASONING/THINKING RE
+# ── Reasoning/Thinking RE ─────────────────────────────────────────
 THINK_END_RE = re.compile(
     r'</\s*(?:mm:)?(?:think|thinking|reasoning)\s*>',
     re.IGNORECASE
 )
-
 THINK_START_RE = re.compile(
     r'<\s*(?:mm:)?(?:think|thinking|reasoning)\s*>',
     re.IGNORECASE
@@ -35,7 +34,7 @@ SHADOW_THINK = False
 
 @dataclass
 class StreamMetrics:
-    """ model performance object data """
+    """ Model performance object data """
     model: str = ""
     token_count: int = 0
     generation_time: float = 0.0
@@ -43,13 +42,14 @@ class StreamMetrics:
     prompt_tokens: int = 0
     token_savings: int = 0
     pre_process_time: float = 0.0
+    ttft: float = 0.0  # time to first token
 
 console = Console(highlight=True)
 current_dir = os.path.dirname(os.path.abspath(__file__))
 
-
+# ── Session Init ───────────────────────────────────────────────────
 @st.cache_resource
-def get_chat_session()->Chat:
+def get_chat_session() -> Chat:
     """ Instantiate Chat """
     opts = ChatOptions.from_yaml(current_dir)
     args = parse_args(sys.argv[1:], opts)
@@ -61,9 +61,8 @@ def get_chat_session()->Chat:
 def call_llm_stream(o_renderer,
                     o_documents: dict,
                     o_meta: RAGTag,
-                    o_metrics: StreamMetrics)->Generator:
+                    o_metrics: StreamMetrics) -> Generator:
     """Stream LLM response and collect performance metrics."""
-
     o_renderer.set_llm(o_meta, o_documents)
     messages = o_renderer.get_messages(o_meta, o_documents)
 
@@ -72,99 +71,84 @@ def call_llm_stream(o_renderer,
     o_metrics.token_savings = o_documents["token_savings"]
 
     start_time = time.time()
+    first_token_flag = True
 
     for token in o_renderer.stream_response(messages):
+        if first_token_flag:
+            o_metrics.ttft = time.time() - start_time
+            first_token_flag = False
+
         o_metrics.token_count += o_renderer.response_count(token.content)
         yield token
 
     o_metrics.generation_time = time.time() - start_time
 
-def save_messages(o_renderer: Chat,
-                  o_documents: dict,
-                  response: str)->None:
+def save_messages(o_renderer: Chat, o_documents: dict, response: str) -> None:
     """ Save Turn """
-    # pylint: disable-next=global-statement
     global NEVER_THINK, SHADOW_THINK, IS_THINKING
     IS_THINKING = False
     NEVER_THINK = False
     SHADOW_THINK = False
     o_renderer.save_response(o_documents, response)
 
-def get_history(o_chat: Chat)->list:
-    """ return chat history """
+def get_history(o_chat: Chat) -> list:
+    """ Return chat history """
     o_history = o_chat.session.common.load_chat()
-    if o_chat.opts.assistant_mode:
-        branch = 'assistant'
-    else:
-        branch = o_history.get('current', 'default')
+    branch = 'assistant' if o_chat.opts.assistant_mode else o_history.get('current', 'default')
     return o_history[branch]
 
-def is_thinking(o_chunk)->bool:
+def is_thinking(o_chunk) -> bool:
     """ Return whether or not model is reasoning/thinking """
-    # pylint: disable-next=global-statement
     global NEVER_THINK, SHADOW_THINK, IS_THINKING
     if NEVER_THINK:
         return False
 
     is_start_tag = bool(THINK_START_RE.search(o_chunk.content))
     is_end_tag   = bool(THINK_END_RE.search(o_chunk.content))
-    # -------- FIRST/(AND SHADOW LAST) REASON TOKEN DISCOVERY IF/ELIF
-    # First chunk has reasoning content: ('' || <*ing> || <*think>)
+
     if not IS_THINKING and (not o_chunk.content or is_start_tag):
         if not o_chunk.content:
             SHADOW_THINK = True
         IS_THINKING = True
 
-    # While shadow thinking, the next non-empty chunk of any kind ends thinking
     elif SHADOW_THINK and o_chunk.content:
         IS_THINKING = False
         NEVER_THINK = True
         return False
 
-    # First token is a non-thinking token. Prevent future thinking discovery.
     elif not IS_THINKING:
         NEVER_THINK = True
         return False
 
-    # -------- MODEL IS IN THE MIDDLE OF REASONING (we are looking for a is_end_tag)
     if IS_THINKING and is_end_tag:
         NEVER_THINK = True
         return False
+
     return True
 
-
-# pylint: disable=redefined-outer-name   # this is desired behavior in this case
+# ── Attachment Handler (Streamlit-only) ───────────────────────────
 def handle_attachments(documents: dict) -> dict:
-    """Process attachments from session state and add to documents.
-
-    Modifies documents in-place: adds base64-encoded images to 'dynamic_images',
-    appends extracted text from PDFs/text files to 'dynamic_files'.
-    """
-
+    """Process attachments from session state and add to documents."""
     if "attachments" not in st.session_state or not st.session_state.attachments:
         return documents
 
-    # Ensure target keys exist
     if "dynamic_images" not in documents:
         documents["dynamic_images"] = []
     if "dynamic_files" not in documents:
         documents["dynamic_files"] = ""
 
     for attachment in st.session_state.attachments:
-        name = attachment.get("name", "unknown")
+        name     = attachment.get("name", "unknown")
         mime_type = attachment.get("type", "")
         data_bytes = attachment.get("data", b"")
 
-        # ── Image processing ───────────────────────────────────────────
         if mime_type.startswith("image/"):
-            # Infer format from MIME or filename extension
             fmt = mime_type.split("/")[-1].upper()
             if fmt == "JPEG":
                 fmt = "JPEG"
             elif fmt == "PNG":
                 fmt = "PNG"
             else:
-                # Fallback: guess from filename
                 ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
                 fmt = ext.upper() if ext in ("jpg", "jpeg", "png") else "PNG"
 
@@ -177,9 +161,7 @@ def handle_attachments(documents: dict) -> dict:
 
             documents["dynamic_images"].append(b64_data)
 
-        # ── PDF processing ─────────────────────────────────────────────
         elif mime_type == "application/pdf":
-            # Write bytes to temp file for PyPDFLoader
             with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
                 tmp.write(data_bytes)
                 temp_path = tmp.name
@@ -190,159 +172,203 @@ def handle_attachments(documents: dict) -> dict:
                     pages.append(page)
                 text_content = "".join(doc.page_content for doc in pages)
             finally:
-                os.unlink(temp_path)  # clean up even on failure
+                os.unlink(temp_path)
+
             documents["dynamic_files"] += f"\n--- {name} ---\n\n{text_content}\n\n"
 
-        # ── Text/code file processing ───────────────────────────────────
         else:
             try:
                 text_content = data_bytes.decode("utf-8")
             except UnicodeDecodeError:
                 try:
                     text_content = data_bytes.decode("latin-1")
-                # pylint: disable-next=broad-exception-caught   # specifics being handled
                 except Exception:
                     text_content = "<binary content, could not decode>"
 
             documents["dynamic_files"] += f"\n--- {name} ---\n\n{text_content}\n\n"
 
     return documents
-# pylint: enable=redefined-outer-name
 
-# ──────────────────────────────────────────────────────────────
-# Streamlit UI
-# ──────────────────────────────────────────────────────────────
+# ── Streamlit UI ───────────────────────────────────────────────────
 chat: Chat = get_chat_session()
 renderer = chat.session.renderer
 
-
 st.html("""
 <style>
-[data-testid="stChatInput"] div:first-child {
+/* ── Kill all borders and shadows on st.chat_input ───────────────── */
+[data-testid="stChatInput"] {
     border: none !important;
     box-shadow: none !important;
     outline: none !important;
 }
-[data-testid="stChatInput"]:focus-within {
+
+[data-testid="stChatInput"] > div {
     border: none !important;
     box-shadow: none !important;
 }
-/* iMessage layout: user on right, assistant on left */
-[data-testid="stChatMessageContent"]:has([data-testid="stAvatar"]) {
-    display: flex !important;
+
+/* Kill the focus-induced red ring */
+[data-testid="stChatInput"]:focus-within,
+[data-testid="stChatInput"]:focus {
+    border: none !important;
+    box-shadow: none !important;
+    outline: none !important;
 }
 
-/* user messages → right side */
-.user-message [data-testid="stChatMessageContent"] {
-    justify-content: flex-end !important;
+/* Target the inner input element */
+[data-testid="stChatInput"] input {
+    border: none !important;
+    outline: none !important;
 }
 
-/* assistant messages → left side */
-.assistant-message [data-testid="stChatMessageContent"] {
-    justify-content: flex-start !important;
+/* ── Chat layout ────────────────────────────────────────────────── */
+[data-testid="stHorizontalBlock"] {
+    gap: 0;
+}
+
+[data-testid="stChatMessageContent"] {
+    border-radius: 0;
+    background: transparent !important;
+    box-shadow: none;
+}
+
+[data-testid="stChatMessage"] {
+    padding: 2px 0;
+}
+
+/* ── Message bubbles ────────────────────────────────────────────── */
+.user-bubble {
+    background: #1a1a2e !important;
+    border-radius: 18px 18px 4px 18px;
+    padding: 12px 16px;
+    max-width: 75%;
+}
+
+.assistant-bubble {
+    background: #252525 !important;
+    border-radius: 18px 18px 18px 4px;
+    padding: 12px 16px;
+    max-width: 75%;
+}
+
+/* ── Custom sticky title ────────────────────────────────────────── */
+.custom-chat-title {
+    font-size: 1.4rem;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+    position: sticky;
+    top: 0;
+    background: inherit;
+    z-index: 10;
 }
 </style>
 """)
 
-st.set_page_config(page_title="LLM Chat", page_icon="💬", layout="wide")
-st.title("Dynamic RAG Chat")
+st.markdown(
+    "<h3 class='custom-chat-title'>Dynamic RAG Chat</h3>",
+    unsafe_allow_html=True,
+)
+st.set_page_config(page_title="Dynamic RAG Chat", page_icon="💬", layout="wide")
+#st.title("Dynamic RAG Chat")
 
-# ── Sidebar: Attachment Zone ──────────────────────────────────────
-st.sidebar.header("Attachments")
-
+# ── Sidebar: Attachments + Metrics ────────────────────────────────
+st.sidebar.header("📎 Attachments")
 uploaded_files = st.sidebar.file_uploader(
     "Attach files",
     type=["png", "jpg", "jpeg", "pdf", "txt", "py"],
     help="Attach images, PDFs, or text files to your message",
 )
 
-# Store attachments in session state so they persist across reruns
 if uploaded_files:
-    # Normalize: single file → wrap in list
     if not isinstance(uploaded_files, list):
         uploaded_files = [uploaded_files]
-
     st.session_state.attachments = [
         {"name": f.name, "type": f.type, "data": f.getvalue()}
         for f in uploaded_files
     ]
 else:
-    # Ensure no stale attachments
     st.session_state.attachments = []
 
 # Initialize chat history
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Display previous messages
+# Render existing history
 for msg in st.session_state.messages:
+    css_class = "user-bubble" if msg["role"] == "user" else "assistant-bubble"
     with st.chat_message(msg["role"]):
-        # Attachment chips
         if msg.get("attachments"):
             for fdata in msg["attachments"]:
                 st.markdown(f"📎 **{fdata.get('name', 'attached')}**")
-        # Reasoning expander
         if "reasoning" in msg and msg["reasoning"]:
-            with st.expander("Reasoning", expanded=False):
+            with st.expander("🤭 Reasoning"):
                 st.markdown(msg["reasoning"])
-        # Content
         st.markdown(msg["content"])
 
+# ── Input & Streaming ─────────────────────────────────────────────
 if prompt := st.chat_input("Type your message…"):
+
     with st.chat_message("user"):
         st.markdown(prompt)
-    # Show attached file chips alongside the user's message
+
+    # Attachments for this turn
     if st.session_state.attachments:
-        for f in st.session_state.attachments:  # uploaded_files still exists in this branch
+        for f in st.session_state.attachments:
             st.markdown(f"📎 **{f['name']}**")
-    # Append user message WITH attachments attached
+
+    # Store user message
     st.session_state.messages.append({
         "role": "user",
         "content": prompt,
         "attachments": st.session_state.attachments,
     })
+
     documents, meta_data = chat.prepare_turn(prompt)
     documents = handle_attachments(documents)
 
     with st.chat_message("assistant"):
         history = get_history(chat)
-        thinking_indicator = st.empty()
-        thinking_indicator.markdown("**Processing Prompt…**")
-        answer_container = st.empty()
-        reasoning_buffer = ""
         metrics = StreamMetrics()
         metrics.turn_count = len(history)
+
+        thinking_indicator = st.empty()
+        answer_container   = st.empty()
+        reasoning_buffer   = ""
+
         stream = call_llm_stream(renderer, documents, meta_data, metrics)
         full_response = ""
+
         for chunk in stream:
             if is_thinking(chunk):
                 reasoning_buffer += chunk.content
             else:
                 full_response += chunk.content
+
             answer_container.markdown(full_response)
 
-            # ── Sidebar indicator (shows only while reasoning) ───────────
             if is_thinking(chunk):
-                thinking_indicator.markdown(f"🤔 **Reasoning… [{renderer.llm.model_name}]**"
-                                            "\n\n_Pausing output_")
+                thinking_indicator.markdown(
+                    f"🤔 **Reasoning…**\n`{metrics.model}`"
+                )
             else:
                 thinking_indicator.empty()
 
-        # ── Final render — expander with full reasoning block ───────────
+        # Expander for full reasoning block
         if reasoning_buffer:
-            # Clean up the ephemeral indicator
             thinking_indicator.empty()
-
-            with st.expander("🤔 Reasoning", expanded=False):
+            with st.expander("🤭 Reasoning"):
                 st.markdown(reasoning_buffer)
 
-        # Post-stream metrics
+        # tokens per second — generation only (post-TTFT)
+        gen_duration = metrics.generation_time - metrics.ttft
+        tps = metrics.token_count / gen_duration if gen_duration > 0 else 0
+
         st.caption(
-            f"Turn: {metrics.turn_count} • "
-            f"{metrics.model} • "
-            f"{metrics.generation_time:.2f}s • "
-            f"Tokens: {metrics.token_count} • "
-            f"{metrics.token_count / metrics.generation_time:.1f} T/s"
+            f"⏱ TTFT: {metrics.ttft:.2f}s | "
+            f"Gen: {gen_duration:.2f}s | "  # <-- shows gen time ex-TTFT
+            f"Tokens: {metrics.token_count} | "
+            f"{tps:.1f} T/s | "             # <-- accurate now
+            f"`{metrics.model}`"
         )
 
     # Save after streaming completes
