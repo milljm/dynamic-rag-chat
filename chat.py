@@ -120,6 +120,56 @@ HELP_TEXT = (
     "    [yellow]Ctrl-L[/yellow] - clear screen\n"
 )
 
+# history migration helpers
+def is_message_list(history_branch: list) -> bool:
+    """Detect whether we are on the new format."""
+    return (bool(history_branch)
+            and isinstance(history_branch[0], dict)
+            and "role" in history_branch[0])
+
+
+def turn_count(messages: list) -> int:
+    """Number of complete user turns."""
+    if not messages:
+        return 0
+    if is_message_list(messages):
+        return sum(1 for m in messages if m.get("role") == "user")
+    return len(messages)  # old format
+
+
+def get_last_n_turns(messages: list, n: int) -> list:
+    """Return the last n complete turns (user + assistant pairs)."""
+    if not messages:
+        return []
+    if is_message_list(messages):
+        # take last 2*n messages, but never go past the beginning
+        return messages[-(n * 2):]
+    return messages[-n:]
+
+
+def slice_to_turn(messages: list, turn_n: int) -> list:
+    """Keep only the first `turn_n` turns (1-based)."""
+    if not messages:
+        return []
+    if is_message_list(messages):
+        return messages[:turn_n * 2]
+    return messages[:turn_n]
+
+
+def delete_last_turn(messages: list) -> list:
+    """Remove the last complete turn."""
+    if not messages:
+        return messages
+    if is_message_list(messages):
+        # remove last assistant + last user (if present)
+        if messages and messages[-1].get("role") == "assistant":
+            messages.pop()
+        if messages and messages[-1].get("role") == "user":
+            messages.pop()
+        return messages
+    messages.pop()
+    return messages
+
 @dataclass
 class ParsedInput:
     """ In-line command options dataclass """
@@ -220,17 +270,17 @@ class Chat():
 
     def _initialize_startup_tasks(self):
         """ run startup routines """
-        opts = self.opts # shorthand
-        if opts.debug:
+        o_opts = self.opts # shorthand
+        if o_opts.debug:
             console.print('[italic dim grey30]Debug mode enabled. I will re-read the '
                                'prompt files each time.[/]')
-        elif opts.prompts_debug:
+        elif o_opts.prompts_debug:
             console.print('[italic dim grey30]prompts-debug enabled. I will re-read the '
                                'prompt files each time.[/]')
-        if opts.assistant_mode and not opts.no_rags:
+        if o_opts.assistant_mode and not o_opts.no_rags:
             console.print('[italic dim grey30]Assistant mode enabled. RAGs disabled'
                           ' (--use-rags to enable).[/]')
-        elif opts.no_rags and opts.assistant_mode:
+        elif o_opts.no_rags and o_opts.assistant_mode:
             console.print('[italic dim grey30]Assistant mode enabled.[/]')
 
     def prepare_turn(self, raw_user_input: str):
@@ -301,14 +351,14 @@ class Chat():
         documents = dict()
         pre_process_time = time.time()
         history = self.session.common.load_chat()
-        previous = history[self.chat_branch][-2:-1:]
+        prev_msgs = get_last_n_turns(history[self.chat_branch], 1)
         documents.update(
             {'user_query'         : user_input,
              'model'              : self.opts.model,
              'dynamic_files'      : '',
              'include_branch'     : '',
              'dynamic_images'     : [],
-             'turn_num'           : len(history[self.chat_branch])+1,
+             'turn_num'           : turn_count(history[self.chat_branch]) + 1,
              'history_sessions'   : self.opts.history_sessions,
              'name'               : self.opts.name,
              'user_name'          : self.opts.user_name,
@@ -320,7 +370,7 @@ class Chat():
              'date_time'          : self.session.common.get_time(self.opts.time_zone),
              'pre_process_time'   : pre_process_time,
              'light_mode'         : self.set_lightmode_aware(self.opts.light_mode),
-             'previous'           : previous,
+             'previous'           : prev_msgs,
              'history'            : history,
              'entities'           : [],
              'explicit'           : False,
@@ -532,33 +582,29 @@ class Chat():
                     cmd, arg = parsed.command, parsed.args
                     if cmd == "delete-last":
                         try:
-                            _ = history[self.chat_branch].pop()
+                            history[self.chat_branch] = delete_last_turn(history[self.chat_branch])
                             self.session.common.save_chat(history)
                             self.session.renderer.clear_ooc()
-                            console.print("[green]Deleted last.[/green]", highlight=False)
+                            console.print("[green]Deleted last turn.[/green]", highlight=False)
                         except IndexError:
                             console.print("[yellow]History empty.[/yellow]")
                         continue
+
                     elif cmd == "turn":
-                        console.print(max(1,len(history[self.chat_branch])))
+                        console.print(turn_count(history[self.chat_branch]))
                         continue
+
                     elif cmd == "rewind":
                         try:
                             n = int(arg)
                             cur = history[self.chat_branch]
-                            total = len(cur)
+                            total = turn_count(cur)
                             if not (1 <= n <= total):
                                 console.print(f"[red]usage: \\rewind N  (1 ≤ N ≤ {total})[/red]")
                                 continue
-                            # keep the first n turns (1-based absolute index)
-                            history[self.chat_branch] = cur[:n]
+                            history[self.chat_branch] = slice_to_turn(cur, n)
                             self.session.common.save_chat(history)
-                            console.print(f"[green]Rewound to turn {n} of {total}.[/green]",
-                                           highlight=False)
-
-                            if history[self.chat_branch]:
-                                print(f"\n⬇ CURRENT (TURN {len(history[self.chat_branch])}) ⬇\n"
-                                    f"{history[self.chat_branch][-1]}")
+                            console.print(f"[green]Rewound to turn {n} of {total}.[/green]", highlight=False)
                             self.session.renderer.clear_ooc()
                         except ValueError:
                             console.print("[red]usage: \\rewind N[/red]")
@@ -617,13 +663,14 @@ class Chat():
                                 branches.insert(0, self.chat_branch)
 
                             for name in branches:
-                                count = len(history[name])
+                                count = int(len(history[name]) / 2)
                                 preview = ""
                                 if count > 0:
-                                    last = history[name][-1].replace("\n", " ")
-                                    user = last.find('USER:')
-                                    preview = last[user:40+user] + ("…" if len(last) > 40 else "")
-                                    preview = f"[dim]{preview}[/dim]"  # <= dim effect
+                                    last = history[name][-1].get("content", "")
+                                    # collapse any newlines / excess whitespace
+                                    last = " ".join(last.split())
+                                    preview = last[:40] + ("…" if len(last) > 40 else "")
+                                    preview = f"[dim]{preview}[/dim]"
 
                                 if name == self.chat_branch:
                                     console.print(
@@ -651,7 +698,7 @@ class Chat():
                         if "@" in raw:
                             name, n_str = raw.split("@", 1)
                             try:
-                                cut = int(n_str)
+                                cut = int(n_str)*2
                             except ValueError:
                                 console.print("[red]usage: \\branch NAME[@N][/red]",
                                                highlight=False)
@@ -710,11 +757,39 @@ class Chat():
                             n = int(arg or "5")
                         except ValueError:
                             n = 5
-                        turns = history[self.chat_branch][-n:]
-                        total = len(history[self.chat_branch])
-                        start = total - len(turns)
-                        for _, v in enumerate(turns, start=start+1):
-                            print(f'\n\n{v}')
+
+                        messages = history[self.chat_branch]
+                        turns = get_last_n_turns(messages, n)
+
+                        if not turns:
+                            console.print("[yellow]No history yet.[/yellow]")
+                            continue
+
+                        # Calculate the starting turn number
+                        total_turns = turn_count(messages)
+                        start_turn = total_turns - (len(turns) // 2) + 1
+                        turn_num = start_turn - 1
+                        for msg in turns:
+                            if not isinstance(msg, dict):
+                                # fallback for any leftover old-format items
+                                console.print(f"\n\n{msg}")
+                                continue
+
+                            role = msg.get("role", "?").lower()
+                            content = msg.get("content", "")
+
+                            if role == "user":
+                                turn_num += 1
+                                console.print()
+                                console.print(f"[bold cyan]⬇  TURN {turn_num}  ⬇[/bold cyan]")
+                                console.print(f"[bold]USER:[/bold] {content}")
+                            elif role == "assistant":
+                                console.print(f"\n[bold]AI:[/bold] {content}")
+                            else:
+                                # system / tool / etc.
+                                console.print(f"\n[dim]{role.upper()}:[/dim] {content}")
+
+                        console.print()  # trailing newline
                         continue
                     elif cmd in ("no-context", "include", "agent"):
                         if not self.opts.assistant_mode:
@@ -1116,6 +1191,7 @@ arguments. See `.chat.yaml.example` for details.
     merged = asdict(yaml_opts)
     merged.update({k: v for k, v in vars(partial).items() if v is not None})
 
+    # pylint: disable-next=protected-access   # I must do so...
     _opts = ChatOptions._build(current_dir, merged, yaml_opts)
 
     # -------- Stage 2: real parser with merged defaults --------

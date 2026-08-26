@@ -46,6 +46,7 @@ class ImportData:
         """Install a graceful Ctrl-C handler. Call once before the Live context."""
         signal.signal(signal.SIGINT, self._handle_sigint)
 
+    # pylint: disable-next=unused-argument    # satisfy inheritance
     def _handle_sigint(self, signum, frame):
         """First SIGINT sets a flag for graceful exit; second one forces immediate kill."""
         if self._interrupt_requested:

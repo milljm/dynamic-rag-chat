@@ -655,6 +655,8 @@ class RenderWindow(PromptManager):
                     traceback.print_exc()
                 return
 
+            documents['llm_response'] = current_response
+
             # Polisher + polishing cnt
             if (self.opts.polisher_llm != 'None'
                     and documents['user_query'].find('OOC:') == -1
@@ -663,7 +665,6 @@ class RenderWindow(PromptManager):
                                                      style=f'color({color}')
                 self.render_chat(live)
                 self.common.write_debug(f'polisher_input-{self.llm.model_name}', current_response)
-                documents['llm_response'] = current_response
                 for pass_num in range(int(self.opts.polisher_cnt)):
                     documents['llm_response'] = current_response
                     messages = self.get_messages(meta_data, documents, polish=True)
@@ -695,52 +696,83 @@ class RenderWindow(PromptManager):
             self.renderable.assistant = Text(documents["name"], style='bold color(208)')
             self.render_chat(live)
 
-        # Do not save any output if \no-context was used
-        if documents.get('no_context', False):
+        # Do not save any output if \no-context was used or LLM failed to produce output
+        if documents.get('no_context', False) or not current_response:
             return
-        return self.save_response(documents, current_response)
 
-    def save_response(self, documents: dict, current_response: str)->None:
-        """ Save Turn """
+        return self.save_history(documents, current_response)
+
+    def save_history(self, documents: dict, current_response: str) -> None:
+        """Save Turn using role/content messages per branch."""
         stream = self.state.stream
         history = self.common.load_chat()
-        if self.opts.assistant_mode:
-            branch = 'assistant'
-        else:
-            branch = history.get('current', 'default')
 
-        if self.debug and self.state.no_rags and self.state.assistant_mode:
-            self.console.print(f'DEBUG: storing meta\n{stream.meta_capture}\n\n',
-                                style=f'color({self.state.color})',highlight=False)
-        # Attache OOC's response for next system/human prompt message usage
-        ooc_prefix = self.common.regex.ooc_prefix  # shorthand
-        if ooc_prefix.search(current_response) or ooc_prefix.search(documents['user_query']):
+        # ── Determine current branch ──────────────────────────────────────
+        if self.opts.assistant_mode:
+            branch = "assistant"
+        else:
+            branch = history.get("current_branch", "default")
+
+        # Make sure the branch exists.
+        if branch not in history:
+            history[branch] = []
+
+        # ── OOC handling ──────────────────────────────────────────────────
+        ooc_prefix = self.common.regex.ooc_prefix
+
+        if ooc_prefix.search(current_response) or ooc_prefix.search(
+            documents["user_query"]
+        ):
             if not ooc_prefix.search(current_response):
                 self.console.print(
-                    '\nNOTE:\tBad LLM response. LLM ignored OOC request. This turn not saved.',
-                    style=f'color({self.state.color})', highlight=False)
+                    "\nNOTE:\tBad LLM response. LLM ignored OOC request. "
+                    "This turn not saved.",
+                    style=f"color({self.state.color})",
+                    highlight=False,
+                )
                 return
+
             self.ooc_response = current_response
             return
 
+        # ── Context handling ─────────────────────────────────────────────
         documents['llm_response'] = current_response
-        stream.meta_capture = ''
-        if self.debug:
-            self.console.print('DEBUG: saving to RAG...',
-                                style=f'color({self.state.color})',highlight=False)
-        self.state.context.handle_context(documents, direction='store')
-        current_response = self.common.sanitize_response(current_response)
-        if self.state.disable_thinking:
-            documents["user_query"] = documents["user_query"].replace('</think>', '')
+        self.state.context.handle_context(documents, direction="store")
 
-        history[branch].append(
-            f'\n⬇  TURN {len(history[branch])+1}  ⬇\n'
-            f'TIMESTAMP: {self.common.get_time(self.opts.time_zone)}\n'
-            f'USER: {documents["user_query"]}\n\n'
-            f'AI: {current_response}')
+        # Sanitize before storing the response.
+        current_response = self.common.sanitize_response(current_response)
+
+        if self.state.disable_thinking:
+            documents["user_query"] = documents["user_query"].replace(
+                "</think>", ""
+            )
+
+        # ── Build messages ────────────────────────────────────────────────
+        history[branch].append({
+            "role": "user",
+            "content": documents["user_query"],
+        })
+
+        history[branch].append({
+            "role": "assistant",
+            "content": current_response,
+        })
+
+        # ── Bookkeeping ──────────────────────────────────────────────────
+        stream.meta_capture = ""
+
+        if self.debug:
+            self.console.print(
+                "DEBUG: saving to RAG...",
+                style=f"color({self.state.color})",
+                highlight=False,
+            )
+
         self.common.save_chat(history)
 
         if self.debug:
-            self.console.print('DEBUG: live finished',
-                                style=f'color({self.state.color})',highlight=False)
-        return
+            self.console.print(
+                "DEBUG: live finished",
+                style=f"color({self.state.color})",
+                highlight=False,
+            )

@@ -18,6 +18,7 @@ from chat import (Chat,
                   parse_args,
                   seed_from_string)
 from src.chat_utils import RAGTag
+from src import RenderWindow
 
 # ── Reasoning/Thinking RE ─────────────────────────────────────────
 THINK_END_RE = re.compile(
@@ -58,14 +59,16 @@ def get_chat_session() -> Chat:
     session = SessionContext.from_args(console, _opts)
     return Chat(session, _opts)
 
-def call_llm_stream(o_renderer,
+def call_llm_stream(o_renderer: RenderWindow,
                     o_documents: dict,
                     o_meta: RAGTag,
-                    o_metrics: StreamMetrics) -> Generator:
+                    o_metrics: StreamMetrics,
+                    o_pre_worker: object) -> Generator:
     """Stream LLM response and collect performance metrics."""
+    o_pre_worker.markdown('RAG/AGENT Working...')
     o_renderer.set_llm(o_meta, o_documents)
     messages = o_renderer.get_messages(o_meta, o_documents)
-
+    o_pre_worker.markdown(f':small[Loading Model/Processing Prompt [{o_renderer.llm.model_name}]]')
     o_metrics.model = o_renderer.llm.model_name
     o_metrics.prompt_tokens = o_documents["prompt_tokens"]
     o_metrics.token_savings = o_documents["token_savings"]
@@ -74,6 +77,7 @@ def call_llm_stream(o_renderer,
     first_token_flag = True
 
     for token in o_renderer.stream_response(messages):
+        o_pre_worker.empty()
         if first_token_flag:
             o_metrics.ttft = time.time() - start_time
             first_token_flag = False
@@ -83,13 +87,15 @@ def call_llm_stream(o_renderer,
 
     o_metrics.generation_time = time.time() - start_time
 
-def save_messages(o_renderer: Chat, o_documents: dict, response: str) -> None:
+def save_messages(o_renderer: RenderWindow, o_documents: dict, response: str) -> None:
     """ Save Turn """
+    # pylint: disable-next=global-statement
     global NEVER_THINK, SHADOW_THINK, IS_THINKING
     IS_THINKING = False
     NEVER_THINK = False
     SHADOW_THINK = False
-    o_renderer.save_response(o_documents, response)
+    o_documents['llm_response'] = response
+    o_renderer.save_history(o_documents, response)
 
 def get_history(o_chat: Chat) -> list:
     """ Return chat history """
@@ -99,6 +105,7 @@ def get_history(o_chat: Chat) -> list:
 
 def is_thinking(o_chunk) -> bool:
     """ Return whether or not model is reasoning/thinking """
+    # pylint: disable-next=global-statement
     global NEVER_THINK, SHADOW_THINK, IS_THINKING
     if NEVER_THINK:
         return False
@@ -127,6 +134,7 @@ def is_thinking(o_chunk) -> bool:
     return True
 
 # ── Attachment Handler (Streamlit-only) ───────────────────────────
+# pylint: disable=redefined-outer-name   # intended behavior
 def handle_attachments(documents: dict) -> dict:
     """Process attachments from session state and add to documents."""
     if "attachments" not in st.session_state or not st.session_state.attachments:
@@ -182,12 +190,14 @@ def handle_attachments(documents: dict) -> dict:
             except UnicodeDecodeError:
                 try:
                     text_content = data_bytes.decode("latin-1")
+                # pylint: disable-next=broad-exception-caught   # Specifics being handled
                 except Exception:
                     text_content = "<binary content, could not decode>"
 
             documents["dynamic_files"] += f"\n--- {name} ---\n\n{text_content}\n\n"
 
     return documents
+# pylint: enable=redefined-outer-name
 
 # ── Streamlit UI ───────────────────────────────────────────────────
 chat: Chat = get_chat_session()
@@ -236,21 +246,6 @@ st.html("""
     padding: 2px 0;
 }
 
-/* ── Message bubbles ────────────────────────────────────────────── */
-.user-bubble {
-    background: #1a1a2e !important;
-    border-radius: 18px 18px 4px 18px;
-    padding: 12px 16px;
-    max-width: 75%;
-}
-
-.assistant-bubble {
-    background: #252525 !important;
-    border-radius: 18px 18px 18px 4px;
-    padding: 12px 16px;
-    max-width: 75%;
-}
-
 /* ── Custom sticky title ────────────────────────────────────────── */
 .custom-chat-title {
     font-size: 1.4rem;
@@ -261,11 +256,57 @@ st.html("""
     background: inherit;
     z-index: 10;
 }
+
+/* ── Chat layout — role-based positioning ───────────────────────────── */
+.stChatMessage.user {
+    justify-content: flex-end;
+}
+
+.stChatMessage.assistant {
+    justify-content: flex-start;
+}
+
+/* ── Message bubbles — tapers face each other ─────────────────────── */
+.user-bubble {
+    background: #1a1a2e !important;
+    border-radius: 4px 18px 4px 18px; /* rounded LEFT, tapered RIGHT */
+    padding: 12px 16px;
+    max-width: 75%;
+}
+
+.assistant-bubble {
+    background: #252525 !important;
+    border-radius: 18px 4px 18px 4px; /* rounded RIGHT, tapered LEFT */
+    padding: 12px 16px;
+    max-width: 75%;
+}
 </style>
 """)
 
+if "messages" not in st.session_state:
+    persistent = get_history(chat) or []
+    persistent = persistent[-chat.opts.history_sessions:]
+    st.session_state.messages = [
+        {
+            "role": m.get("role", "assistant"),
+            "content": m.get("content", ""),
+        }
+        for m in persistent
+        if isinstance(m, dict) and m.get("content")
+    ]
+    for msg in persistent:
+        if not isinstance(msg, dict):
+            continue
+        role = msg.get("role", "assistant")
+        # Optional: map any extra fields
+        st.session_state.messages.append({
+            "role": role,
+            "content": msg.get("content", ""),
+            # "reasoning": msg.get("reasoning"),   # if I ever store it
+        })
+
 st.markdown(
-    "<h3 class='custom-chat-title'>Dynamic RAG Chat</h3>",
+    "<h5 class='custom-chat-title'>Dynamic RAG Chat</h5>",
     unsafe_allow_html=True,
 )
 st.set_page_config(page_title="Dynamic RAG Chat", page_icon="💬", layout="wide")
@@ -295,8 +336,7 @@ if "messages" not in st.session_state:
 
 # Render existing history
 for msg in st.session_state.messages:
-    css_class = "user-bubble" if msg["role"] == "user" else "assistant-bubble"
-    with st.chat_message(msg["role"]):
+    with st.chat_message(msg["role"], avatar=msg.get("avatar")):
         if msg.get("attachments"):
             for fdata in msg["attachments"]:
                 st.markdown(f"📎 **{fdata.get('name', 'attached')}**")
@@ -331,11 +371,12 @@ if prompt := st.chat_input("Type your message…"):
         metrics = StreamMetrics()
         metrics.turn_count = len(history)
 
+        pre_worker         = st.empty()
         thinking_indicator = st.empty()
         answer_container   = st.empty()
         reasoning_buffer   = ""
 
-        stream = call_llm_stream(renderer, documents, meta_data, metrics)
+        stream = call_llm_stream(renderer, documents, meta_data, metrics, pre_worker)
         full_response = ""
 
         for chunk in stream:
@@ -365,9 +406,9 @@ if prompt := st.chat_input("Type your message…"):
 
         st.caption(
             f"⏱ TTFT: {metrics.ttft:.2f}s | "
-            f"Gen: {gen_duration:.2f}s | "  # <-- shows gen time ex-TTFT
+            f"Gen: {gen_duration:.2f}s | "
             f"Tokens: {metrics.token_count} | "
-            f"{tps:.1f} T/s | "             # <-- accurate now
+            f"{tps:.1f} T/s | "
             f"`{metrics.model}`"
         )
 

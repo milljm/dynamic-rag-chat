@@ -95,7 +95,7 @@ CRITICAL: If user is asking about images they are attaching, simply answer "rout
  The system performs an internet search if score ≤ 0.5.
 
  Guide:
- - 0.8–1.0: Timeless / stable (math, history, well-established science)
+ - 0.8–1.0: Timeless / stable (math, history, well-established science), simple greetings
  - 0.5–0.7: General but verifiable (consider lowering toward threshold if possible)
  - 0.0–0.4: Time-sensitive, recent releases, version-specific details
 

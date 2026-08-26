@@ -64,43 +64,61 @@ class ContextManager(PromptManager):
         self.filter_builder = FilterBuilder()
         self.prompts.build_prompts()
 
+    # Helper methods for history schema migration
+    @staticmethod
+    def _is_message_list(history: list) -> bool:
+        """True when history is the new role/content format."""
+        return bool(history) and isinstance(history[0], dict) and "role" in history[0]
+
+    @staticmethod
+    def _turn_count(messages: list) -> int:
+        if not messages:
+            return 0
+        if ContextManager._is_message_list(messages):
+            return sum(1 for m in messages if m.get("role") == "user")
+        return len(messages)
+
+    @staticmethod
+    def _messages_for_last_n_turns(messages: list, n: int) -> list:
+        """Return the message list corresponding to the last n turns."""
+        if not messages or n <= 0:
+            return []
+        if ContextManager._is_message_list(messages):
+            return messages[-(n * 2):]
+        return messages[-n:]
+
     # pylint: enable=too-many-positional-arguments,too-many-arguments
-    def deduplication(self, base_reference: list[str],
-                            response_list: list[str]) -> list[str]:
+    def deduplication(self, base_reference: list, response_list: list) -> list[str]:
         """
         Deduplicate response_list by checking for overlap containment.
-        Returns cleaned RAG chunks.
+        Accepts either list[str] or list[dict] (role/content format).
+        Returns cleaned RAG chunks (list[str]).
         """
-        def is_overlap_duplicate(a: str, b: str) -> bool:
-            """Checks if one string is mostly contained within the other."""
-            # Ensure we're always checking the shorter string against the longer one
-            s, l = (a, b) if len(a) < len(b) else (b, a)
+        def to_text(item) -> str:
+            if isinstance(item, dict):
+                return item.get("content", "") or ""
+            return str(item) if item is not None else ""
 
-            # If the shorter string is empty or whitespace, it's not a duplicate
+        def is_overlap_duplicate(a: str, b: str) -> bool:
+            s, l = (a, b) if len(a) < len(b) else (b, a)
             if not s.strip():
                 return False
-
             matcher = SequenceMatcher(None, s, l)
-            # Find the longest common block of text
             match = matcher.find_longest_match(0, len(s), 0, len(l))
-
-            # What percentage of the SHORTER string is this match?
-            # If it's very high, one chunk is likely just an overlap of the other.
             containment_ratio = match.size / len(s)
-
-            # You can tune this threshold. 0.85 means 85% of the shorter
-            # chunk must be identical to a block in the longer one.
             return containment_ratio > 0.65
+
+        # Normalize the base reference once
+        base_texts = [to_text(x) for x in base_reference]
 
         cleaned_chunks = []
         for chunk in response_list:
-            # Check against the original reference (base_reference)
-            if any(is_overlap_duplicate(chunk, base) for base in base_reference):
+            chunk_text = to_text(chunk)
+            if any(is_overlap_duplicate(chunk_text, base) for base in base_texts):
                 continue
-            # Check against what we've already kept (cleaned_chunks)
-            if any(is_overlap_duplicate(chunk, prior) for prior in cleaned_chunks):
+            if any(is_overlap_duplicate(chunk_text, prior) for prior in cleaned_chunks):
                 continue
-            cleaned_chunks.append(chunk)
+            cleaned_chunks.append(chunk_text)   # always store as string
         return cleaned_chunks
 
     @staticmethod
@@ -139,9 +157,9 @@ class ContextManager(PromptManager):
         query = self.common.normalize_for_dedup(query)
         documents = dict(documents)
         # Make only one previous turn available in chat_history when working with pre-conditioning
-        if documents.get('chat_history', []):
-            documents['chat_history'] = documents['chat_history'][-1]
-
+        if documents.get('chat_history'):
+            documents['chat_history'] = self._messages_for_last_n_turns(
+                                                        documents['chat_history'], 1)
         # pylint: disable=no-member # dynamic prompts (see self.__build_prompts)
         human_prompt = (prompts.get_prompt(f'{prompts.tag_prompt_file}_human.md')
                         if self.debug or self.opts.prompts_debug else prompts.tag_prompt_human)
@@ -511,36 +529,63 @@ class ContextManager(PromptManager):
                 return f.read()
         return ''
 
-    def stagger_history(self, documents)->list:
-        """ return last *n* unmolested turns plus staggered retention turns """
-        # Recent turns to leave unmolested
-        unmolested_count = self.opts.unmolested_sessions
+    def stagger_history(self, documents) -> list:
+        """
+        Return a list of messages that includes:
+        - the last `unmolested_sessions` turns completely intact
+        - older turns sampled with exponential decay
+        """
+        full_history = documents.get('chat_history', [])
+        if not full_history:
+            return []
 
-        # Get the full chat history we're working with
-        full_history = documents['chat_history']
+        # How many *turns* we want to keep in total
+        max_turns = self.opts.history_sessions
+        unmolested_turns = self.opts.unmolested_sessions
 
-        # User opting for full unmolested history
-        if unmolested_count == 0:
-            return full_history[-self.opts.history_sessions:]
+        # Fast path: keep everything recent
+        if unmolested_turns == 0:
+            return self._messages_for_last_n_turns(full_history, max_turns)
 
-        # The history we can stagger (everything except unmolested_count)
-        unmolested_history = full_history[:-unmolested_count]
+        total_turns = self._turn_count(full_history)
+        if total_turns <= unmolested_turns:
+            return full_history
 
-        # Get stagger indices
-        if len(unmolested_history) > 0:
-            max_elements = self.opts.history_sessions
-            recent_tail = min(self.opts.unmolested_sessions, len(unmolested_history))
-            indices = self.stagger_indices(len(full_history),
-                                            max_elements,
-                                            recent_tail,
-                                            self.opts.lookback)
+        # Convert turn-based numbers → message indices
+        is_new = self._is_message_list(full_history)
+        msg_per_turn = 2 if is_new else 1
 
-            # Pull the actual chat turns using those indices
-            selected_turns = [full_history[i] for i in indices]
-            return selected_turns
+        # Guaranteed recent messages (the unmolested tail)
+        unmolested_msgs = unmolested_turns * msg_per_turn
+        recent = full_history[-unmolested_msgs:]
 
-        # No history or history count is below unmolested count
-        return full_history
+        # Everything before the unmolested tail
+        older = full_history[:-unmolested_msgs]
+        if not older:
+            return recent
+
+        # How many additional *turns* we are allowed to pull from the older part
+        remaining_turns = max(0, max_turns - unmolested_turns)
+        if remaining_turns == 0:
+            return recent
+
+        # Use the existing stagger logic, but on *turn* counts
+        older_turn_count = self._turn_count(older)
+        indices = self.stagger_indices(
+            history_size=older_turn_count,
+            max_elements=remaining_turns,
+            recent_tail=0,                  # we already handled the real tail
+            lookback=self.opts.lookback
+        )
+
+        # Map turn indices back to message slices
+        selected = []
+        for turn_idx in indices:
+            start = turn_idx * msg_per_turn
+            end = start + msg_per_turn
+            selected.extend(older[start:end])
+
+        return selected + recent
 
     def handle_context(self, documents: dict,
                              direction='query')->tuple[dict[str,list], int, list]:
@@ -601,7 +646,7 @@ class ContextManager(PromptManager):
                            self.scene.get_scene().get('known_characters', [])
                        )
 
-            if (len(documents['chat_history']) > self.opts.unmolested_sessions):
+            if self._turn_count(documents['chat_history']) > self.opts.unmolested_sessions:
                 documents['chat_history'] = self.stagger_history(documents)
 
             # Make all meta_tags available for prompt templating operations, without overwriting
@@ -649,9 +694,9 @@ class ContextManager(PromptManager):
                 pages = list(map(lambda doc: doc.page_content, storage))
                 for page in pages:
                     pre_tokens += self.token_retriever(page)
-                # Remove duplicates RAG matches
-                documents[collection] = self.deduplication(documents['chat_history'],
-                                                           pages)
+
+                # Remove duplicate RAG matches
+                documents[collection] = self.deduplication(documents['chat_history'], pages)
 
                 # Record post-token counts
                 for page in documents[collection]:
@@ -661,7 +706,16 @@ class ContextManager(PromptManager):
                 documents[collection] = self.common.stringify_lists(documents[collection])
 
             # Stringify lists in chat_history
-            documents['chat_history'] = '\n'.join(documents['chat_history'])
+            chat_lines = []
+            for msg in documents['chat_history']:
+                if isinstance(msg, dict):
+                    role = 'USER' if msg.get('role') == 'user' else 'AI'
+                    content = msg.get('content', '')
+                    chat_lines.append(f'{role}: {content}')
+                else:
+                    # safety net for any remaining old-format items
+                    chat_lines.append(str(msg))
+            documents['chat_history'] = '\n'.join(chat_lines)
             # Store the users query to their RAG, now that we are done pre-processing
             # (so as not to bring back identical information in their query)
             # A little unorthodox, but the first item in the list is the user's query
