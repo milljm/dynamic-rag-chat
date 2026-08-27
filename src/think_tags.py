@@ -3,6 +3,10 @@
 MiniMax emits <mm:think>…</mm:think> and often *mentions* <think> / </think>
 inside that block (code samples, prose). Treating `mm:` as optional used to
 close reasoning at the inner tag and stall the stream.
+
+Thinking is once-per-turn: after a block closes (or the turn starts on
+visible non-tag text), later <think> mentions stay in the answer.
+Reset never_think when the user sends a new turn.
 """
 from __future__ import annotations
 
@@ -35,9 +39,17 @@ def chunk_text(chunk: Any) -> tuple[str, str]:
 
 
 def split_think(
-    text: str, in_think: bool, ns: str = ""
-) -> tuple[str, str, bool, str]:
-    """Strip think blocks. The closer must match the opener's namespace."""
+    text: str, in_think: bool, ns: str = "", never_think: bool = False
+) -> tuple[str, str, bool, str, bool]:
+    """Strip think blocks. The closer must match the opener's namespace.
+
+    Once a block closes, never_think latches True and the rest of the turn
+    (this chunk and later chunks) is visible content — even if the model
+    talks about <think> / </think>.
+    """
+    if never_think:
+        return text or "", "", False, "", True
+
     content: list[str] = []
     reasoning: list[str] = []
     rest = text or ""
@@ -55,13 +67,17 @@ def split_think(
             rest = rest[match.end() :]
             in_think = False
             ns = ""
-        else:
-            match = THINK_START_RE.search(rest)
-            if not match:
+            never_think = True
+            if rest:
                 content.append(rest)
-                break
-            content.append(rest[: match.start()])
-            ns = tag_ns(match)
-            rest = rest[match.end() :]
-            in_think = True
-    return "".join(content), "".join(reasoning), in_think, ns
+            break
+        match = THINK_START_RE.search(rest)
+        if not match:
+            content.append(rest)
+            never_think = True
+            break
+        content.append(rest[: match.start()])
+        ns = tag_ns(match)
+        rest = rest[match.end() :]
+        in_think = True
+    return "".join(content), "".join(reasoning), in_think, ns, never_think

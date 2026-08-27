@@ -658,6 +658,7 @@ async def api_chat(request: Request) -> StreamingResponse:
             reasoning = ""
             in_think = False
             think_ns = ""
+            never_think = False
             model = getattr(renderer.llm, "model_name", "")
 
             def bump(n: int = 1) -> None:
@@ -673,8 +674,8 @@ async def api_chat(request: Request) -> StreamingResponse:
                     bump(len(extra.split()))
                     reasoning += extra
                     yield sse({"type": "reasoning", "content": extra}).encode()
-                visible, thought, in_think, think_ns = split_think(
-                    piece, in_think, think_ns
+                visible, thought, in_think, think_ns, never_think = split_think(
+                    piece, in_think, think_ns, never_think
                 )
                 if thought:
                     bump(len(thought.split()))

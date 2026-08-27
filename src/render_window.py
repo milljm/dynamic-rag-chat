@@ -22,7 +22,7 @@ from .context_manager import ContextManager # For Type Hinting
 from .chat_utils import CommonUtils, ChatOptions, RAGTag # For Type Hinting
 from .model_orchestrator import Orchestration
 from .agent_tools import DuckDuckGoSearchTool
-from .think_tags import THINK_END_RE, THINK_START_RE, chunk_text, tag_ns
+from .think_tags import chunk_text, split_think
 
 # pylint: disable=too-many-instance-attributes  # this is what a dataclass is for
 @dataclass
@@ -263,6 +263,8 @@ class RenderWindow(PromptManager):
 
         Closers must match the opener's namespace so a MiniMax model that
         *mentions* <think> inside <mm:think> does not end reasoning early.
+        After thinking closes once this turn, never_think latches so later
+        mentions in the answer stay visible. Reset on the next user turn.
         LangChain sometimes sends content=None on those special tokens.
         """
         stream = self.state.stream
@@ -274,45 +276,39 @@ class RenderWindow(PromptManager):
         if stream.never_think or show:
             return chunk
 
-        start = THINK_START_RE.search(piece)
-        end = THINK_END_RE.search(piece)
-        # -------- FIRST/(AND SHADOW LAST) REASON TOKEN DISCOVERY IF/ELIF
-        # First chunk has reasoning content: ('' || <*ing> || <*think>)
-        if not stream.thinking and (not piece or start):
-            if not piece:
-                stream.shadow_think = True
+        # Empty first token: MiniMax / LangChain shadow reasoning_content.
+        if not stream.thinking and not piece:
+            stream.shadow_think = True
             stream.thinking = True
-            stream.think_ns = tag_ns(start)
             stream.do_once = True
             self.start_thinking()
             self.thinking_chunk = ''
             chunk.content = ''
+            return chunk
 
-        # While shadow thinking, the next non-empty chunk of any kind ends thinking
-        elif stream.shadow_think and piece:
+        # Shadow thinking ends on the first non-empty chunk of any kind.
+        if stream.shadow_think and piece:
             stream.thinking = False
             stream.never_think = True
             self.stop_thinking()
+            return chunk
 
-        # First token is non-thinking token. Prevent future thinking discovery.
-        elif not stream.thinking:
-            stream.never_think = True
-
-        # -------- WITHIN REASONING TOKENS
-        # Only the matching closer (mm: vs bare) ends the block.
-        if stream.thinking and end and tag_ns(end) == stream.think_ns:
-            stream.never_think = True
+        visible, thought, in_think, ns, never = split_think(
+            piece, stream.thinking, stream.think_ns, stream.never_think
+        )
+        if thought:
+            if not stream.thinking:
+                stream.do_once = True
+                self.start_thinking()
+                self.thinking_chunk = ''
+            self.thinking_chunk += thought
+        if stream.thinking and not in_think:
             stream.do_once = False
-            stream.thinking = False
-            stream.think_ns = ''
             self.stop_thinking()
-            chunk.content = ''
-
-        # Reasoning chunk (including nested <think> mentions)
-        elif stream.thinking and not stream.shadow_think:
-            self.thinking_chunk += piece
-            chunk.content = ''
-
+        stream.thinking = in_think
+        stream.think_ns = ns
+        stream.never_think = never
+        chunk.content = visible
         return chunk
 
     def start_thinking(self):
