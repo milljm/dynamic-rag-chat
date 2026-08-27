@@ -22,17 +22,7 @@ from .context_manager import ContextManager # For Type Hinting
 from .chat_utils import CommonUtils, ChatOptions, RAGTag # For Type Hinting
 from .model_orchestrator import Orchestration
 from .agent_tools import DuckDuckGoSearchTool
-
-# REASONING/THINKING RE
-THINK_END_RE = re.compile(
-    r'</\s*(?:mm:)?(?:think|thinking|reasoning)\s*>',
-    re.IGNORECASE
-)
-
-THINK_START_RE = re.compile(
-    r'<\s*(?:mm:)?(?:think|thinking|reasoning)\s*>',
-    re.IGNORECASE
-)
+from .think_tags import THINK_END_RE, THINK_START_RE, chunk_text, tag_ns
 
 # pylint: disable=too-many-instance-attributes  # this is what a dataclass is for
 @dataclass
@@ -43,6 +33,7 @@ class StreamState:
     meta_brace_count: int = 0
     meta_hide_attempt_count: int = 0
     thinking: bool = False
+    think_ns: str = ''
     shadow_think: bool = False
     never_think: bool = False
     do_once: bool = False
@@ -267,30 +258,38 @@ class RenderWindow(PromptManager):
 
     def reveal_thinking(self, chunk: object, show: bool = False)->object:
         """
-        Intercept <think> tags in streamed content and optionally hide or reveal them.
+        Intercept <think> / <mm:think> tags in streamed content and optionally
+        hide or reveal them.
 
-        If `show` is True, actual thinking content is shown.
-        If `show` is False, replaces it with '' at start, then hides remaining.
+        Closers must match the opener's namespace so a MiniMax model that
+        *mentions* <think> inside <mm:think> does not end reasoning early.
+        LangChain sometimes sends content=None on those special tokens.
         """
         stream = self.state.stream
+        piece, _extra = chunk_text(chunk)
+        try:
+            chunk.content = piece
+        except Exception:  # pylint: disable=broad-exception-caught
+            pass
         if stream.never_think or show:
             return chunk
 
-        is_start_tag = bool(THINK_START_RE.search(chunk.content))
-        is_end_tag   = bool(THINK_END_RE.search(chunk.content))
+        start = THINK_START_RE.search(piece)
+        end = THINK_END_RE.search(piece)
         # -------- FIRST/(AND SHADOW LAST) REASON TOKEN DISCOVERY IF/ELIF
         # First chunk has reasoning content: ('' || <*ing> || <*think>)
-        if not stream.thinking and (not chunk.content or is_start_tag):
-            if not chunk.content:
+        if not stream.thinking and (not piece or start):
+            if not piece:
                 stream.shadow_think = True
             stream.thinking = True
+            stream.think_ns = tag_ns(start)
             stream.do_once = True
             self.start_thinking()
             self.thinking_chunk = ''
             chunk.content = ''
 
         # While shadow thinking, the next non-empty chunk of any kind ends thinking
-        elif stream.shadow_think and chunk.content:
+        elif stream.shadow_think and piece:
             stream.thinking = False
             stream.never_think = True
             self.stop_thinking()
@@ -300,15 +299,18 @@ class RenderWindow(PromptManager):
             stream.never_think = True
 
         # -------- WITHIN REASONING TOKENS
-        if stream.thinking and is_end_tag:
+        # Only the matching closer (mm: vs bare) ends the block.
+        if stream.thinking and end and tag_ns(end) == stream.think_ns:
             stream.never_think = True
             stream.do_once = False
+            stream.thinking = False
+            stream.think_ns = ''
             self.stop_thinking()
             chunk.content = ''
 
-        # Reasoning chunk
+        # Reasoning chunk (including nested <think> mentions)
         elif stream.thinking and not stream.shadow_think:
-            self.thinking_chunk += str(chunk.content)
+            self.thinking_chunk += piece
             chunk.content = ''
 
         return chunk
@@ -570,6 +572,8 @@ class RenderWindow(PromptManager):
         context = self.state.context # shorthand
         stream.never_think = False
         stream.shadow_think = False
+        stream.thinking = False
+        stream.think_ns = ''
         history = self.common.load_chat()
         pre_process_time = float(documents['pre_process_time'])
         start_time = time.time()
