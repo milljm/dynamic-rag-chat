@@ -3,7 +3,7 @@
 **A terminal-first, orchestrated, context-aware chat system powered by LLMs, RAG, and a tagging pre-processor.**
 Built for long-running story work and a capable local assistant — with memory that actually persists.
 
-Also ships a **Streamlit** UI (`streamlit_chat.py`) for the same backend.
+Also ships two GUIs for the same backend: **Streamlit** (`streamlit_chat.py`) and **[Spur](https://github.com/milljm/spur)**. Spur is the prettier one — a React view that talks to `spur-server.py`, a small FastAPI adapter around `chat.py`.
 
 ```bash
 # Terminal
@@ -13,6 +13,10 @@ Also ships a **Streamlit** UI (`streamlit_chat.py`) for the same backend.
 # Streamlit (same flags after --)
 streamlit run streamlit_chat.py -- --assistant-mode
 streamlit run streamlit_chat.py
+
+# Spur — adapter in this repo, UI in milljm/spur
+uv run --with fastapi --with uvicorn spur-server.py
+# then: VITE_CHAT_API=http://127.0.0.1:8765 npm run dev
 ```
 
 ---
@@ -37,9 +41,10 @@ That is the whole product: targeted context, not a bigger window.
 
 - **Terminal UI** — `prompt_toolkit` + `rich` (Markdown in the terminal, optional `--light-mode`)
 - **Streamlit UI** — branch cards, mode toggle, attachments, slash commands, reasoning panel (same `Chat` / `RenderWindow` stack)
+- **Spur UI** — React front-end ([milljm/spur](https://github.com/milljm/spur)). Same stack via `spur-server.py`; just nicer to look at.
 - **Streaming** — token-level generation
 - **Persistent history** — JSON on disk, role/content messages per branch
-- **Branches** — fork / switch / delete; RAG collections clone with the fork (`\branch`, `\dbranch`, or the Streamlit cards)
+- **Branches** — fork / switch / delete; RAG collections clone with the fork (`\branch`, `\dbranch`, or the Streamlit / Spur cards)
 - **Two flavors**
   - **Story** — role-play prompts, scene grounding, optional NPC sheets + polisher
   - **Assistant** — tool-style prompts, optional vision + web-search agent, RAG off unless you pass `--use-rags`
@@ -141,6 +146,16 @@ Retrieval is an ensemble (filter + similarity), then BM25 on that set, then pare
 You do not need seven models running. Three is enough; the rest are sockets you can fill.
 
 ---
+
+## GUIs
+
+The terminal is the source of truth. Two optional fronts wrap it.
+
+**Streamlit** (`streamlit_chat.py`) is the original GUI. Same flags as `chat.py` after `--`. Fine if you already live in Python.
+
+**Spur** is a React UI that never imports LangChain. `spur-server.py` sits next to `chat.py` and exposes the same session: branches, pickle history, RAG, agent tools, SSE tokens. The UI is only a view — that is why the adapter lives in *this* repo, not in [milljm/spur](https://github.com/milljm/spur). Point Spur at it with `VITE_CHAT_API=http://127.0.0.1:8765`. OpenAPI is at `http://127.0.0.1:8765/docs`.
+
+Streamlit still works. Spur is just prettier.
 
 ## Getting started
 
