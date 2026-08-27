@@ -1,4 +1,4 @@
-<AGENT_ERROR: {{agent_error}}>
+{{agent_error}}
 <SYSTEM_TIME: {{date_time}}>
 <TURN_NUMBER: {{turn_num}}>
 <LLM_MODEL: {{model_name}}>

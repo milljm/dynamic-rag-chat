@@ -17,6 +17,7 @@ from langchain.schema.messages import HumanMessage
 from langchain.schema import BaseMessage, Document   # For Type Hinting
 from langchain_core.prompts import HumanMessagePromptTemplate, SystemMessagePromptTemplate
 from langchain_tavily import TavilySearch
+from langchain_openai import ChatOpenAI # For Type Hinting
 from .prompt_manager import PromptManager
 from .context_manager import ContextManager # For Type Hinting
 from .chat_utils import CommonUtils, ChatOptions, RAGTag # For Type Hinting
@@ -467,7 +468,7 @@ class RenderWindow(PromptManager):
                           style=f'color({self.state.color})',
                           highlight=False)
 
-        documents['agent_error'] = 'FALSE'
+        documents['agent_error'] = '<AGENT_ERROR: FALSE>'
         if self.orchestrator.requires_agent(meta_data, documents):
             # Let LangChain create the proper prompt template for the agent
             agent = create_openai_tools_agent(self.llm, self.agent_tools, self.agent_prompt)
@@ -494,7 +495,7 @@ class RenderWindow(PromptManager):
                         'and that you cannot answer reliably without it. '
                         'Do NOT fabricate or guess.\n\n'
                     )
-                documents['agent_error'] = 'TRUE'
+                documents['agent_error'] = '<AGENT_ERROR: TRUE>'
                 return self.get_messages(meta_data, documents, polish=polish)
         self.common.write_debug(f'live_stream-{self.llm.model_name}', messages)
         return messages
@@ -553,9 +554,10 @@ class RenderWindow(PromptManager):
             chat_content = Markdown(current_stream, code_theme=self.state.syntax_theme)
         return chat_content
 
-    def set_llm(self, meta_data: RAGTag, documents: dict)->None:
-        """ Run Orchestrator to properly, globally set LLM """
+    def set_llm(self, meta_data: RAGTag, documents: dict)->ChatOpenAI:
+        """ Set and Return Orchestrated LLM """
         self.llm = self.orchestrator.route(meta_data, documents)
+        return self.llm
 
     def live_stream(self, documents: dict, meta_data: RAGTag)->None:
         """ Handle the Rich Live updating process """

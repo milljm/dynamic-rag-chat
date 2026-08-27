@@ -76,8 +76,6 @@ class Orchestration():
         }
         self.__llm = {}
         for model, dict_meta in model_specs.items():
-            # TODO: allow more individual settings in YAML resource file (top_k,
-            # top_p, repeat_penalty... comes to mind)
             self.__llm[model] = ChatOpenAI(**dict_meta,
                                         frequency_penalty=args.frequency_penalty,
                                         presence_penalty=args.presence_penalty,
