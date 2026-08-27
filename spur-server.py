@@ -606,7 +606,7 @@ async def api_chat(request: Request) -> StreamingResponse:
             _sync_chat_object(chat)
             if regenerate:
                 pop_last_assistant(chat)
-            yield sse({"type": "status", "message": "Processing Prompt…"}).encode()
+            yield sse({"type": "status", "message": "Working — RAG / agent / prompt…"}).encode()
             if no_context:
                 parsed = parse_user_input(prompt)
                 documents = chat.no_context(parsed.clean_text or prompt)
