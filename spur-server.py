@@ -20,7 +20,6 @@ import glob
 import json
 import os
 import pickle
-import re
 import shutil
 import sys
 import time
@@ -46,6 +45,7 @@ from chat import (  # noqa: E402
     parse_user_input,
     seed_from_string,
 )
+from src.think_tags import ThinkFeed  # noqa: E402
 
 LOCKED_BRANCHES = frozenset({"assistant", "story"})
 # Metadata keys in the pickle — not message lists.
@@ -81,34 +81,6 @@ def get_chat() -> Chat:
 
 def sse(obj: dict[str, Any]) -> str:
     return f"data: {json.dumps(obj)}\n\n"
-
-
-THINK_START_RE = re.compile(r"<\s*(?:mm:)?(?:think|thinking|reasoning)\s*>", re.I)
-THINK_END_RE = re.compile(r"</\s*(?:mm:)?(?:think|thinking|reasoning)\s*>", re.I)
-
-
-def split_think(text: str, in_think: bool) -> tuple[str, str, bool]:
-    content: list[str] = []
-    reasoning: list[str] = []
-    rest = text
-    while rest:
-        if in_think:
-            m = THINK_END_RE.search(rest)
-            if not m:
-                reasoning.append(rest)
-                break
-            reasoning.append(rest[: m.start()])
-            rest = rest[m.end() :]
-            in_think = False
-        else:
-            m = THINK_START_RE.search(rest)
-            if not m:
-                content.append(rest)
-                break
-            content.append(rest[: m.start()])
-            rest = rest[m.end() :]
-            in_think = True
-    return "".join(content), "".join(reasoning), in_think
 
 
 def _history(chat: Chat) -> dict:
@@ -668,47 +640,41 @@ async def api_chat(request: Request) -> StreamingResponse:
                     "message": f"Streaming `{getattr(renderer.llm, 'model_name', '')}`",
                 }
             ).encode()
+            # reveal_thinking is a Rich TUI helper: it zeros chunk.content,
+            # starts a console thread, and TypeErrors when MiniMax sends
+            # content=None. Split tags here instead. ThinkFeed also covers
+            # gpt-oss-style blank first tokens (shadow think → never_think).
+            stream_state = getattr(getattr(renderer, "state", None), "stream", None)
+            if stream_state is not None:
+                stream_state.never_think = False
+                stream_state.shadow_think = False
+                stream_state.thinking = False
+                if hasattr(stream_state, "think_ns"):
+                    stream_state.think_ns = ""
             started = time.time()
             first = True
             ttft = 0.0
             tokens = 0
             answer = ""
             reasoning = ""
-            in_think = False
+            parser = ThinkFeed()
             model = getattr(renderer.llm, "model_name", "")
+
+            def bump(n: int = 1) -> None:
+                nonlocal first, ttft, tokens
+                if first:
+                    ttft = time.time() - started
+                    first = False
+                tokens += max(1, n)
+
             for chunk in renderer.stream_response(packed):
-                if hasattr(renderer, "reveal_thinking"):
-                    chunk = renderer.reveal_thinking(
-                        chunk, show=bool(getattr(chat.opts, "verbose", False))
-                    )
-                think = getattr(renderer, "thinking_chunk", "") or ""
-                if think and think != reasoning:
-                    delta = think[len(reasoning) :]
-                    reasoning = think
-                    if delta:
-                        yield sse({"type": "reasoning", "content": delta}).encode()
-                piece = getattr(chunk, "content", "") or ""
-                extra = getattr(chunk, "reasoning_content", None) or ""
-                if extra:
-                    yield sse({"type": "reasoning", "content": extra}).encode()
-                    reasoning += extra
-                visible, thought, in_think = split_think(piece, in_think)
+                visible, thought = parser.feed_chunk(chunk)
                 if thought:
-                    yield sse({"type": "reasoning", "content": thought}).encode()
+                    bump(len(thought.split()))
                     reasoning += thought
+                    yield sse({"type": "reasoning", "content": thought}).encode()
                 if visible:
-                    if first:
-                        ttft = time.time() - started
-                        yield sse(
-                            {
-                                "type": "usage",
-                                "model": model,
-                                "promptTokens": documents.get("prompt_tokens", 0),
-                                "completionTokens": 0,
-                            }
-                        ).encode()
-                        first = False
-                    tokens += renderer.response_count(visible)
+                    bump(renderer.response_count(visible))
                     answer += visible
                     yield sse({"type": "token", "content": visible}).encode()
             gen = time.time() - started
@@ -718,9 +684,10 @@ async def api_chat(request: Request) -> StreamingResponse:
                     "model": model,
                     "promptTokens": documents.get("prompt_tokens", 0),
                     "completionTokens": tokens,
+                    "ttft": ttft,
                 }
             ).encode()
-            if answer and not documents.get("no_context"):
+            if (answer or reasoning) and not documents.get("no_context"):
                 persist_turn(
                     renderer,
                     documents,
@@ -740,7 +707,15 @@ async def api_chat(request: Request) -> StreamingResponse:
         except Exception as exc:  # pylint: disable=broad-exception-caught
             yield sse({"type": "error", "error": str(exc)}).encode()
 
-    return StreamingResponse(generate(), media_type="text/event-stream")
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @app.get("/api/health")
