@@ -45,7 +45,7 @@ from chat import (  # noqa: E402
     parse_user_input,
     seed_from_string,
 )
-from src.think_tags import chunk_text, split_think  # noqa: E402
+from src.think_tags import ThinkFeed  # noqa: E402
 
 LOCKED_BRANCHES = frozenset({"assistant", "story"})
 # Metadata keys in the pickle — not message lists.
@@ -642,7 +642,8 @@ async def api_chat(request: Request) -> StreamingResponse:
             ).encode()
             # reveal_thinking is a Rich TUI helper: it zeros chunk.content,
             # starts a console thread, and TypeErrors when MiniMax sends
-            # content=None. Split tags here instead.
+            # content=None. Split tags here instead. ThinkFeed also covers
+            # gpt-oss-style blank first tokens (shadow think → never_think).
             stream_state = getattr(getattr(renderer, "state", None), "stream", None)
             if stream_state is not None:
                 stream_state.never_think = False
@@ -656,9 +657,7 @@ async def api_chat(request: Request) -> StreamingResponse:
             tokens = 0
             answer = ""
             reasoning = ""
-            in_think = False
-            think_ns = ""
-            never_think = False
+            parser = ThinkFeed()
             model = getattr(renderer.llm, "model_name", "")
 
             def bump(n: int = 1) -> None:
@@ -669,14 +668,7 @@ async def api_chat(request: Request) -> StreamingResponse:
                 tokens += max(1, n)
 
             for chunk in renderer.stream_response(packed):
-                piece, extra = chunk_text(chunk)
-                if extra:
-                    bump(len(extra.split()))
-                    reasoning += extra
-                    yield sse({"type": "reasoning", "content": extra}).encode()
-                visible, thought, in_think, think_ns, never_think = split_think(
-                    piece, in_think, think_ns, never_think
-                )
+                visible, thought = parser.feed_chunk(chunk)
                 if thought:
                     bump(len(thought.split()))
                     reasoning += thought

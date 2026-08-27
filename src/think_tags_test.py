@@ -9,10 +9,10 @@ import sys
 import unittest
 
 try:
-    from .think_tags import chunk_text, split_think
+    from .think_tags import ThinkFeed, chunk_text, split_think
 except ImportError:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-    from think_tags import chunk_text, split_think
+    from think_tags import ThinkFeed, chunk_text, split_think
 
 
 class _Chunk:
@@ -135,10 +135,64 @@ class ThinkTagsTest(unittest.TestCase):
         self.assertTrue(in_think)
         self.assertEqual(thought, "later")
 
-    def test_chunk_text_survives_none_content(self):
+    def test_chunk_text_survives_none_and_empty_list(self):
         piece, extra = chunk_text(_Chunk(content=None, reasoning_content="hmm"))
         self.assertEqual(piece, "")
         self.assertEqual(extra, "hmm")
+        piece, extra = chunk_text(_Chunk(content="", reasoning_content="x"))
+        self.assertEqual(piece, "")
+        self.assertEqual(extra, "x")
+        piece, extra = chunk_text(
+            _Chunk(content=[], additional_kwargs={"reasoning_content": "y"})
+        )
+        self.assertEqual(piece, "")
+        self.assertEqual(extra, "y")
+
+    def test_gpt_oss_blank_tokens_latch_on_first_nonblank(self):
+        """gpt-oss-120b: content is '' while reasoning_content streams.
+
+        First non-blank token is the answer. Mentions of <think> stay visible.
+        """
+        feed = ThinkFeed()
+        vis, thought = feed.feed_chunk(
+            _Chunk(content=None, reasoning_content="The user attached spur-server.")
+        )
+        self.assertEqual(vis, "")
+        self.assertEqual(thought, "The user attached spur-server.")
+        self.assertTrue(feed.shadow_think)
+        self.assertFalse(feed.never_think)
+
+        vis, thought = feed.feed_chunk(_Chunk(content="", reasoning_content=" Honest take."))
+        self.assertEqual(vis, "")
+        self.assertEqual(thought, " Honest take.")
+        self.assertTrue(feed.shadow_think)
+
+        vis, thought = feed.feed_chunk(
+            _Chunk(
+                content=(
+                    "Oh, spur-server.py — clean move.\n"
+                    "4. split_think() to handle `<think>` / `</thinking>` blocks."
+                )
+            )
+        )
+        self.assertTrue(feed.never_think)
+        self.assertFalse(feed.shadow_think)
+        self.assertEqual(thought, "")
+        self.assertIn("Oh, spur-server.py", vis)
+        self.assertIn("`<think>` / `</thinking>`", vis)
+
+    def test_qwen_tags_still_open_when_first_token_is_not_blank(self):
+        feed = ThinkFeed()
+        vis, thought = feed.feed("<think>secret")
+        self.assertEqual(vis, "")
+        self.assertEqual(thought, "secret")
+        self.assertTrue(feed.in_think)
+        self.assertFalse(feed.never_think)
+        vis, thought = feed.feed("</think>\nanswer `<think>` mention")
+        self.assertEqual(thought, "")
+        self.assertTrue(feed.never_think)
+        self.assertIn("answer", vis)
+        self.assertIn("`<think>` mention", vis)
 
 
 if __name__ == "__main__":

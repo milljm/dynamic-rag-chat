@@ -22,7 +22,7 @@ from .context_manager import ContextManager # For Type Hinting
 from .chat_utils import CommonUtils, ChatOptions, RAGTag # For Type Hinting
 from .model_orchestrator import Orchestration
 from .agent_tools import DuckDuckGoSearchTool
-from .think_tags import chunk_text, split_think
+from .think_tags import ThinkFeed, chunk_text
 
 # pylint: disable=too-many-instance-attributes  # this is what a dataclass is for
 @dataclass
@@ -261,53 +261,48 @@ class RenderWindow(PromptManager):
         Intercept <think> / <mm:think> tags in streamed content and optionally
         hide or reveal them.
 
-        Closers must match the opener's namespace so a MiniMax model that
-        *mentions* <think> inside <mm:think> does not end reasoning early.
-        After thinking closes once this turn, never_think latches so later
-        mentions in the answer stay visible. Reset on the next user turn.
-        LangChain sometimes sends content=None on those special tokens.
+        Blank first tokens (gpt-oss-120b) are shadow-think until the first
+        non-blank token, which latches never_think. Tag-based models still
+        open on <think>/<mm:think>; closers must match the opener namespace.
+        Reset on the next user turn.
         """
         stream = self.state.stream
-        piece, _extra = chunk_text(chunk)
+        piece, extra = chunk_text(chunk)
         try:
             chunk.content = piece
         except Exception:  # pylint: disable=broad-exception-caught
             pass
-        if stream.never_think or show:
+        if show:
             return chunk
 
-        # Empty first token: MiniMax / LangChain shadow reasoning_content.
-        if not stream.thinking and not piece:
-            stream.shadow_think = True
-            stream.thinking = True
+        was_busy = stream.thinking or stream.shadow_think
+        feed = ThinkFeed(
+            in_think=stream.thinking and not stream.shadow_think,
+            ns=stream.think_ns,
+            never_think=stream.never_think,
+            shadow_think=stream.shadow_think,
+        )
+        visible, thought = feed.feed(piece)
+        if extra:
+            thought = extra + thought
+        busy = feed.in_think or feed.shadow_think
+        if thought and not was_busy:
             stream.do_once = True
             self.start_thinking()
             self.thinking_chunk = ''
-            chunk.content = ''
-            return chunk
-
-        # Shadow thinking ends on the first non-empty chunk of any kind.
-        if stream.shadow_think and piece:
-            stream.thinking = False
-            stream.never_think = True
-            self.stop_thinking()
-            return chunk
-
-        visible, thought, in_think, ns, never = split_think(
-            piece, stream.thinking, stream.think_ns, stream.never_think
-        )
+        elif busy and not was_busy:
+            stream.do_once = True
+            self.start_thinking()
+            self.thinking_chunk = ''
         if thought:
-            if not stream.thinking:
-                stream.do_once = True
-                self.start_thinking()
-                self.thinking_chunk = ''
             self.thinking_chunk += thought
-        if stream.thinking and not in_think:
+        if was_busy and not busy:
             stream.do_once = False
             self.stop_thinking()
-        stream.thinking = in_think
-        stream.think_ns = ns
-        stream.never_think = never
+        stream.thinking = busy
+        stream.shadow_think = feed.shadow_think
+        stream.think_ns = feed.ns
+        stream.never_think = feed.never_think
         chunk.content = visible
         return chunk
 
