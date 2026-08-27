@@ -606,7 +606,7 @@ async def api_chat(request: Request) -> StreamingResponse:
             _sync_chat_object(chat)
             if regenerate:
                 pop_last_assistant(chat)
-            yield sse({"type": "status", "message": "Working — RAG / agent / prompt…"}).encode()
+            yield sse({"type": "status", "message": "Processing Prompt…"}).encode()
             if no_context:
                 parsed = parse_user_input(prompt)
                 documents = chat.no_context(parsed.clean_text or prompt)
@@ -634,12 +634,9 @@ async def api_chat(request: Request) -> StreamingResponse:
 
             renderer.set_llm(meta, documents)
             packed = renderer.get_messages(meta, documents)
-            yield sse(
-                {
-                    "type": "status",
-                    "message": f"Streaming `{getattr(renderer.llm, 'model_name', '')}`",
-                }
-            ).encode()
+            # Stay on Processing Prompt while LM Studio / Ollama loads.
+            # Flip to Streaming on the first LLM chunk, even if content is blank.
+            yield sse({"type": "status", "message": "Processing Prompt…"}).encode()
             # reveal_thinking is a Rich TUI helper: it zeros chunk.content,
             # starts a console thread, and TypeErrors when MiniMax sends
             # content=None. Split tags here instead. ThinkFeed also covers
@@ -668,6 +665,11 @@ async def api_chat(request: Request) -> StreamingResponse:
                 tokens += max(1, n)
 
             for chunk in renderer.stream_response(packed):
+                if first:
+                    # Null/empty first tokens still count as "the stream started".
+                    ttft = time.time() - started
+                    first = False
+                    yield sse({"type": "status", "message": "Streaming…"}).encode()
                 visible, thought = parser.feed_chunk(chunk)
                 if thought:
                     bump(len(thought.split()))
