@@ -80,7 +80,11 @@ def get_chat() -> Chat:
 
 
 def sse(obj: dict[str, Any]) -> str:
-    return f"data: {json.dumps(obj)}\n\n"
+    # Escape < > so a proxy/browser that HTML-parses the SSE body cannot
+    # treat a MiniMax inner <think> token as a real tag and swallow the rest
+    # of the stream.
+    payload = json.dumps(obj).replace("<", "\\u003c").replace(">", "\\u003e")
+    return f"data: {payload}\n\n"
 
 
 def _history(chat: Chat) -> dict:
