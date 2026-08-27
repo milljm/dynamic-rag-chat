@@ -1,16 +1,17 @@
 """Think-tag splitter used by the TUI and the Spur HTTP adapter.
 
-MiniMax emits <mm:think>…</mm:think> and often *mentions* <think> / </think>
-inside that block (code samples, prose). Treating `mm:` as optional used to
-close reasoning at the inner tag and stall the stream.
+Supported reasoning modes (these should always work):
 
-Thinking is once-per-turn. Two discovery modes:
+- **Namespaced tags** (MiniMax-M3): ``<mm:think>…</mm:think>``.
+  Bare ``<think>`` / ``</think>`` inside that block are prose — the model
+  talking about Python, not a closer. Only a matching ``</mm:think>`` ends it.
+- **Null / blank first tokens** (gpt-oss-120b): ``content`` is None/'' while
+  ``reasoning_content`` streams. First non-blank token is the answer, unless
+  it opens a namespaced block.
 
-- Tag-based: first non-empty token contains <think> / <mm:think> / …
-- Shadow: first token is blank (None, "", []). gpt-oss-120b and friends
-  stream reasoning on another field while content stays empty. The first
-  non-blank token is the answer — never_think latches, even if that
-  answer *mentions* <think>.
+Bare ``<think>…</think>`` (Qwen etc.) still splits. If those models *talk
+about* ``<think>`` while still inside a bare block, that is unsolvable —
+do not try.
 
 Reset the parser when the user sends a new turn.
 """
@@ -19,8 +20,21 @@ from __future__ import annotations
 import re
 from typing import Any
 
-THINK_START_RE = re.compile(r"<\s*(mm:)?(think|thinking|reasoning)\s*>", re.I)
-THINK_END_RE = re.compile(r"</\s*(mm:)?(think|thinking|reasoning)\s*>", re.I)
+# Namespaced (MiniMax). Do not make `mm:` optional — that is what used to
+# treat an inner <think> as a real tag.
+NS_START_RE = re.compile(r"<\s*mm:(think|thinking|reasoning)\s*>", re.I)
+NS_END_RE = re.compile(r"</\s*mm:(think|thinking|reasoning)\s*>", re.I)
+# Bare tags. Must NOT match <mm:think>.
+BARE_START_RE = re.compile(r"<\s*(think|thinking|reasoning)\s*>", re.I)
+BARE_END_RE = re.compile(r"</\s*(think|thinking|reasoning)\s*>", re.I)
+
+# Kept for TUI callers that still import these names.
+THINK_START_RE = re.compile(
+    r"<\s*(mm:)?(think|thinking|reasoning)\s*>", re.I
+)
+THINK_END_RE = re.compile(
+    r"</\s*(mm:)?(think|thinking|reasoning)\s*>", re.I
+)
 
 
 def tag_ns(match: re.Match[str] | None) -> str:
@@ -51,14 +65,20 @@ def chunk_text(chunk: Any) -> tuple[str, str]:
     return piece, extra
 
 
+def _earliest(*matches: re.Match[str] | None) -> re.Match[str] | None:
+    found = [m for m in matches if m]
+    if not found:
+        return None
+    return min(found, key=lambda m: m.start())
+
+
 def split_think(
     text: str, in_think: bool, ns: str = "", never_think: bool = False
 ) -> tuple[str, str, bool, str, bool]:
-    """Strip think blocks. The closer must match the opener's namespace.
+    """Strip think blocks.
 
-    Once a block closes, never_think latches True and the rest of the turn
-    (this chunk and later chunks) is visible content — even if the model
-    talks about <think> / </think>. Empty text does not latch (shadow think).
+    ``ns == "mm:"`` means MiniMax-style: ignore every bare think tag until
+    ``</mm:think>``. Empty text does not latch never_think (shadow think).
     """
     if never_think:
         return text or "", "", False, "", True
@@ -66,38 +86,37 @@ def split_think(
     content: list[str] = []
     reasoning: list[str] = []
     rest = text or ""
+    ns = (ns or "").lower()
     while rest:
         if in_think:
-            match = THINK_END_RE.search(rest)
-            if not match:
+            end = NS_END_RE.search(rest) if ns == "mm:" else BARE_END_RE.search(rest)
+            if not end:
                 reasoning.append(rest)
                 break
-            if tag_ns(match) != ns:
-                reasoning.append(rest[: match.end()])
-                rest = rest[match.end() :]
-                continue
-            reasoning.append(rest[: match.start()])
-            rest = rest[match.end() :]
+            reasoning.append(rest[: end.start()])
+            rest = rest[end.end() :]
             in_think = False
             ns = ""
             never_think = True
             if rest:
                 content.append(rest)
             break
-        match = THINK_START_RE.search(rest)
+        ns_open = NS_START_RE.search(rest)
+        bare_open = BARE_START_RE.search(rest)
+        match = _earliest(ns_open, bare_open)
         if not match:
             content.append(rest)
             never_think = True
             break
         content.append(rest[: match.start()])
-        ns = tag_ns(match)
+        ns = "mm:" if NS_START_RE.match(match.group(0)) else ""
         rest = rest[match.end() :]
         in_think = True
     return "".join(content), "".join(reasoning), in_think, ns, never_think
 
 
 class ThinkFeed:
-    """Turn-scoped parser. Blank first tokens are gpt-oss-style shadow think."""
+    """Turn-scoped parser for null-token and namespaced think modes."""
 
     def __init__(
         self,
@@ -124,12 +143,17 @@ class ThinkFeed:
         if self.shadow_think:
             if not text:
                 return "", ""
-            # First non-blank token after null reasoning: that's the answer.
-            self.shadow_think = False
-            self.in_think = False
-            self.ns = ""
-            self.never_think = True
-            return text, ""
+            # First non-blank after null tokens: gpt-oss answer — unless
+            # MiniMax is opening a namespaced block on this same chunk.
+            stripped = text.lstrip()
+            if NS_START_RE.match(stripped):
+                self.shadow_think = False
+            else:
+                self.shadow_think = False
+                self.in_think = False
+                self.ns = ""
+                self.never_think = True
+                return text, ""
 
         visible, thought, self.in_think, self.ns, self.never_think = split_think(
             text, self.in_think, self.ns, self.never_think
