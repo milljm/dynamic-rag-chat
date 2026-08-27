@@ -673,7 +673,11 @@ async def api_chat(request: Request) -> StreamingResponse:
                     # Null/empty first tokens still count as "the stream started".
                     ttft = time.time() - started
                     first = False
-                    yield sse({"type": "status", "message": "Streaming…"}).encode()
+                    yield sse({
+                        "type": "status",
+                        "message": "Streaming…",
+                        "model": model or "",
+                    }).encode()
                 visible, thought = parser.feed_chunk(chunk)
                 if thought:
                     bump(len(thought.split()))
