@@ -9,8 +9,13 @@ class Orchestration():
         self.args = args
         disable_thinking = args.disable_thinking
         think = not disable_thinking
+        # Keep model-side thinking on (chat template). Do NOT let the server
+        # (LM Studio / llama.cpp) parse generic <think> as a stream delimiter —
+        # MiniMax-M3 uses <mm:think> and often *mentions* <think> in prose,
+        # which used to abort the OpenAI stream at that token.
         extra_body = {
                        "thinking": {"type": "disabled" if not think else "enabled"},
+                       "reasoning_format": "none",
                        "chat_template_kwargs": {
                          "enable_thinking": think,
                          "include_reasoning": think,
