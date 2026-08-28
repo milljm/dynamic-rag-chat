@@ -152,14 +152,31 @@ class Orchestration():
                                 style=f'color({self.args.color})',highlight=False)
         return self.__llm.get(assistant_mode, self.__llm['general'])
 
-    def get_rout_name(self, meta_tags: list[RAGTag], documents: dict | None = None)->str:
-        """ Return route name """
+    def name_of(self, llm) -> str:
+        """Role key for a ChatOpenAI instance (story, nsfw, coding, …)."""
+        for name, client in self.__llm.items():
+            if client is llm:
+                return name
+        return ''
+
+    def get_route_name(self, meta_tags: list[RAGTag],
+                       documents: dict | None = None) -> str:
+        """Return the orchestrator role chosen for this turn."""
+        documents = documents or {}
+        if not self.args.assistant_mode:
+            if documents.get('explicit', False):
+                return 'nsfw'
+            return 'story'
         if self.requires_agent(meta_tags, documents):
             return 'agent'
         if self._requires_vision(documents):
             return 'vision'
-        assistant_mode = self._extract_mode(meta_tags)
-        return assistant_mode
+        return self._extract_mode(meta_tags)
+
+    def get_rout_name(self, meta_tags: list[RAGTag],
+                      documents: dict | None = None) -> str:
+        """Alias kept for the TUI footer."""
+        return self.get_route_name(meta_tags, documents)
 
     def route(self, meta_tags: list[RAGTag], documents: dict | None = None)->ChatOpenAI:
         """
