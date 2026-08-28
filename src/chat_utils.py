@@ -123,8 +123,6 @@ class ChatOptions:
     debug: bool = False
     verbose: bool = False
     light_mode: bool = False
-    prompts_debug: bool = False
-
 
     name: str = 'assistant'
     user_name: str = 'John'

@@ -164,7 +164,7 @@ Streamlit still works. Spur is just prettier.
 Conda + `uv` is the intended path. System Python will fight you.
 
 ```bash
-conda create -n dynamic-rag python=3.13 uv pip
+conda create -n dynamic-rag python=3.13 uv pip nodejs
 conda activate dynamic-rag
 git clone https://github.com/milljm/dynamic-rag-chat.git
 cd dynamic-rag-chat

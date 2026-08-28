@@ -422,17 +422,11 @@ class RenderWindow(PromptManager):
 
         # pylint: disable=no-member # dynamic prompts (see self.__build_prompts)
         if polish:
-            system_prompt = (prompts.get_prompt(f'{prompts.polish_prompt_file}_system.md')
-                        if self.debug or self.opts.prompts_debug else prompts.polish_prompt_system)
-
-            human_prompt = (prompts.get_prompt(f'{prompts.polish_prompt_file}_human.md')
-                        if self.debug or self.opts.prompts_debug else prompts.polish_prompt_human)
+            system_prompt = prompts.get_prompt(f'{prompts.polish_prompt_file}_system.md')
+            human_prompt = prompts.get_prompt(f'{prompts.polish_prompt_file}_human.md')
         else:
-            system_prompt = (prompts.get_prompt(f'{prompts.plot_prompt_file}_system.md')
-                        if self.debug or self.opts.prompts_debug else prompts.plot_prompt_system)
-
-            human_prompt = (prompts.get_prompt(f'{prompts.plot_prompt_file}_human.md')
-                        if self.debug or self.opts.prompts_debug else prompts.plot_prompt_human)
+            system_prompt = prompts.get_prompt(f'{prompts.plot_prompt_file}_system.md')
+            human_prompt = prompts.get_prompt(f'{prompts.plot_prompt_file}_human.md')
         # pylint: enable=no-member
 
         # Prompt conversions/templates

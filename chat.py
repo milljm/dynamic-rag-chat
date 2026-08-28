@@ -27,6 +27,7 @@
 #     "ddgs",
 #     "langchain-tavily",
 #     "streamlit",
+#     "nodejs",
 # ]
 # ///
 import os
@@ -282,9 +283,6 @@ class Chat():
         o_opts = self.opts # shorthand
         if o_opts.debug:
             console.print('[italic dim grey30]Debug mode enabled. I will re-read the '
-                               'prompt files each time.[/]')
-        elif o_opts.prompts_debug:
-            console.print('[italic dim grey30]prompts-debug enabled. I will re-read the '
                                'prompt files each time.[/]')
         if o_opts.assistant_mode and not o_opts.no_rags:
             console.print('[italic dim grey30]Assistant mode enabled. RAGs disabled'
@@ -1157,8 +1155,6 @@ def _add_arguments(parser: argparse.ArgumentParser, defaults, *, use_defaults: b
     debug_args = parser.add_argument_group("Debugging Options")
     debug_args.add_argument('-d', '--debug', action='store_true', default=D('debug'),
                             help='Print preconditioning message, prompt, etc.')
-    debug_args.add_argument('--prompts-debug', action='store_true', default=D('prompts_debug'),
-                            help='Re-read the prompt files every turn.')
 
 def parse_args(argv, yaml_opts):
     """Two-stage parse so help shows effective defaults: CLI > YAML > dataclass."""

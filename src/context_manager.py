@@ -167,10 +167,8 @@ class ContextManager(PromptManager):
         if documents.get('chat_history'):
             documents['chat_history'] = self._messages_for_last_n_turns(
                                                         documents['chat_history'], 1)
-        # pylint: disable=no-member # dynamic prompts (see self.__build_prompts)
-        human_prompt = (prompts.get_prompt(f'{prompts.tag_prompt_file}_human.md')
-                        if self.debug or self.opts.prompts_debug else prompts.tag_prompt_human)
-        # pylint: enable=no-member
+        # pylint: disable-next=no-member # dynamic prompts (see self.__build_prompts)
+        human_prompt = prompts.get_prompt(f'{prompts.tag_prompt_file}_human.md')
         human_tmpl = PromptTemplate(template=human_prompt,
                                     template_format="jinja2")
         human_msg = HumanMessagePromptTemplate(prompt=human_tmpl)
@@ -298,10 +296,8 @@ class ContextManager(PromptManager):
         prompts = self.prompts
         populated = {'character_name' : char} | documents
 
-        # pylint: disable=no-member # dynamic prompts (see self.__build_prompts)
-        human_prompt = (prompts.get_prompt(f'{prompts.entity_prompt_file}_human.md')
-                        if self.debug or self.opts.prompts_debug else prompts.entity_prompt_human)
-        # pylint: enable=no-member
+        # pylint: disable-next=no-member # dynamic prompts (see self.__build_prompts)
+        human_prompt = prompts.get_prompt(f'{prompts.entity_prompt_file}_human.md')
         human_tmpl = PromptTemplate(template=human_prompt,
                                     template_format="jinja2")
         human_msg = HumanMessagePromptTemplate(prompt=human_tmpl)
