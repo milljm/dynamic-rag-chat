@@ -153,7 +153,7 @@ The terminal is the source of truth. Two optional fronts wrap it.
 
 **Streamlit** (`streamlit_chat.py`) is the original GUI. Same flags as `chat.py` after `--`. Fine if you already live in Python.
 
-**Spur** is a React UI that never imports LangChain. `spur-server.py` sits next to `chat.py` and exposes the same session: branches, pickle history, RAG, agent tools, SSE tokens. The UI is only a view — that is why the adapter lives in *this* repo, not in [milljm/spur](https://github.com/milljm/spur). Point Spur at it with `VITE_CHAT_API=http://127.0.0.1:8765`. OpenAPI is at `http://127.0.0.1:8765/docs`.
+**Spur** is a React UI that never imports LangChain. `spur-server.py` sits next to `chat.py` and exposes the same session: branches, JSON history (`chat_history.json`, migrated from pickle on first load), RAG, agent tools, SSE tokens. The UI is only a view — that is why the adapter lives in *this* repo, not in [milljm/spur](https://github.com/milljm/spur). Point Spur at it with `VITE_CHAT_API=http://127.0.0.1:8765`. OpenAPI is at `http://127.0.0.1:8765/docs`.
 
 Streamlit still works. Spur is just prettier.
 

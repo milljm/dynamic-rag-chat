@@ -3,7 +3,7 @@
 Spur adapter — drop this next to chat.py.
 
 The React UI is only a view. This process owns Chat / SessionContext /
-RenderWindow: branches, pickle history, RAG clone/reset, agent tools,
+RenderWindow: branches, JSON history, RAG clone/reset, agent tools,
 prepare_turn, stream_response, save_history. LM Studio (or whatever is
 in .chat.yaml) is reached the same way the terminal app already does.
 
@@ -21,7 +21,6 @@ import glob
 import json
 import mimetypes
 import os
-import pickle
 import shutil
 import sys
 import time
@@ -49,12 +48,12 @@ from chat import (  # noqa: E402
     seed_from_string,
 )
 from src.think_tags import ThinkFeed  # noqa: E402
+from src.chat_utils import HISTORY_META_KEYS, load_history_from_dir  # noqa: E402
 
 LOCKED_BRANCHES = frozenset({'assistant', 'story'})
-# Metadata keys in the pickle — not message lists.
-HISTORY_META_KEYS = frozenset({'current', 'assistant_mode', 'branch_modes'})
+# Metadata keys in the history file — not message lists.
 RESERVED_NAMES = frozenset(
-    {'current', 'assistant', 'story', 'assistant_mode', 'branch_modes'}
+    {'current', 'assistant', 'story', 'assistant_mode', 'branch_modes', 'version'}
 )
 
 app = FastAPI(title='Spur')
@@ -108,17 +107,10 @@ def _vector_dir() -> str:
 
 
 def read_hist() -> dict:
-    """Load pickle directly so the branch list does not wait on Chat/Chroma."""
-    path = os.path.join(_vector_dir(), 'chat_history.pkl')
-    try:
-        with open(path, 'rb') as f:
-            data = pickle.load(f)
-        if isinstance(data, dict):
-            return data
-    except FileNotFoundError:
-        pass
-    except Exception:  # pylint: disable=broad-exception-caught
-        pass
+    """Load JSON (or legacy pickle) without constructing Chat/Chroma."""
+    loaded = load_history_from_dir(_vector_dir(), migrate=True)
+    if isinstance(loaded, dict):
+        return loaded
     if _chat is not None:
         return _history(_chat)
     return {
@@ -127,6 +119,7 @@ def read_hist() -> dict:
         'current': 'story',
         'branch_modes': {},
         'assistant_mode': False,
+        'version': 1,
     }
 
 
@@ -459,7 +452,7 @@ def set_assistant_mode(chat: Chat, enabled: bool) -> tuple[bool, str]:
 
 
 def _slim_attachments(vector_dir: str, attachments: list | None) -> list[dict]:
-    """Never pickle dataUrls. Images live under vector_dir/uploads/."""
+    """Never store dataUrls in history. Images live under vector_dir/uploads/."""
     if not attachments:
         return []
     upload_dir = os.path.join(vector_dir, 'uploads')
@@ -530,7 +523,7 @@ def persist_turn(
     attachments: list | None = None,
 ) -> None:
     documents['llm_response'] = response
-    renderer.save_history(documents, response)
+    renderer.save_history(documents, response, reasoning=reasoning)
     common = renderer.common
     hist = common.load_chat()
     if not isinstance(hist, dict):
@@ -631,7 +624,7 @@ def _op(fn, *args) -> JSONResponse:
 
 @app.get('/api/session')
 def api_session() -> dict[str, Any]:
-    # Read pickle directly — do not construct Chat/Chroma just to list branches.
+    # JSON history — do not construct Chat/Chroma just to list branches.
     return session_payload(_chat)
 
 

@@ -50,7 +50,7 @@ ASSIST = '#8ab4f8'
 
 LOCKED_BRANCHES = frozenset({'assistant', 'story'})
 RESERVED_NAMES = frozenset(
-    {'current', 'assistant', 'story', 'assistant_mode', 'branch_modes'}
+    {'current', 'assistant', 'story', 'assistant_mode', 'branch_modes', 'version'}
 )
 
 THINK_END_RE = re.compile(

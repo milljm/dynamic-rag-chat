@@ -662,6 +662,7 @@ class RenderWindow(PromptManager):
         stream.shadow_think = False
         stream.thinking = False
         stream.think_ns = ''
+        self.thinking_chunk = ''
 
     def _skip_polisher(self, documents: dict) -> bool:
         """True when the raw stream should be shown (no polish pass)."""
@@ -849,8 +850,9 @@ class RenderWindow(PromptManager):
         return None
 
 
-    def save_history(self, documents: dict, current_response: str) -> None:
-        """Save Turn using role/content messages per branch."""
+    def save_history(self, documents: dict, current_response: str,
+                     reasoning: str = '') -> None:
+        """Save turn as role/content messages. Reasoning is optional extra."""
         stream = self.state.stream
         history = self.common.load_chat()
 
@@ -886,9 +888,13 @@ class RenderWindow(PromptManager):
         if self.state.disable_thinking:
             documents['user_query'] = documents['user_query'].replace('', '')
 
-        # ── Append user/assistant pair to active branch (unchanged) ─────
-        history[branch].append({'role': 'user',      'content': documents['user_query']})
-        history[branch].append({'role': 'assistant', 'content': current_response})
+        # ── Append user/assistant pair to active branch ─────
+        assistant_msg: dict = {'role': 'assistant', 'content': current_response}
+        thought = (reasoning or getattr(self, 'thinking_chunk', '') or '').strip()
+        if thought:
+            assistant_msg['reasoning'] = thought
+        history[branch].append({'role': 'user', 'content': documents['user_query']})
+        history[branch].append(assistant_msg)
 
         stream.meta_capture = ''
         if self.debug:

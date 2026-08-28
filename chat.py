@@ -59,7 +59,7 @@ from src import CommonUtils, ChatOptions
 from src import ImportData
 from src import SceneManager
 from src import Orchestration
-from src.chat_utils import load_pdf
+from src.chat_utils import load_pdf, HISTORY_META_KEYS
 posthog.disabled = True
 dark_rich_142_styles = {
     'markdown.h1': 'bold #FFFFFF',
@@ -121,10 +121,6 @@ HELP_TEXT = (
     '    [yellow]Ctrl-E[/yellow] - move to end of line\n'
     '    [yellow]Ctrl-L[/yellow] - clear screen\n'
 )
-
-# history migration helpers
-HISTORY_META_KEYS = frozenset({'current', 'assistant_mode', 'branch_modes'})
-
 
 def is_message_list(history_branch: list) -> bool:
     """Detect whether we are on the new format."""
@@ -581,7 +577,8 @@ class Chat():
         if self.opts.assistant_mode:
             console.print('[red]Cannot manage branches in assistant mode[/red]')
             return
-        protected = {'story', 'assistant', 'current', 'assistant_mode', 'branch_modes'}
+        protected = {'story', 'assistant', 'current', 'assistant_mode',
+                     'branch_modes', 'version'}
         for branch in list(history.keys()):
             if not is_history_branch(history, branch):
                 continue
@@ -657,7 +654,7 @@ class Chat():
                 highlight=False,
             )
             return
-        if raw in {'current', 'assistant', 'assistant_mode', 'branch_modes'}:
+        if raw in {'current', 'assistant', 'assistant_mode', 'branch_modes', 'version'}:
             console.print('[red]Invalid branch name.[/red]', highlight=False)
             return
         if '@' in raw:
