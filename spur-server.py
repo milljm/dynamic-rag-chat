@@ -810,8 +810,11 @@ async def api_chat(request: Request) -> StreamingResponse:
                 }).encode()
             renderer.set_llm(meta, documents)
             packed = renderer.get_messages(meta, documents)
+            model = getattr(renderer.llm, 'model_name', '') or ''
             yield sse({
-                'type': 'status', 'message': 'Processing Prompt…',
+                'type': 'status',
+                'message': 'Processing Prompt…',
+                'model': model,
             }).encode()
             stats: dict = {}
             yield from _iter_sse_chunks(renderer, packed, documents, stats)
