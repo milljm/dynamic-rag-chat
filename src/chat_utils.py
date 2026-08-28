@@ -513,34 +513,87 @@ class CommonUtils():
             heat[x] = colors[i]
         return heat
 
+    def empty_chat_history(self) -> dict:
+        """Default branched history. Never a list — callers do .items()."""
+        assistant = bool(getattr(self.opts, "assistant_mode", False))
+        return {
+            "story": [],
+            "assistant": [],
+            "current": "assistant" if assistant else "story",
+            "branch_modes": {},
+            "assistant_mode": assistant,
+        }
+
+    @staticmethod
+    def _read_pickle_dict(path: str) -> dict | None:
+        try:
+            with open(path, "rb") as handle:
+                data = pickle.load(handle)
+        except FileNotFoundError:
+            return None
+        except (pickle.UnpicklingError, EOFError) as exc:
+            print(f"Warning: could not read {path}: {exc}")
+            return None
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            print(f"Warning: Error loading chat: {exc}")
+            return None
+        if isinstance(data, dict):
+            return data
+        print(f"Warning: {path} is a {type(data).__name__}, expected dict")
+        return None
+
     def save_chat(self, history)->None:
-        """ Persist chat history (save) """
+        """ Persist chat history (save). Atomic replace so a crash cannot
+        truncate chat_history.pkl (Spur used to pickle full image dataUrls).
+        """
         if self.opts.continue_from != -1:
             if self.opts.debug:
                 self.console.print('CONTINUE_FROM Enabled. Not saving chat',
                                    style=f'color({self.opts.color})', highlight=True)
             return
+        if not isinstance(history, dict):
+            print(f"Error saving chat: history is {type(history).__name__}, not dict")
+            return
         history_file = os.path.join(self.opts.vector_dir, 'chat_history.pkl')
+        tmp = history_file + ".tmp"
+        bak = history_file + ".bak"
         try:
-            with open(history_file, "wb") as f:
-                pickle.dump(history, f)
+            os.makedirs(self.opts.vector_dir, exist_ok=True)
+            with open(tmp, "wb") as handle:
+                pickle.dump(history, handle)
+                handle.flush()
+                os.fsync(handle.fileno())
+            if os.path.exists(history_file):
+                try:
+                    os.replace(history_file, bak)
+                except OSError:
+                    pass
+            os.replace(tmp, history_file)
         except FileNotFoundError as e:
             print(f'Error saving chat. Check --history-dir\n{e}')
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            print(f"Error saving chat: {exc}")
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
 
     def load_chat(self)->dict:
-        """ Persist chat history (load) """
+        """ Persist chat history (load). Never sys.exit — Spur is an HTTP server.
+        Truncated pickles fall back to .bak, then to in-memory/empty history.
+        """
         history_file = os.path.join(self.opts.vector_dir, 'chat_history.pkl')
-        try:
-            with open(history_file, "rb") as f:
-                self.chat_history_session = pickle.load(f)
-        except FileNotFoundError:
-            pass
-        except pickle.UnpicklingError as e:
-            print(f'Chat history file {history_file} not a pickle file:\n{e}')
-            sys.exit(1)
-        # pylint: disable=broad-exception-caught  # so many ways to fail, catch them all
-        except Exception as e:
-            print(f'Warning: Error loading chat: {e}')
+        loaded = self._read_pickle_dict(history_file)
+        if loaded is None:
+            loaded = self._read_pickle_dict(history_file + ".bak")
+            if loaded is not None:
+                print(f"Warning: restored chat history from {history_file}.bak")
+        if loaded is None:
+            if isinstance(self.chat_history_session, dict):
+                return self.chat_history_session
+            self.chat_history_session = self.empty_chat_history()
+            return self.chat_history_session
+        self.chat_history_session = loaded
         return self.chat_history_session
 
     def save_thinking(self, thinking_str: str)->None:

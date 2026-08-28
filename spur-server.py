@@ -16,13 +16,16 @@ Then point the UI at this origin:
 """
 from __future__ import annotations
 
+import base64
 import glob
 import json
+import mimetypes
 import os
 import pickle
 import shutil
 import sys
 import time
+import uuid
 from copy import deepcopy
 from typing import Any, Iterator
 
@@ -88,7 +91,10 @@ def sse(obj: dict[str, Any]) -> str:
 
 
 def _history(chat: Chat) -> dict:
-    return chat.session.common.load_chat()
+    hist = chat.session.common.load_chat()
+    if isinstance(hist, dict):
+        return hist
+    return chat.session.common.empty_chat_history()
 
 
 def _vector_dir() -> str:
@@ -219,6 +225,14 @@ def _mode_label(assistant: bool) -> str:
 
 def session_payload(chat: Chat | None = None) -> dict[str, Any]:
     hist = _history(chat) if chat is not None else read_hist()
+    if not isinstance(hist, dict):
+        hist = {
+            "story": [],
+            "assistant": [],
+            "current": "story",
+            "branch_modes": {},
+            "assistant_mode": False,
+        }
     if chat is not None:
         current, mode = _sync_chat_object(chat, hist)
     else:
@@ -244,7 +258,9 @@ def session_payload(chat: Chat | None = None) -> dict[str, Any]:
                 if m.get("metrics"):
                     row["metrics"] = m["metrics"]
                 if m.get("attachments"):
-                    row["attachments"] = m["attachments"]
+                    row["attachments"] = _hydrate_attachments(
+                        _vector_dir(), m["attachments"]
+                    )
                 clean.append(row)
             elif isinstance(m, str) and m.strip():
                 clean.append({"role": "assistant", "content": m})
@@ -389,7 +405,7 @@ def delete_last_turn(chat: Chat) -> tuple[bool, str]:
     msgs = hist.get(branch, [])
     if not msgs:
         return False, "History empty."
-    if msgs and msgs[-1].get("role") == "assistant":
+    if msgs and isinstance(msgs[-1], dict) and msgs[-1].get("role") == "assistant":
         msgs.pop()
     if msgs and msgs[-1].get("role") == "user":
         msgs.pop()
@@ -442,6 +458,69 @@ def set_assistant_mode(chat: Chat, enabled: bool) -> tuple[bool, str]:
     return True, _mode_label(target)
 
 
+def _slim_attachments(vector_dir: str, attachments: list | None) -> list[dict]:
+    """Never pickle dataUrls. Images live under vector_dir/uploads/."""
+    if not attachments:
+        return []
+    upload_dir = os.path.join(vector_dir, "uploads")
+    os.makedirs(upload_dir, exist_ok=True)
+    slim: list[dict] = []
+    for raw in attachments:
+        if not isinstance(raw, dict):
+            continue
+        rec = {
+            k: raw[k]
+            for k in ("id", "name", "mime", "kind", "size")
+            if raw.get(k) is not None
+        }
+        rec.setdefault("id", uuid.uuid4().hex)
+        rec.setdefault("kind", "image" if raw.get("dataUrl") else "text")
+        if rec.get("kind") == "text" and raw.get("text"):
+            rec["text"] = str(raw["text"])[:100_000]
+        data = raw.get("dataUrl")
+        if rec.get("kind") == "image" and isinstance(data, str) and data:
+            payload = data.split(",", 1)[1] if data.startswith("data:") and "," in data else data
+            try:
+                blob = base64.b64decode(payload)
+            except Exception:  # pylint: disable=broad-exception-caught
+                blob = b""
+            if blob:
+                mime = str(rec.get("mime") or "image/png")
+                ext = mimetypes.guess_extension(mime.split(";")[0].strip()) or ".png"
+                if ext == ".jpe":
+                    ext = ".jpg"
+                fname = f"{rec['id']}{ext}"
+                with open(os.path.join(upload_dir, fname), "wb") as handle:
+                    handle.write(blob)
+                rec["file"] = f"uploads/{fname}"
+        slim.append(rec)
+    return slim
+
+
+def _hydrate_attachments(vector_dir: str, attachments: list | None) -> list:
+    """Re-attach dataUrls from uploads/ so Spur can render them."""
+    if not isinstance(attachments, list):
+        return []
+    out = []
+    for rec in attachments:
+        if not isinstance(rec, dict):
+            continue
+        row = dict(rec)
+        row.pop("dataUrl", None)
+        rel = row.get("file")
+        if rel:
+            path = os.path.join(vector_dir, rel) if not os.path.isabs(str(rel)) else str(rel)
+            try:
+                if os.path.isfile(path) and os.path.getsize(path) <= 8_000_000:
+                    mime = str(row.get("mime") or "image/png")
+                    b64 = base64.b64encode(open(path, "rb").read()).decode("ascii")
+                    row["dataUrl"] = f"data:{mime};base64,{b64}"
+            except Exception:  # pylint: disable=broad-exception-caught
+                pass
+        out.append(row)
+    return out
+
+
 def persist_turn(
     renderer,
     documents: dict,
@@ -454,10 +533,18 @@ def persist_turn(
     renderer.save_history(documents, response)
     common = renderer.common
     hist = common.load_chat()
+    if not isinstance(hist, dict):
+        hist = common.empty_chat_history()
     branch = hist.get("current", "story")
     msgs = hist.get(branch) or []
+    if not isinstance(msgs, list):
+        msgs = []
+        hist[branch] = msgs
     if (
         len(msgs) >= 3
+        and isinstance(msgs[-1], dict)
+        and isinstance(msgs[-2], dict)
+        and isinstance(msgs[-3], dict)
         and msgs[-1].get("role") == "assistant"
         and msgs[-2].get("role") == "user"
         and msgs[-3].get("role") == "user"
@@ -466,9 +553,10 @@ def persist_turn(
         hist[branch] = msgs
         common.save_chat(hist)
     if attachments:
+        slim = _slim_attachments(_vector_dir(), attachments)
         for m in reversed(msgs):
-            if m.get("role") == "user":
-                m["attachments"] = attachments
+            if isinstance(m, dict) and m.get("role") == "user":
+                m["attachments"] = slim
                 break
     extra = {}
     if reasoning and reasoning.strip():
