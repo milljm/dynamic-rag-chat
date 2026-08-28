@@ -759,7 +759,7 @@ class RenderWindow(PromptManager):
 
     def _prime_live_panel(self, documents, meta_data, footer_meta, color) -> None:
         """Set header/query/assistant/response before Live starts."""
-        rag = '' if not self.state.no_rags and self.state.assistant_mode else 'RAG+'
+        rag = '' if self.state.no_rags else 'RAG+'
         took = '{:.1f}s'.format(footer_meta['pre_process_time'])
         self.renderable.header = Text(
             f'Submitting relevant {rag}History tokens: '

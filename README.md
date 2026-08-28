@@ -47,7 +47,7 @@ That is the whole product: targeted context, not a bigger window.
 - **Branches** — fork / switch / delete; RAG collections clone with the fork (`\branch`, `\dbranch`, or the Streamlit / Spur cards)
 - **Two flavors**
   - **Story** — role-play prompts, scene grounding, optional NPC sheets + polisher
-  - **Assistant** — tool-style prompts, optional vision + web-search agent, RAG off unless you pass `--use-rags`
+  - **Assistant** — tool-style prompts, optional vision + web-search agent, RAG on (pass `--no-rags` to disable)
 - **Pre-processor** — lightweight LLM for tags *and* model routing (casual → general → coder → analysis)
 - **Optional post-process** — threaded RAG write-back; story mode can mint entity files
 - **Gold / canon import** — pre-load a read-oriented collection from `.md`, `.html`, `.txt`, `.pdf`, `.template`
@@ -128,7 +128,7 @@ Chunking is parent/child, not a single 100/50 split:
 
 Retrieval is an ensemble (filter + similarity), then BM25 on that set, then parent-document expansion. Dedupe drops chunks that overlap history or each other (~65% containment).
 
-`--rag-matches 0` disables retrieval. Assistant mode **skips RAG unless `--use-rags`**.
+`--rag-matches 0` disables retrieval. `--no-rags` skips retrieve/store entirely (tagging and routing still run). RAG is on by default in both story and assistant mode.
 
 ### Models
 

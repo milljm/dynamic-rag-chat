@@ -13,8 +13,8 @@ Return ONE valid JSON object only.
   - string
   - array of strings
   - float (for confidence)
-- No nulls, bools,
-- No nested objects except the top-level "metadata" object.
+- No nulls, bools
+- No nested objects except the top-level "metadata" object
 - No extra fields
 - Arrays must always be arrays (never a single string)
 
@@ -24,59 +24,46 @@ Return ONE valid JSON object only.
 If unsure, choose a reasonable general tag instead of leaving fields empty.
 
 ## 2) entity must NEVER be empty
-entity:
-PC and NPCs present this turn. {{user_name}} is the PC (Player Character and protagonist) and is always present.
+entity: [string array]
+PC and NPCs physically present this turn. {{user_name}} is the PC and is always present.
 Rules:
-- People's names only (no locations, no inanimate objects)
+- People's names only (no locations, no objects, no pronouns: i/me/you/he/she/they)
 - Always include {{user_name}}
+- Include NPCs who are in the room even if {{user_name}} did not name them this turn,
+  using PREVIOUS_TURN when they have not left
+- Do not list known characters who are elsewhere
 
 ## 3) audience
 audience: [string array]
-PC and NPCs engaged in dialog
-Rules:
-- People's names only (no inanimate objects)
-- Dialog is typically written in double quotes. If double quotes appear in INPUT_TEXT, assume characters are speaking and infer who is part of the conversation.
-- Always include {{user_name}} if there is dialog in INPUT_TEXT.
+PC and NPCs engaged in dialog (names in double quotes). Empty array if nobody is speaking.
+Always include {{user_name}} if there is dialog.
 
-## 5) content_rating
+## 4) content_rating
 content_rating: string
-Rate the content as being appropriate for work `sfw` or not suitable for work `nsfw`
-Rules:
-- `nsfw` material includes any of the following:
-  - explicit material
-  - sexual activities
-  - nudity descriptors
-  - descriptive gore
-If INPUT_TEXT is not `nsfw` default to `sfw`
+`sfw` or `nsfw`. nsfw = explicit sexual content, nudity, or descriptive gore.
+Default `sfw`.
 
-## 6) nsfw_reason
+## 5) nsfw_reason
 nsfw_reason: string
-Use one of:
-- sexual_content
-- nudity
-- gore
-- explicit_dialogue
-- graphic_violence
+One of: sexual_content, nudity, gore, explicit_dialogue, graphic_violence, none
 
-## 7) player_location
+## 6) player_location
 player_location: string
-Generic location where {{user_name}} is currently located.
+Short generic place where {{user_name}} is. Reuse PREVIOUS_TURN's location unless
+INPUT_TEXT clearly moves them. Do not invent a new room for looking around.
 
-## 8) npc_location
-npc_location: [string array]
-NPC's name followed by a colon separator and their current location: ["john: in car", "jane: in house"]
-Use empty array if no NPCs present, or their location is unknown.
+## 7) npc_locations
+npc_locations: [string array]
+"name: place" for NPCs. Empty array if unknown. Example: ["mira: tavern", "cal: stables"]
 
-## 9) moving_confidence
+## 8) moving_confidence
 moving_confidence: float
-Rate your confidence that {{user_name}} is moving to a new location in INPUT_TEXT.
-
+Confidence that {{user_name}} is changing to a *different* player_location this turn.
 Use:
-- 0.9–1.0 when {{user_name}} is physically moving to a different location turn
-- 0.6–0.8 when {{user_name}} is possibly moving away from current location this turn
-- 0.3–0.5 when {{user_name}} is not physically moving to a new location this turn
-
-Avoid always using 1.0.
+- 0.9–1.0 only when INPUT_TEXT has them leave for a named new place
+- 0.5–0.7 when they might be moving but the destination is the same room
+- 0.0–0.4 when they stay, look around, talk, or wait
+Never use a high score just because someone walked across the room.
 
 # JSON SCHEMA
 {
@@ -92,7 +79,8 @@ Avoid always using 1.0.
 }
 
 # FINAL CHECK BEFORE OUTPUT
-- entity contains at least one item
+- entity contains at least {{user_name}}
+- npc_locations (plural), not npc_location
 - all text lowercase
 - valid JSON only
 

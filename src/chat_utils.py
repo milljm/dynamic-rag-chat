@@ -205,7 +205,6 @@ class ChatOptions:
         'rag_matches':               'matches',
         'history_max':               'chat_history',
         'chat_max':                  'chat_history',
-        'use_rags':                  'no_rags',
         'casual_server':             'casual_host',
         'coder_server':              'coder_host',
         'structured_server':         'structured_host',
@@ -213,7 +212,7 @@ class ChatOptions:
     }
 
     _INT_FIELDS = {'matches', 'completion_tokens', 'chat_history', 'history_sessions'}
-    _IGNORED_FIELDS = {'color'}
+    _IGNORED_FIELDS = {'color', 'use_rags'}
     @classmethod
     def _build(cls,
                current_dir: str | Path,
@@ -238,6 +237,11 @@ class ChatOptions:
 
         # vector directory default needs `current_dir`
         data.setdefault('vector_dir', os.path.join(current_dir, 'vector_data'))
+        # Old yaml used `use_rags: true` to *enable* RAG (the flag was inverted).
+        # `no_rags` now means disable. Honor the old key only when the new one
+        # is absent.
+        if 'no_rags' not in raw and 'use_rags' in raw:
+            data['no_rags'] = not bool(raw.get('use_rags'))
         return cls(**data)
 
     @classmethod
