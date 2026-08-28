@@ -1,0 +1,39 @@
+[MAIN]
+load-plugins=
+ignore=prompts,vector_data,.git
+jobs=0
+persistent=no
+
+[FORMAT]
+max-line-length=100
+ignore-long-lines=^\s*(# )?<?https?://\S+>?$
+
+[MESSAGES CONTROL]
+# Dataclasses and argparse helpers trip these without adding value.
+disable=
+    too-few-public-methods,
+    too-many-instance-attributes,
+    too-many-arguments,
+    too-many-positional-arguments,
+    too-many-locals,
+    duplicate-code,
+    consider-using-f-string,
+    import-error,
+
+[DESIGN]
+max-statements=50
+max-branches=12
+max-returns=8
+max-bool-expr=5
+max-nested-blocks=5
+max-public-methods=25
+min-public-methods=1
+max-attributes=20
+
+[BASIC]
+good-names=i,j,k,n,x,y,ex,e,f,D,_,id,kb
+no-docstring-rgx=^(test_|_)
+
+
+[STRING]
+check-quote-consistency=no

@@ -137,14 +137,14 @@ class RenderWindow(PromptManager):
 
         # Agent Prompt
         self.agent_prompt = ChatPromptTemplate.from_messages([
-            ("system", ('You are a helpful research assistant. Today\'s date is '
+            ('system', ("You are a helpful research assistant. Today\'s date is "
                         f'{datetime.today().strftime("%B %d, %Y")}. Use web search to find '
                         'accurate, up-to-date information. If this is a follow-up search, '
                         'run a new query that fills the gaps — do not repeat the first '
                         'search verbatim unless the first results were empty.'))
             ,
-            ("user", "{input}"),
-            MessagesPlaceholder(variable_name="agent_scratchpad"),
+            ('user', '{input}'),
+            MessagesPlaceholder(variable_name='agent_scratchpad'),
             ])
         # Prompts
         self.prompts = PromptManager(
@@ -159,10 +159,10 @@ class RenderWindow(PromptManager):
         self.thinking_thread = Thread(target=self.animate_thinking)
         self.namepulse_active: bool = False
         self.namepulse_thread = Thread(target=self.animate_namepulse)
-        key = (self.opts.tavily_key or "").strip().lower()
+        key = (self.opts.tavily_key or '').strip().lower()
         self.agent_tools = (
                 [TavilySearch(tavily_api_key=self.opts.tavily_key)]
-                if key and key != "none"
+                if key and key != 'none'
                 else [DuckDuckGoSearchTool()]
             )
 
@@ -184,7 +184,7 @@ class RenderWindow(PromptManager):
         self.renderable = Renderables(
             header = Text(''),
             query = Markdown('', code_theme=self.state.syntax_theme),
-            separator=Rule(style="bold color(208)"),
+            separator=Rule(style='bold color(208)'),
             assistant = Text('', style='bold color(208)'),
             response = Markdown('', code_theme=self.state.syntax_theme),
             footer = Text('')
@@ -229,7 +229,7 @@ class RenderWindow(PromptManager):
         for keyword, (icon, title) in patterns.items():
             if keyword in clean:
                 version = self._get_version(model)
-                return f"{icon} {title} [{version}]"
+                return f'{icon} {title} [{version}]'
 
         parts = re.split(r'[-_/]', model)
         version = self._get_version(model)
@@ -364,9 +364,9 @@ class RenderWindow(PromptManager):
         if images:
             image_blocks = [
                 {
-                    "type": "image_url",
-                    "image_url": {
-                        "url": f"data:image/jpeg;base64,{img_b64}"
+                    'type': 'image_url',
+                    'image_url': {
+                        'url': f"data:image/jpeg;base64,{img_b64}"
                     }
                 }
                 for img_b64 in images
@@ -376,7 +376,7 @@ class RenderWindow(PromptManager):
                 if isinstance(msg, HumanMessage):
                     if isinstance(msg.content, str):
                         messages[i] = HumanMessage(content=[
-                            {"type": "text", "text": msg.content},
+                            {'type': 'text', 'text': msg.content},
                             *image_blocks
                         ])
                     elif isinstance(msg.content, list):
@@ -386,13 +386,13 @@ class RenderWindow(PromptManager):
 
     @staticmethod
     def _llm_text(resp) -> str:
-        piece = getattr(resp, "content", None)
-        if piece is None or piece == "" or piece == []:
-            extra = getattr(resp, "reasoning_content", None) or ""
+        piece = getattr(resp, 'content', None)
+        if piece is None or piece == '' or piece == []:
+            extra = getattr(resp, 'reasoning_content', None) or ''
             if not extra:
-                kwargs = getattr(resp, "additional_kwargs", None) or {}
-                extra = (kwargs.get("reasoning_content") or "") if isinstance(kwargs, dict) else ""
-            piece = extra or ""
+                kwargs = getattr(resp, 'additional_kwargs', None) or {}
+                extra = (kwargs.get('reasoning_content') or '') if isinstance(kwargs, dict) else ''
+            piece = extra or ''
         if not isinstance(piece, str):
             piece = str(piece)
         visible, _, _, _, _ = split_think(piece, False)
@@ -401,34 +401,34 @@ class RenderWindow(PromptManager):
     @staticmethod
     def _parse_agent_followup(text: str) -> str | None:
         """Return a refined query from YES: …, or None for NO / garbage."""
-        lines = [ln.strip() for ln in (text or "").splitlines() if ln.strip()]
+        lines = [ln.strip() for ln in (text or '').splitlines() if ln.strip()]
         if not lines:
             return None
         for ln in reversed(lines):
-            cleaned = ln.strip("`").strip()
+            cleaned = ln.strip('`').strip()
             upper = cleaned.upper()
-            if upper == "NO" or upper.startswith("NO:") or upper.startswith("NO "):
+            if upper == 'NO' or upper.startswith('NO:') or upper.startswith('NO '):
                 return None
-            if upper.startswith("YES:"):
-                query = cleaned.split(":", 1)[1].strip().strip("\"'")
+            if upper.startswith('YES:'):
+                query = cleaned.split(':', 1)[1].strip().strip("\"'")
                 return query or None
         return None
 
     def _agent_followup_query(self, documents: dict) -> str | None:
         """Ask the agent model if another web search is worth it."""
-        if int(documents.get("agent_calls", 0)) >= MAX_AGENT_CALLS:
+        if int(documents.get('agent_calls', 0)) >= MAX_AGENT_CALLS:
             return None
-        original = documents.get("original_user_query") or documents.get("user_query", "")
-        evidence = str(documents.get("dynamic_files") or "")[-6000:]
+        original = documents.get('original_user_query') or documents.get('user_query', '')
+        evidence = str(documents.get('dynamic_files') or '')[-6000:]
         prompt = (
-            "You already ran a web search for this user query:\n"
-            f"{original}\n\n"
-            "Search results:\n"
-            f"{evidence}\n\n"
-            "If the results are enough to answer the user, reply with exactly: NO\n"
-            "If you need one more search, reply with exactly:\n"
-            "YES: <refined search query>\n"
-            "No explanation."
+            'You already ran a web search for this user query:\n'
+            f'{original}\n\n'
+            'Search results:\n'
+            f'{evidence}\n\n'
+            'If the results are enough to answer the user, reply with exactly: NO\n'
+            'If you need one more search, reply with exactly:\n'
+            'YES: <refined search query>\n'
+            'No explanation.'
         )
         try:
             resp = self.llm.invoke([HumanMessage(content=prompt)])
@@ -438,14 +438,14 @@ class RenderWindow(PromptManager):
 
     def _invoke_web_agent(self, documents: dict, polish: bool, meta_data) -> list:
         """Run AgentExecutor once, then recurse so a follow-up search can happen."""
-        if int(documents.get("agent_calls", 0)) >= MAX_AGENT_CALLS:
-            documents["agent_ran"] = True
+        if int(documents.get('agent_calls', 0)) >= MAX_AGENT_CALLS:
+            documents['agent_ran'] = True
             return self.get_messages(meta_data, documents, polish=polish)
-        documents.setdefault("original_user_query", documents["user_query"])
-        documents.setdefault("dynamic_files", "")
-        documents["agent_calls"] = int(documents.get("agent_calls", 0)) + 1
-        call_n = documents["agent_calls"]
-        documents["agent_ran"] = True
+        documents.setdefault('original_user_query', documents['user_query'])
+        documents.setdefault('dynamic_files', '')
+        documents['agent_calls'] = int(documents.get('agent_calls', 0)) + 1
+        call_n = documents['agent_calls']
+        documents['agent_ran'] = True
         agent = create_openai_tools_agent(self.llm, self.agent_tools, self.agent_prompt)
         agent_executor = AgentExecutor(
             agent=agent,
@@ -454,50 +454,50 @@ class RenderWindow(PromptManager):
             max_iterations=4,
         )
         agent_input = (
-            documents.pop("agent_followup_query", None)
-            or documents["original_user_query"]
+            documents.pop('agent_followup_query', None)
+            or documents['original_user_query']
         )
-        label = f"({call_n}/{MAX_AGENT_CALLS})"
+        label = f'({call_n}/{MAX_AGENT_CALLS})'
         try:
             self.console.print(
-                f"Agent Tool Web Search {label} (ctl-c to cancel)...",
-                style=f"color({self.state.color})",
+                f'Agent Tool Web Search {label} (ctl-c to cancel)...',
+                style=f'color({self.state.color})',
                 highlight=False,
             )
-            result = agent_executor.invoke({"input": agent_input})
-            documents["dynamic_files"] += (
-                f"\n=== AGENT_TOOL_RESULT {label} ===\n{result}\n\n"
+            result = agent_executor.invoke({'input': agent_input})
+            documents['dynamic_files'] += (
+                f'\n=== AGENT_TOOL_RESULT {label} ===\n{result}\n\n'
             )
         except KeyboardInterrupt:
-            documents["dynamic_files"] += (
-                "\n=== AGENT_TOOL_RESULT ===\nUSER CANCELED SEARCH\n\n"
+            documents['dynamic_files'] += (
+                '\n=== AGENT_TOOL_RESULT ===\nUSER CANCELED SEARCH\n\n'
             )
             return self.get_messages(meta_data, documents, polish=polish)
         except Exception:  # pylint: disable=broad-exception-caught
             self.console.print(
-                "Error running agent!",
-                style=f"color({self.state.color})",
+                'Error running agent!',
+                style=f'color({self.state.color})',
                 highlight=False,
             )
-            documents["dynamic_files"] += (
-                "\n=== AGENT_TOOL_RESULT ===\n"
-                "ERROR: Tool execution failed.\n"
-                "INSTRUCTION: You must inform the user that the web/tool search failed "
-                "and that you cannot answer reliably without it. "
-                "Do NOT fabricate or guess.\n\n"
+            documents['dynamic_files'] += (
+                '\n=== AGENT_TOOL_RESULT ===\n'
+                'ERROR: Tool execution failed.\n'
+                'INSTRUCTION: You must inform the user that the web/tool search failed '
+                'and that you cannot answer reliably without it. '
+                'Do NOT fabricate or guess.\n\n'
             )
-            documents["agent_error"] = "<AGENT_ERROR: TRUE>"
+            documents['agent_error'] = '<AGENT_ERROR: TRUE>'
             return self.get_messages(meta_data, documents, polish=polish)
 
         if call_n < MAX_AGENT_CALLS:
             follow = self._agent_followup_query(documents)
             if follow:
-                documents["agent_followup_query"] = follow
-                documents["agent_ran"] = False
-                documents["use_agent"] = True
+                documents['agent_followup_query'] = follow
+                documents['agent_ran'] = False
+                documents['use_agent'] = True
                 self.console.print(
-                    f"Agent follow-up search: {follow}",
-                    style=f"color({self.state.color})",
+                    f'Agent follow-up search: {follow}',
+                    style=f'color({self.state.color})',
                     highlight=False,
                 )
         return self.get_messages(meta_data, documents, polish=polish)
@@ -522,14 +522,16 @@ class RenderWindow(PromptManager):
         diag = (self.ooc_response or '').strip()
         if diag:
             documents['ooc_diagnostics'] = (
-                'CRITICAL: Previous turn generated invalid output. You are to study the previous turn'
-                f' and and understand your folly/error, and follow these correction_rules:\n{diag}\n'
-                '\nend correction_rules.')
+                'CRITICAL: Previous turn generated invalid output. You are to '
+                'study the previous turn and understand your folly/error, and '
+                f'follow these correction_rules:\n{diag}\n'
+                '\nend correction_rules.'
+            )
         else:
             documents['ooc_diagnostics'] = ''
         documents['ooc_diagnostics_bool'] = 'TRUE' if diag else 'FALSE'
         documents['ooc_mode_bool'] = (
-            'TRUE' if documents['user_query'].strip().lower().startswith("ooc:") else 'FALSE')
+            'TRUE' if documents['user_query'].strip().lower().startswith('ooc:') else 'FALSE')
         self.ooc_response = ''
 
         # One shot VISION population
@@ -552,9 +554,9 @@ class RenderWindow(PromptManager):
 
         # Prompt conversions/templates
         system_tmpl = PromptTemplate(template=system_prompt,
-                                     template_format="jinja2")
+                                     template_format='jinja2')
         human_tmpl  = PromptTemplate(template=human_prompt,
-                                     template_format="jinja2")
+                                     template_format='jinja2')
 
         system_msg = SystemMessagePromptTemplate(prompt=system_tmpl)
         human_msg  = HumanMessagePromptTemplate(prompt=human_tmpl)
@@ -653,145 +655,199 @@ class RenderWindow(PromptManager):
         self.llm = self.orchestrator.route(meta_data, documents)
         return self.llm
 
-    def live_stream(self, documents: dict, meta_data: RAGTag)->None:
-        """ Handle the Rich Live updating process """
-        stream = self.state.stream   # shorthand
-        context = self.state.context # shorthand
+    def _reset_think_state(self) -> None:
+        """Clear think-tag latches at the start of a turn."""
+        stream = self.state.stream
         stream.never_think = False
         stream.shadow_think = False
         stream.thinking = False
         stream.think_ns = ''
+
+    def _skip_polisher(self, documents: dict) -> bool:
+        """True when the raw stream should be shown (no polish pass)."""
+        return (
+            self.opts.polisher_llm == 'None'
+            or documents['user_query'].find('OOC:') != -1
+            or self.opts.assistant_mode
+        )
+
+    def _paint_token(self, documents, footer_meta, color, live, inference_start,
+                     start_time, current_response) -> None:
+        """Update the live footer/name after one stream piece."""
+        stream = self.state.stream
+        if self._skip_polisher(documents):
+            self.renderable.response = self.build_content(current_response)
+        else:
+            self.renderable.response = Text(
+                'Receiving message to polish...', style=f'color({color}',
+            )
+        self.renderable.footer = self.render_footer(
+            time.time() - inference_start,
+            time.time() - start_time,
+            **footer_meta,
+        )
+        if (isinstance(self.renderable.response, Markdown)
+                and stream.do_once
+                and not stream.shadow_think):
+            stream.do_once = False
+            cleared = True
+        else:
+            cleared = False
+        name_color = self.state.pulse_colors[self.state.pulse_color_index]
+        self.renderable.assistant = Text(
+            documents['name'], style=f'bold color({name_color})',
+        )
+        self.render_chat(live)
+        return cleared
+
+    def _consume_model_stream(self, messages, documents, footer_meta, color,
+                              live, inference_start):
+        """Read the LLM stream into the live panel.
+
+        Returns (assembled text, first-token timestamp).
+        """
+        current_response = ''
+        first_token_at = 0
+        for piece in self.stream_response(messages):
+            piece = self.reveal_thinking(piece, self.state.verbose)
+            if first_token_at == 0:
+                first_token_at = time.time()
+            current_response += piece.content
+            footer_meta['token_count'] += self.response_count(piece.content)
+            if self._paint_token(
+                documents, footer_meta, color, live, inference_start,
+                first_token_at, current_response,
+            ):
+                current_response = ''
+        return current_response, first_token_at
+
+    def _run_polisher(self, documents, meta_data, footer_meta, color, live,
+                      inference_start, first_token_at, current_response) -> str:
+        """Optional polish passes; returns the last pass text."""
+        self.renderable.response = Text('Loading Polisher...', style=f'color({color}')
+        self.render_chat(live)
+        self.common.write_debug(
+            f'polisher_input-{self.llm.model_name}', current_response,
+        )
+        passes = int(self.opts.polisher_cnt)
+        for pass_num in range(passes):
+            documents['llm_response'] = current_response
+            messages = self.get_messages(meta_data, documents, polish=True)
+            current_response = ''
+            for piece in self.stream_response(messages):
+                piece = self.reveal_thinking(piece, self.state.verbose)
+                current_response += piece.content
+                footer_meta['token_count'] += self.response_count(piece.content)
+                if passes == pass_num + 1:
+                    self.renderable.response = self.build_content(current_response)
+                else:
+                    self.renderable.response = Text(
+                        f'Polishing pass {pass_num+1} of {passes-1} before final...',
+                        style=f'color({color}',
+                    )
+                self.renderable.footer = self.render_footer(
+                    time.time() - inference_start,
+                    time.time() - first_token_at,
+                    **footer_meta,
+                )
+                name_color = self.state.pulse_colors[self.state.pulse_color_index]
+                self.renderable.assistant = Text(
+                    documents['name'], style=f'bold color({name_color})',
+                )
+                self.render_chat(live)
+        return current_response
+
+    def _prime_live_panel(self, documents, meta_data, footer_meta, color) -> None:
+        """Set header/query/assistant/response before Live starts."""
+        rag = '' if not self.state.no_rags and self.state.assistant_mode else 'RAG+'
+        took = '{:.1f}s'.format(footer_meta['pre_process_time'])
+        self.renderable.header = Text(
+            f'Submitting relevant {rag}History tokens: '
+            f'{footer_meta["prompt_tokens"]} '
+            f'{documents.get("in_line_commands", "")} '
+            f'(took {took})...',
+            style=f'color({color})',
+        )
+        self.renderable.query = Markdown(
+            f'**You:** {documents["user_query"]}',
+            code_theme=self.state.syntax_theme,
+        )
+        self.renderable.assistant = Text(documents['name'], style='bold color(208)')
+        route = self.orchestrator.get_rout_name(meta_data, documents)
+        self.renderable.response = Text(
+            f'Inference/Loading ({route} LLM)...', style=f'color({color}',
+        )
+        self.renderable.footer = self.render_footer(0.0, 0.0, **footer_meta)
+
+    def live_stream(self, documents: dict, meta_data: RAGTag)->None:
+        """Stream one turn into the Rich Live display and persist it."""
+        self._reset_think_state()
         history = self.common.load_chat()
         pre_process_time = float(documents['pre_process_time'])
         start_time = time.time()
-
-        # Grab suitable llm model from orchestrator (sets agent tool if needed)
         self.llm = self.orchestrator.route(meta_data, documents)
         messages = self.get_messages(meta_data, documents)
-        # Run orchestrator again after grabbing messages (sets appropriate model after agent runs)
         self.llm = self.orchestrator.route(meta_data, documents)
-
-        pre_process_time += time.time()-start_time
+        pre_process_time += time.time() - start_time
         token_total = documents['prompt_tokens']
         for message in messages:
-            token_total += context.token_retriever(message.content)
-        current_response = ''
-        if self.opts.assistant_mode:
-            branch = 'assistant'
-        else:
-            branch = history.get('current', 'story')
-        footer_meta = {'token_savings'   : documents['token_savings'],
-                       'prompt_tokens'   : token_total,
-                       'cleaned_color'   : documents['cleaned_color'],
-                       'pre_process_time': pre_process_time,
-                       'token_count'     : 0,
-                       'content_rating'  : documents['explicit'],
-                       'turn_count'      : len(history[branch])+1
-                       }
-        color = self.state.color-5 if self.state.light_mode else self.state.color
-        _rag = '' if not self.state.no_rags and self.state.assistant_mode else 'RAG+'
-        self.renderable.header = Text(f'Submitting relevant {_rag}History tokens: '
-                                      f'{footer_meta["prompt_tokens"]} '
-                                      f'{documents.get("in_line_commands", "")} '
-                                      f"(took {'{:.1f}s'.format(pre_process_time)})...",
-                                      style=f'color({color})')
-        self.renderable.query = Markdown(f'**You:** {documents["user_query"]}',
-                                         code_theme=self.state.syntax_theme)
-        self.renderable.assistant = Text(documents["name"], style='bold color(208)')
-        self.renderable.response = Text('Inference/Loading ('
-                                        f'{self.orchestrator.get_rout_name(meta_data, documents)}'
-                                        ' LLM)...', style=f'color({color}')
-        self.renderable.footer = self.render_footer(0.0, 0.0, **footer_meta)
+            token_total += self.state.context.token_retriever(message.content)
+        branch = 'assistant' if self.opts.assistant_mode else history.get(
+            'current', 'story',
+        )
+        footer_meta = {
+            'token_savings': documents['token_savings'],
+            'prompt_tokens': token_total,
+            'cleaned_color': documents['cleaned_color'],
+            'pre_process_time': pre_process_time,
+            'token_count': 0,
+            'content_rating': documents['explicit'],
+            'turn_count': len(history[branch]) + 1,
+        }
+        color = self.state.color - 5 if self.state.light_mode else self.state.color
+        self._prime_live_panel(documents, meta_data, footer_meta, color)
         inference_start = time.time()
-        start_time = 0
+        current_response = ''
         with Live(refresh_per_second=30, console=self.console) as live:
             live.console.clear(home=True)
             self.render_chat(live)
             self.start_namepulse()
             try:
-                for piece in self.stream_response(messages):
-                    piece = self.reveal_thinking(piece, self.state.verbose)
-                    if start_time == 0:
-                        start_time = time.time()
-                    current_response += piece.content
-                    footer_meta['token_count'] += self.response_count(piece.content)
-                    if (self.opts.polisher_llm == 'None'
-                        or documents['user_query'].find('OOC:') != -1
-                        or self.opts.assistant_mode):
-                        self.renderable.response = self.build_content(current_response)
-                    else:
-                        self.renderable.response = Text('Receiving message to polish...',
-                                                        style=f'color({color}')
-                    self.renderable.footer = self.render_footer(time.time() - inference_start,
-                                                                time.time() - start_time,
-                                                                **footer_meta)
-                    # replace 'thinking' output with Model's Markdown response
-                    if (isinstance(self.renderable.response, Markdown)
-                            and stream.do_once
-                            and not stream.shadow_think):
-                        stream.do_once = False
-                        # Reset (erase) the thinking output
-                        current_response = ''
-                    name_color = self.state.pulse_colors[self.state.pulse_color_index]
-                    self.renderable.assistant = Text(documents["name"],
-                                                    style=f'bold color({name_color})')
-                    self.render_chat(live)
-            # pylint: disable-next=broad-exception-caught  # too many ways for LLMs to fail
-            except Exception as e:
+                current_response, first_token_at = self._consume_model_stream(
+                    messages, documents, footer_meta, color, live,
+                    inference_start,
+                )
+            except Exception as exc:  # pylint: disable=broad-exception-caught
                 error_text = (
-                    f"**LLM Error**: {e}\n\nThe model backend may need to be reloaded.")
+                    f'**LLM Error**: {exc}\n\n'
+                    'The model backend may need to be reloaded.'
+                )
                 self.renderable.response = self.build_content(error_text)
                 self.render_chat(live)
                 if self.state.debug:
                     traceback.print_exc()
-                return
-
+                return None
             documents['llm_response'] = current_response
-
-            # Polisher + polishing cnt
-            if (self.opts.polisher_llm != 'None'
-                    and documents['user_query'].find('OOC:') == -1
-                    and not self.opts.assistant_mode):
-                self.renderable.response = Text('Loading Polisher...',
-                                                     style=f'color({color}')
-                self.render_chat(live)
-                self.common.write_debug(f'polisher_input-{self.llm.model_name}', current_response)
-                for pass_num in range(int(self.opts.polisher_cnt)):
-                    documents['llm_response'] = current_response
-                    messages = self.get_messages(meta_data, documents, polish=True)
-                    current_response = ''
-                    for piece in self.stream_response(messages):
-                        piece = self.reveal_thinking(piece, self.state.verbose)
-                        current_response += piece.content
-                        footer_meta['token_count'] += self.response_count(piece.content)
-                        if int(self.opts.polisher_cnt) == pass_num+1:
-                            self.renderable.response = self.build_content(current_response)
-                        else:
-                            self.renderable.response = Text(
-                                f'Polishing pass {pass_num+1} of'
-                                f' {int(self.opts.polisher_cnt)-1} before final...',
-                                style=f'color({color}')
-                        self.renderable.footer = self.render_footer(time.time() - inference_start,
-                                                                    time.time() - start_time,
-                                                                    **footer_meta)
-                        name_color = self.state.pulse_colors[self.state.pulse_color_index]
-                        self.renderable.assistant = Text(documents["name"],
-                                                    style=f'bold color({name_color})')
-                        self.render_chat(live)
-
+            if not self._skip_polisher(documents):
+                current_response = self._run_polisher(
+                    documents, meta_data, footer_meta, color, live,
+                    inference_start, first_token_at or inference_start,
+                    current_response,
+                )
             self.stop_namepulse()
             if not current_response or current_response == ' ':
-                self.renderable.response = self.build_content('Error: received no response '
-                                                              'from LLM')
-
-            self.renderable.assistant = Text(documents["name"], style='bold color(208)')
+                self.renderable.response = self.build_content(
+                    'Error: received no response from LLM',
+                )
+            self.renderable.assistant = Text(
+                documents['name'], style='bold color(208)',
+            )
             self.render_chat(live)
-
-        # Do not save any output if \no-context was used or LLM failed to produce output
         if documents.get('no_context', False) or not current_response:
-            return
+            return None
+        self.save_history(documents, current_response)
+        return None
 
-        return self.save_history(documents, current_response)
 
     def save_history(self, documents: dict, current_response: str) -> None:
         """Save Turn using role/content messages per branch."""
@@ -804,19 +860,19 @@ class RenderWindow(PromptManager):
             history[branch] = []
 
         # ── Persist mode metadata alongside the save ────────────────────
-        history["assistant_mode"] = bool(self.opts.assistant_mode)
+        history['assistant_mode'] = bool(self.opts.assistant_mode)
         history.setdefault('branch_modes', {})
-        history["branch_modes"][branch] = bool(self.opts.assistant_mode)
+        history['branch_modes'][branch] = bool(self.opts.assistant_mode)
 
         # ── OOC handling (unchanged) ─────────────────────────────────────
         ooc_prefix = self.common.regex.ooc_prefix
         if ooc_prefix.search(current_response) or ooc_prefix.search(
-            documents["user_query"]
+            documents['user_query']
         ):
             if not ooc_prefix.search(current_response):
                 self.console.print(
-                    "\nNOTE:\tBad LLM response. LLM ignored OOC request.",
-                    style=f"color({self.state.color})",
+                    '\nNOTE:\tBad LLM response. LLM ignored OOC request.',
+                    style=f'color({self.state.color})',
                 )
                 return
             self.ooc_response = current_response
@@ -824,21 +880,21 @@ class RenderWindow(PromptManager):
 
         # ── Context handling (unchanged) ────────────────────────────────
         documents['llm_response'] = current_response
-        self.state.context.handle_context(documents, direction="store")
+        self.state.context.handle_context(documents, direction='store')
         current_response = self.common.sanitize_response(current_response)
 
         if self.state.disable_thinking:
-            documents["user_query"] = documents["user_query"].replace("", "")
+            documents['user_query'] = documents['user_query'].replace('', '')
 
         # ── Append user/assistant pair to active branch (unchanged) ─────
-        history[branch].append({"role": "user",      "content": documents["user_query"]})
-        history[branch].append({"role": "assistant", "content": current_response})
+        history[branch].append({'role': 'user',      'content': documents['user_query']})
+        history[branch].append({'role': 'assistant', 'content': current_response})
 
-        stream.meta_capture = ""
+        stream.meta_capture = ''
         if self.debug:
-            self.console.print("DEBUG: saving to RAG...", highlight=False)
+            self.console.print('DEBUG: saving to RAG...', highlight=False)
 
         self.common.save_chat(history)
 
         if self.debug:
-            self.console.print("DEBUG: live finished", highlight=False)
+            self.console.print('DEBUG: live finished', highlight=False)

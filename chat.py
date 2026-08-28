@@ -62,75 +62,75 @@ from src import Orchestration
 from src.chat_utils import load_pdf
 posthog.disabled = True
 dark_rich_142_styles = {
-    "markdown.h1": "bold #FFFFFF",
-    "markdown.h2": "bold #CCCCCC",
-    "markdown.h3": "bold #999999",
-    "markdown.h4": "italic #777777",
-    "markdown.h5": "#555555",
-    "markdown.h6": "#333333",
-    "markdown.item.bullet": "yellow",
-    "markdown.hr": "yellow",
-    "markdown.table.header": "bold white",
-    "markdown.table.border": "bright_black",
+    'markdown.h1': 'bold #FFFFFF',
+    'markdown.h2': 'bold #CCCCCC',
+    'markdown.h3': 'bold #999999',
+    'markdown.h4': 'italic #777777',
+    'markdown.h5': '#555555',
+    'markdown.h6': '#333333',
+    'markdown.item.bullet': 'yellow',
+    'markdown.hr': 'yellow',
+    'markdown.table.header': 'bold white',
+    'markdown.table.border': 'bright_black',
 }
 light_rich_142_styles = {
-    "markdown.h1": "bold #000000",
-    "markdown.h2": "bold #333333",
-    "markdown.h3": "bold #666666",
-    "markdown.h4": "#888888",
-    "markdown.h5": "#AAAAAA",
-    "markdown.h6": "#BBBBBB",
-    "markdown.item.bullet": "yellow",
-    "markdown.hr": "yellow",
-    "markdown.table.header": "bold white",
-    "markdown.table.border": "bright_black",
+    'markdown.h1': 'bold #000000',
+    'markdown.h2': 'bold #333333',
+    'markdown.h3': 'bold #666666',
+    'markdown.h4': '#888888',
+    'markdown.h5': '#AAAAAA',
+    'markdown.h6': '#BBBBBB',
+    'markdown.item.bullet': 'yellow',
+    'markdown.hr': 'yellow',
+    'markdown.table.header': 'bold white',
+    'markdown.table.border': 'bright_black',
 }
 
 console = Console(highlight=True, theme=Theme(dark_rich_142_styles))
 current_dir = os.path.dirname(os.path.abspath(__file__))
 
-CMD_LINE = re.compile(r"^[ \t]*\\(?P<cmd>[A-Za-z0-9_\-\?]+)(?:[ \t]+(?P<args>.*))?$")
-RARE_TOKENS = (r"[RARE NOW]", r"[RARE USED]", r"[RARE RESET]", r"[SAFE MODE]")
-RARE_TOKENS_RE = re.compile("|".join(re.escape(t) for t in RARE_TOKENS))
-INCLUDE_RE = re.compile(r"\{\{([^}]+)\}\}")  # {{/path}} or {{https://url}}
+CMD_LINE = re.compile(r'^[ \t]*\\(?P<cmd>[A-Za-z0-9_\-\?]+)(?:[ \t]+(?P<args>.*))?$')
+RARE_TOKENS = (r'[RARE NOW]', r'[RARE USED]', r'[RARE RESET]', r'[SAFE MODE]')
+RARE_TOKENS_RE = re.compile('|'.join(re.escape(t) for t in RARE_TOKENS))
+INCLUDE_RE = re.compile(r'\{\{([^}]+)\}\}')  # {{/path}} or {{https://url}}
 
 HELP_TEXT = (
-    "in-command switches you can use (some are mode-specific):\n\n"
-    "\t\\regenerate                  - regenerate last turn\n"
-    "\t\\no-context msg              - perform a query with no context\n"
-    "\t\\agent msg                   - force agent (web search)\n"
-    "\t\\delete-last                 - delete last message from history\n"
-    "\t\\turn                        - show turn/status\n"
-    "\t\\rewind N                    - rewind to turn N (keep 0..N)\n"
-    "\t\\branch NAME@N               - set/fork branch name, if empty list branches;\n"
-    "\t                               optional @N to fork from first N turns\n"
-    "\t\\dbranch NAME                - delete chat history branch\n"
-    "\t\\history [N]                 - show last N user inputs (default 5)\n"
-    "\t\\include branch msg          - include branch as attachment\n"
-    "\t\\reset                       - resets history/RAG for current branch\n"
-    "\n[bold]context injection[/bold]\n"
-    "    {{/absolute/path/to/file}}       - include a file as context\n"
-    "    {{https://somewebsite.com/}}     - include URL as context\n"
-    "\n[bold]story controls[/bold]\n"
+    'in-command switches you can use (some are mode-specific):\n\n'
+    '\t\\regenerate                  - regenerate last turn\n'
+    '\t\\no-context msg              - perform a query with no context\n'
+    '\t\\agent msg                   - force agent (web search)\n'
+    '\t\\delete-last                 - delete last message from history\n'
+    '\t\\turn                        - show turn/status\n'
+    '\t\\rewind N                    - rewind to turn N (keep 0..N)\n'
+    '\t\\branch NAME@N               - set/fork branch name, if empty list branches;\n'
+    '\t                               optional @N to fork from first N turns\n'
+    '\t\\dbranch NAME                - delete chat history branch\n'
+    '\t\\history [N]                 - show last N user inputs (default 5)\n'
+    '\t\\include branch msg          - include branch as attachment\n'
+    '\t\\reset                       - resets history/RAG for current branch\n'
+    '\n[bold]context injection[/bold]\n'
+    '    {{/absolute/path/to/file}}       - include a file as context\n'
+    '    {{https://somewebsite.com/}}     - include URL as context\n'
+    '\n[bold]story controls[/bold]\n'
     f"    {', '.join(RARE_TOKENS)}\n"
-    "\n[bold]keyboard shortcuts (terminal):[/bold]\n\n"
-    "    [yellow]Ctrl-W[/yellow] - delete word left of cursor\n"
-    "    [yellow]Ctrl-U[/yellow] - delete everything left of cursor\n"
-    "    [yellow]Ctrl-K[/yellow] - delete everything right of cursor\n"
-    "    [yellow]Ctrl-A[/yellow] - move to beginning of line\n"
-    "    [yellow]Ctrl-E[/yellow] - move to end of line\n"
-    "    [yellow]Ctrl-L[/yellow] - clear screen\n"
+    '\n[bold]keyboard shortcuts (terminal):[/bold]\n\n'
+    '    [yellow]Ctrl-W[/yellow] - delete word left of cursor\n'
+    '    [yellow]Ctrl-U[/yellow] - delete everything left of cursor\n'
+    '    [yellow]Ctrl-K[/yellow] - delete everything right of cursor\n'
+    '    [yellow]Ctrl-A[/yellow] - move to beginning of line\n'
+    '    [yellow]Ctrl-E[/yellow] - move to end of line\n'
+    '    [yellow]Ctrl-L[/yellow] - clear screen\n'
 )
 
 # history migration helpers
-HISTORY_META_KEYS = frozenset({"current", "assistant_mode", "branch_modes"})
+HISTORY_META_KEYS = frozenset({'current', 'assistant_mode', 'branch_modes'})
 
 
 def is_message_list(history_branch: list) -> bool:
     """Detect whether we are on the new format."""
     return (bool(history_branch)
             and isinstance(history_branch[0], dict)
-            and "role" in history_branch[0])
+            and 'role' in history_branch[0])
 
 
 def is_history_branch(history: dict, name: str) -> bool:
@@ -143,7 +143,7 @@ def turn_count(messages: list) -> int:
     if not messages:
         return 0
     if is_message_list(messages):
-        return sum(1 for m in messages if m.get("role") == "user")
+        return sum(1 for m in messages if m.get('role') == 'user')
     return len(messages)  # old format
 
 
@@ -172,9 +172,9 @@ def delete_last_turn(messages: list) -> list:
         return messages
     if is_message_list(messages):
         # remove last assistant + last user (if present)
-        if messages and messages[-1].get("role") == "assistant":
+        if messages and messages[-1].get('role') == 'assistant':
             messages.pop()
-        if messages and messages[-1].get("role") == "user":
+        if messages and messages[-1].get('role') == 'user':
             messages.pop()
         return messages
     messages.pop()
@@ -234,24 +234,24 @@ def parse_user_input(raw: str) -> ParsedInput:
     line = raw.strip()
 
     # 1) Extract a leading command like \rewind 12
-    command, c_args = None, ""
+    command, c_args = None, ''
     m = CMD_LINE.match(line.splitlines()[0]) if line else None
     if m:
         command = m.group(1).lower()
-        c_args = (m.group(2) or "").strip()
+        c_args = (m.group(2) or '').strip()
         # remove the first line entirely (the \cmd line)
         rest = line.splitlines()[1:]
-        line = "\n".join(rest).strip()
+        line = '\n'.join(rest).strip()
 
     # 2) Extract RARE tokens anywhere in the remaining text
     rare_controls = RARE_TOKENS_RE.findall(line)
     if rare_controls:
-        line = RARE_TOKENS_RE.sub("", line).strip()
+        line = RARE_TOKENS_RE.sub('', line).strip()
 
     # 3) Extract includes like {{/abs/path}} or {{https://...}}
     includes = INCLUDE_RE.findall(line)
     if includes:
-        line = INCLUDE_RE.sub("", line).strip()
+        line = INCLUDE_RE.sub('', line).strip()
 
     return ParsedInput(
         clean_text=line,
@@ -262,7 +262,9 @@ def parse_user_input(raw: str) -> ParsedInput:
     )
 
 class CustomWidthFormatter(argparse.RawTextHelpFormatter):
+    """Help formatter that keeps flags readable at width 100."""
     def __init__(self, prog):
+        """Pin help position and total width for the CLI."""
         super().__init__(prog, max_help_position=40, width=100)
 
 class Chat():
@@ -438,7 +440,7 @@ class Chat():
                 _file = os.path.basename(included_file)
                 documents['user_query'] = documents['user_query'].replace(included_file,
                                                                           f'{_file} {icon} ✅')
-                if icon == "🖼️":  # Image
+                if icon == '🖼️':  # Image
                     documents['dynamic_images'].append(data)
                 else:
                     documents['dynamic_files'] += f'\n=== {_file} ===\n{data}\n\n'
@@ -462,31 +464,32 @@ class Chat():
                 icon, data = self._process_pdf(included_file)
             else:
                 if _format == 'html':
-                    icon = "🌍"
+                    icon = '🌍'
                 elif mime == 'text':
-                    icon = "📄"
+                    icon = '📄'
                 data = self._process_text(included_file)
         return data, icon
 
     def _process_text(self, included_file: str):
+        """Read a local text/html file as UTF-8."""
         with open(included_file, 'r', encoding='utf-8') as f:
             data = f.read()
         return data
 
     def _process_image(self, included_file: str, _format: str) -> tuple:
         """Process image files."""
-        icon = "🖼️"
+        icon = '🖼️'
         with Image.open(included_file) as img:
-            img = img.convert("RGB")
+            img = img.convert('RGB')
             buffered = io.BytesIO()
             img.save(buffered, format=_format)
-            data = base64.b64encode(buffered.getvalue()).decode("utf-8")
+            data = base64.b64encode(buffered.getvalue()).decode('utf-8')
         return icon, data
 
     def _process_pdf(self, included_file: str) -> tuple:
         """Process PDF files."""
-        icon = "📕"
-        data = "".join(doc.page_content for doc in load_pdf(included_file))
+        icon = '📕'
+        data = ''.join(doc.page_content for doc in load_pdf(included_file))
         return icon, data
 
     def _process_url(self, url: str) -> tuple:
@@ -497,8 +500,8 @@ class Chat():
             response = self.scraper.get(url, headers=headers, timeout=10)
             if response.status_code == 200:
                 soup = BeautifulSoup(response.content, 'html.parser')
-                return soup.get_text(), "🌍"
-            return f"Error {response.status_code}", "❌"
+                return soup.get_text(), '🌍'
+            return f'Error {response.status_code}', '❌'
         # pylint: disable=bare-except  # too many ways this can go wrong
         except:
             return None, None
@@ -546,319 +549,326 @@ class Chat():
                      }
         return documents
 
+    def _cmd_delete_last(self, history: dict) -> None:
+        """Drop the last assistant/user turn from the current branch."""
+        try:
+            history[self.chat_branch] = delete_last_turn(history[self.chat_branch])
+            self.session.common.save_chat(history)
+            self.session.renderer.clear_ooc()
+            console.print('[green]Deleted last turn.[/green]', highlight=False)
+        except IndexError:
+            console.print('[yellow]History empty.[/yellow]')
+
+    def _cmd_rewind(self, history: dict, arg: str) -> None:
+        """Keep turns 1..N on the current branch."""
+        try:
+            n = int(arg)
+            cur = history[self.chat_branch]
+            total = turn_count(cur)
+            if not 1 <= n <= total:
+                console.print(f'[red]usage: \\rewind N  (1 ≤ N ≤ {total})[/red]')
+                return
+            history[self.chat_branch] = slice_to_turn(cur, n)
+            self.session.common.save_chat(history)
+            console.print(
+                f'[green]Rewound to turn {n} of {total}.[/green]',
+                highlight=False,
+            )
+            self.session.renderer.clear_ooc()
+        except ValueError:
+            console.print('[red]usage: \\rewind N[/red]')
+
+    def _cmd_dbranch(self, history: dict, arg: str) -> None:
+        """Delete a named history branch and its on-disk RAG."""
+        if self.opts.assistant_mode:
+            console.print('[red]Cannot manage branches in assistant mode[/red]')
+            return
+        protected = {'story', 'assistant', 'current', 'assistant_mode', 'branch_modes'}
+        for branch in list(history.keys()):
+            if not is_history_branch(history, branch):
+                continue
+            if arg == self.chat_branch:
+                console.print(
+                    '[red]Cannot delete current branch you are on. '
+                    'Use "/reset" instead',
+                )
+                return
+            if arg in protected:
+                console.print(f'[red]Cannot delete {arg} branch. (protected)[/red]')
+                return
+            if arg == branch and arg != 'current':
+                history.pop(arg)
+                pattern = f'{self.opts.vector_dir}{os.path.sep}{arg}*'
+                for path in glob.glob(pattern):
+                    if os.path.isdir(path):
+                        console.print(f'[green]Deleting:[/green] {path}')
+                        shutil.rmtree(path)
+                self.session.rag.delete_collection(arg)
+                self.session.common.save_chat(history)
+                console.print(f'[green]Deleted: [/green]{arg}', highlight=False)
+                return
+
+    def _cmd_reset(self, history: dict) -> None:
+        """Clear history and RAG for the current branch."""
+        self.session.rag.delete_collection(self.chat_branch)
+        history[self.chat_branch] = []
+        pattern = f'{self.opts.vector_dir}{os.path.sep}{self.chat_branch}*'
+        for path in glob.glob(pattern):
+            if os.path.isdir(path):
+                console.print(f'[green]Deleting:[/green] {path}')
+                shutil.rmtree(path)
+        console.print(f'[green]Reset: [/green]{self.chat_branch}', highlight=False)
+        self.session.common.save_chat(history)
+
+    def _list_branches(self, history: dict) -> None:
+        """Print branch names with turn counts and a preview of the last message."""
+        branches = sorted(k for k in history.keys() if is_history_branch(history, k))
+        maxlen = max((len(n) for n in branches), default=0)
+        if self.chat_branch in branches:
+            branches.remove(self.chat_branch)
+            branches.insert(0, self.chat_branch)
+        for name in branches:
+            count = turn_count(history[name])
+            preview = ''
+            if count > 0:
+                last = history[name][-1].get('content', '')
+                last = ' '.join(last.split())
+                preview = last[:40] + ('…' if len(last) > 40 else '')
+                preview = f'[dim]{preview}[/dim]'
+            if name == self.chat_branch:
+                console.print(
+                    f'\t➡ [green]{name:<{maxlen}}[/green] : '
+                    f'[{count:>3}] {preview}',
+                    highlight=False,
+                )
+            else:
+                console.print(
+                    f'\t  {name:<{maxlen}} : [{count:>3}] {preview}',
+                    highlight=False,
+                )
+
+    def _create_or_switch_branch(self, history: dict, spec: str) -> None:
+        """Switch to NAME, or fork the current branch (optionally NAME@N)."""
+        raw = spec.strip()
+        if self.opts.assistant_mode:
+            console.print(
+                '[red]Not possible while in assistant mode. If you wish '
+                'to use this feature,\nrun the streamlit version instead'
+                ':[/red]\n\n\tstreamlit run streamlit_chat.py -- '
+                '--assistant-mode',
+                highlight=False,
+            )
+            return
+        if raw in {'current', 'assistant', 'assistant_mode', 'branch_modes'}:
+            console.print('[red]Invalid branch name.[/red]', highlight=False)
+            return
+        if '@' in raw:
+            name, n_str = raw.split('@', 1)
+            try:
+                cut = int(n_str) * 2
+            except ValueError:
+                console.print('[red]usage: \\branch NAME[@N][/red]', highlight=False)
+                return
+        else:
+            name, cut = raw, None
+        if self._branch_exists(history, name):
+            if name == self.chat_branch:
+                console.print(f'[green]Already on branch:[/green] {name}', highlight=False)
+            else:
+                self.chat_branch = name
+                history['current'] = name
+                console.print(f'[green]Switched to :[/green] {name}', highlight=False)
+            self.session.common.save_chat(history)
+            return
+        src = self.chat_branch
+        base = history[src]
+        new_list = deepcopy(self._slice_upto(
+            base, cut if cut is not None else len(base),
+        ))
+        history[name] = new_list
+        history['current'] = name
+        self.chat_branch = name
+        self.session.common.save_chat(history)
+        self.session.renderer.clear_ooc()
+        try:
+            if cut is None:
+                self.session.rag.clone_collection(src, name, overwrite=False)
+            else:
+                self.session.rag.build_collection_from_texts(
+                    name, new_list, overwrite=True,
+                )
+            console.print(f'[green]Branched to:[/green] {name}', highlight=False)
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            console.print(
+                f'[red]RAG sync failed for "{name}":[/red] {exc}',
+                highlight=False,
+            )
+
+    def _cmd_branch(self, history: dict, arg: str) -> None:
+        """List branches, or create/switch to NAME[@N]."""
+        if not arg:
+            self._list_branches(history)
+            return
+        self._create_or_switch_branch(history, arg)
+
+    def _cmd_history(self, history: dict, arg: str) -> None:
+        """Print the last N turns of the current branch."""
+        try:
+            n = int(arg or '5')
+        except ValueError:
+            n = 5
+        messages = history[self.chat_branch]
+        turns = get_last_n_turns(messages, n)
+        if not turns:
+            console.print('[yellow]No history yet.[/yellow]')
+            return
+        total_turns = turn_count(messages)
+        turn_num = total_turns - (len(turns) // 2)
+        for msg in turns:
+            if not isinstance(msg, dict):
+                console.print(f'\n\n{msg}')
+                continue
+            role = msg.get('role', '?').lower()
+            content = msg.get('content', '')
+            if role == 'user':
+                turn_num += 1
+                console.print()
+                console.print(f'[bold cyan]⬇  TURN {turn_num}  ⬇[/bold cyan]')
+                console.print(f'[bold]USER:[/bold] {content}')
+            elif role == 'assistant':
+                console.print(f'\n[bold]AI:[/bold] {content}')
+            else:
+                console.print(f'\n[dim]{role.upper()}:[/dim] {content}')
+        console.print()
+
+    def _cmd_regenerate(self, history: dict):
+        """Pop the last assistant message and re-parse the previous user text.
+
+        Returns a ParsedInput to send, or None if history is empty.
+        """
+        try:
+            last = history[self.chat_branch].pop()
+            match = re.findall(r'USER:(.*\n\n)', last)
+            self.session.common.save_chat(history)
+            return parse_user_input(match[0])
+        except IndexError:
+            console.print('[yellow]History empty.[/yellow]')
+            return None
+
+    def _dispatch_command(self, parsed, history: dict):
+        """Handle slash commands.
+
+        Returns (parsed, skip_model). skip_model True means the TUI loop
+        should continue without calling the LLM.
+        """
+        cmd, arg = parsed.command, parsed.args
+        skip_and_done = {
+            'delete-last': lambda: self._cmd_delete_last(history),
+            'turn': lambda: console.print(turn_count(history[self.chat_branch])),
+            'rewind': lambda: self._cmd_rewind(history, arg),
+            'dbranch': lambda: self._cmd_dbranch(history, arg),
+            'reset': lambda: self._cmd_reset(history),
+            'branch': lambda: self._cmd_branch(history, arg),
+            'history': lambda: self._cmd_history(history, arg),
+        }
+        if cmd in skip_and_done:
+            skip_and_done[cmd]()
+            return parsed, True
+        if cmd in ('no-context', 'include', 'agent'):
+            if not self.opts.assistant_mode:
+                console.print('[red]Only available while in assistant mode.[/red]')
+                return parsed, True
+            return parsed, False
+        if cmd == 'regenerate':
+            nxt = self._cmd_regenerate(history)
+            if nxt is None:
+                return parsed, True
+            return nxt, False
+        console.print(f'[red]Unknown command:[/red] \\{cmd}')
+        return parsed, True
+
+    def _prepare_turn_documents(self, parsed, history: dict, raw: str):
+        """Build the documents dict for this user turn, or None on failure."""
+        meta_data = []
+        if parsed.command in ('no-context', 'agent'):
+            if parsed.command == 'no-context':
+                documents = self.no_context(parsed.args or parsed.clean_text)
+            else:
+                documents, meta_data = self.get_documents(
+                    parsed.args or parsed.clean_text,
+                )
+            documents['in_line_commands'] = f'Meta: [{parsed.command}]'
+        else:
+            documents, meta_data = self.get_documents(parsed.clean_text)
+        if not documents:
+            console.print(
+                '[red]There was an error while running pre-processor work.[/red]'
+                'In many cases, re-submitting your query again solves the issue.',
+            )
+            return None, None
+        if parsed.command == 'include':
+            val = parsed.args
+            if val not in history:
+                console.print(f'[red]Unknown branch[/red] \\{val}')
+                return None, None
+            include_branch = ' '.join(history[val][-self.opts.history_sessions:])
+            documents['include_branch'] = str(include_branch)
+        if parsed.command == 'agent':
+            documents['use_agent'] = True
+            documents['agent_ran'] = False
+        if parsed.includes:
+            inc_docs = self.load_content_as_context(
+                ' '.join(f'{{{{{x}}}}}' for x in parsed.includes),
+            )
+            documents.update(inc_docs)
+            documents['user_query'] = (
+                f'{raw} \n\nattachments:{documents["user_query"]}'
+            )
+        return documents, meta_data
+
     def chat(self):
-        """ Prompt the User for questions, and begin! """
+        """Prompt the user for questions and stream replies."""
         c_session = PromptSession()
         kb = KeyBindings()
+
         @kb.add('escape', 'enter')
         def handle_submit(event):
-            buffer = event.current_buffer
-            buffer.validate_and_handle()
+            """Send the multiline buffer (Esc+Enter)."""
+            event.current_buffer.validate_and_handle()
 
         @kb.add('enter')
         def handle_newline(event):
-            buffer = event.current_buffer
-            buffer.insert_text('\n')
+            """Insert a newline instead of submitting."""
+            event.current_buffer.insert_text('\n')
 
-        console.print('💬 Press [italic red]Esc Enter[/italic red] to send message, '
-                      r'[red]\?[/red] [italic red]Esc Enter[/italic red] for help, '
-                      '[italic red]Ctrl-C[/italic red] to quit.\n')
-
+        console.print(
+            '💬 Press [italic red]Esc Enter[/italic red] to send message, '
+            r'[red]\?[/red] [italic red]Esc Enter[/italic red] for help, '
+            '[italic red]Ctrl-C[/italic red] to quit.\n',
+        )
         try:
             while True:
-                raw = c_session.prompt(">>> ",
-                                       multiline=True,
-                                       key_bindings=kb).strip()
+                raw = c_session.prompt(
+                    '>>> ', multiline=True, key_bindings=kb,
+                ).strip()
                 if not raw:
                     continue
-
                 if raw == r'\?':
                     console.print(HELP_TEXT)
                     continue
                 history = self.session.common.load_chat()
                 parsed = parse_user_input(raw)
-                # Global commands that do not call the model:
                 if parsed.command:
-                    cmd, arg = parsed.command, parsed.args
-                    if cmd == "delete-last":
-                        try:
-                            history[self.chat_branch] = delete_last_turn(history[self.chat_branch])
-                            self.session.common.save_chat(history)
-                            self.session.renderer.clear_ooc()
-                            console.print('[green]Deleted last turn.[/green]', highlight=False)
-                        except IndexError:
-                            console.print('[yellow]History empty.[/yellow]')
+                    parsed, skip = self._dispatch_command(parsed, history)
+                    if skip:
                         continue
-
-                    elif cmd == 'turn':
-                        console.print(turn_count(history[self.chat_branch]))
-                        continue
-
-                    elif cmd == 'rewind':
-                        try:
-                            n = int(arg)
-                            cur = history[self.chat_branch]
-                            total = turn_count(cur)
-                            if not (1 <= n <= total):
-                                console.print(f'[red]usage: \\rewind N  (1 ≤ N ≤ {total})[/red]')
-                                continue
-                            history[self.chat_branch] = slice_to_turn(cur, n)
-                            self.session.common.save_chat(history)
-                            console.print(f'[green]Rewound to turn {n} of {total}.[/green]',
-                                          highlight=False)
-                            self.session.renderer.clear_ooc()
-                        except ValueError:
-                            console.print('[red]usage: \\rewind N[/red]')
-                        continue
-                    elif cmd == "dbranch":
-                        if self.opts.assistant_mode:
-                            console.print('[red]Cannot manage branches in assistant mode[/red]')
-                            continue
-                        for branch in history.keys():
-                            if not is_history_branch(history, branch):
-                                continue
-                            if arg == self.chat_branch:
-                                console.print('[red]Cannot delete current branch you are on. '
-                                              'Use "/reset" instead')
-                                break
-                            if arg in ['story',
-                                       'assistant',
-                                       'current',
-                                       'assistant_mode',
-                                       'branch_modes']:
-                                console.print(f'[red]Cannot delete {arg} branch.'
-                                              ' (protected)[/red]')
-                                break
-                            if arg == branch and arg != 'current':
-                                history.pop(arg)
-                                for path in glob.glob(
-                                    f'{self.opts.vector_dir}{os.path.sep}{arg}*'):
-                                    if os.path.isdir(path):
-                                        console.print(
-                                            f'[green]Deleting:[/green] {path}')
-                                        shutil.rmtree(path)
-
-                                # Delete Chroma collection corresponding to branch name
-                                self.session.rag.delete_collection(arg)
-                                self.session.common.save_chat(history)
-                                console.print(f'[green]Deleted: [/green]{arg}', highlight=False)
-                                break
-                        continue
-                    elif cmd == 'reset':
-                        self.session.rag.delete_collection(self.chat_branch)
-                        history[self.chat_branch] = []
-                        for path in glob.glob(
-                            f'{self.opts.vector_dir}{os.path.sep}{self.chat_branch}*'):
-                            if os.path.isdir(path):
-                                console.print(f'[green]Deleting:[/green] {path}')
-                                shutil.rmtree(path)
-                        console.print(f"[green]Reset: [/green]{self.chat_branch}",
-                                      highlight=False)
-                        self.session.common.save_chat(history)
-                        continue
-                    elif cmd == 'branch':
-                        if not arg:
-                            branches = sorted(
-                                [k for k in history.keys() if is_history_branch(history, k)]
-                            )
-                            maxlen = max((len(n) for n in branches), default=0)
-
-                            if self.chat_branch in branches:
-                                branches.remove(self.chat_branch)
-                                branches.insert(0, self.chat_branch)
-
-                            for name in branches:
-                                count = turn_count(history[name])
-                                preview = ""
-                                if count > 0:
-                                    last = history[name][-1].get('content', '')
-                                    # collapse any newlines / excess whitespace
-                                    last = ' '.join(last.split())
-                                    preview = last[:40] + ('…' if len(last) > 40 else '')
-                                    preview = f'[dim]{preview}[/dim]'
-
-                                if name == self.chat_branch:
-                                    console.print(
-                                        f'\t➡ [green]{name:<{maxlen}}[/green] : '
-                                        f'[{count:>3}] {preview}',
-                                        highlight=False
-                                    )
-                                else:
-                                    console.print(
-                                        f'\t  {name:<{maxlen}} : [{count:>3}] {preview}',
-                                        highlight=False
-                                    )
-                            continue
-                        # parse "name@N" to branch from first N turns of current branch
-                        # examples: "\branch testing@5" or just "\branch testing"
-                        raw = arg.strip()
-                        if self.opts.assistant_mode:
-                            console.print('[red]Not possible while in assistant mode. If you wish '
-                                          'to use this feature,\nrun the streamlit version instead'
-                                          ':[/red]\n\n\tstreamlit run streamlit_chat.py -- '
-                                          '--assistant-mode',
-                                          highlight=False)
-                            continue
-                        if raw in ['current', 'assistant', 'assistant_mode', 'branch_modes']:
-                            console.print('[red]Invalid branch name.[/red]', highlight=False)
-                            continue
-
-                        if '@' in raw:
-                            name, n_str = raw.split('@', 1)
-                            try:
-                                cut = int(n_str)*2
-                            except ValueError:
-                                console.print('[red]usage: \\branch NAME[@N][/red]',
-                                               highlight=False)
-                                continue
-                        else:
-                            name, cut = raw, None
-
-                        # switching if it exists, else create from current up to cut (or full)
-                        if self._branch_exists(history, name):
-                            if name == self.chat_branch:
-                                console.print(f'[green]Already on branch:[/green] {name}',
-                                               highlight=False)
-                            else:
-                                self.chat_branch = name
-                                history['current'] = name
-                                console.print(f'[green]Switched to :[/green] {name}',
-                                               highlight=False)
-                            self.session.common.save_chat(history)
-                            continue
-
-                        # create new branch from current
-                        src = self.chat_branch
-                        base = history[src]
-                        new_list = deepcopy(self._slice_upto(
-                                            base, cut if cut is not None else len(base)))
-                        history[name] = new_list
-                        history['current'] = name
-                        self.chat_branch = name
-                        self.session.common.save_chat(history)
-                        self.session.renderer.clear_ooc()
-                        # ---------------- RAG sync for the new branch ----------------
-                        try:
-                            if cut is None:
-                                # exact fork of current branch's RAG
-                                self.session.rag.clone_collection(src, name, overwrite=False)
-                            else:
-                                # rebuild target RAG from the truncated history we just created
-                                self.session.rag.build_collection_from_texts(
-                                    name, new_list, overwrite=True)
-
-                            console.print(f'[green]Branched to:[/green] {name}', highlight=False)
-                        # pylint: disable-next=broad-exception-caught
-                        except Exception as e:
-                            console.print(f'[red]RAG sync failed for "{name}":[/red] '
-                                          f'{e}', highlight=False)
-                            # optional: rollback history on failure
-                            # history.pop(name, None)
-                            # history['current'] = src
-                            # self.chat_branch = src
-                            # self.session.common.save_chat()
-                        # ----------------------------------------------------------------
-                        continue
-                    elif cmd == 'history':
-                        try:
-                            n = int(arg or '5')
-                        except ValueError:
-                            n = 5
-
-                        messages = history[self.chat_branch]
-                        turns = get_last_n_turns(messages, n)
-
-                        if not turns:
-                            console.print('[yellow]No history yet.[/yellow]')
-                            continue
-
-                        # Calculate the starting turn number
-                        total_turns = turn_count(messages)
-                        start_turn = total_turns - (len(turns) // 2) + 1
-                        turn_num = start_turn - 1
-                        for msg in turns:
-                            if not isinstance(msg, dict):
-                                # fallback for any leftover old-format items
-                                console.print(f'\n\n{msg}')
-                                continue
-
-                            role = msg.get('role', '?').lower()
-                            content = msg.get('content', '')
-
-                            if role == 'user':
-                                turn_num += 1
-                                console.print()
-                                console.print(f'[bold cyan]⬇  TURN {turn_num}  ⬇[/bold cyan]')
-                                console.print(f'[bold]USER:[/bold] {content}')
-                            elif role == 'assistant':
-                                console.print(f'\n[bold]AI:[/bold] {content}')
-                            else:
-                                # system / tool / etc.
-                                console.print(f'\n[dim]{role.upper()}:[/dim] {content}')
-
-                        console.print()  # trailing newline
-                        continue
-                    elif cmd in ('no-context', 'include', 'agent'):
-                        if not self.opts.assistant_mode:
-                            console.print('[red]Only available while in assistant mode.[/red]')
-                            continue
-                    elif cmd in ('regenerate'):
-                        try:
-                            last = history[self.chat_branch].pop()
-                            match = re.findall(r'USER:(.*\n\n)', last)
-                            self.session.common.save_chat(history)
-                            parsed = parse_user_input(match[0])
-                            # pass
-                        except IndexError:
-                            console.print('[yellow]History empty.[/yellow]')
-                            continue
-                    else:
-                        console.print(f'[red]Unknown command:[/red] \\{cmd}')
-                        continue
-
-                # Build documents (with or without context)
-                meta_data = []
-                if parsed.command in ('no-context', 'agent'):
-                    if parsed.command == 'no-context':
-                        documents = self.no_context(parsed.args or parsed.clean_text)
-                    else:
-                        documents, meta_data = self.get_documents(parsed.args or parsed.clean_text)
-                    documents['in_line_commands'] = f'Meta: [{parsed.command}]'
-                else:
-                    documents, meta_data = self.get_documents(parsed.clean_text)
+                documents, meta_data = self._prepare_turn_documents(
+                    parsed, history, raw,
+                )
                 if not documents:
-                    console.print('[red]There was an error while running pre-processor work.[/red]'
-                                  'In many cases, re-submitting your query again solves the issue.')
                     continue
-
-                if parsed.command == 'include':
-                    val = parsed.args
-                    if val in history:
-                        include_branch = ' '.join(history[val][-self.opts.history_sessions:])
-                    else:
-                        console.print(f'[red]Unknown branch[/red] \\{val}')
-                        continue
-                    documents['include_branch'] = str(include_branch)
-
-                if parsed.command == 'agent':
-                    documents['use_agent'] = True
-                    documents['agent_ran'] = False
-
-                # Add any inline includes as context (files/URLs)
-                if parsed.includes:
-                    inc_docs = self.load_content_as_context(
-                        ' '.join(f'{{{{{x}}}}}' for x in parsed.includes))
-                    documents.update(inc_docs)
-                    documents['user_query'] = f'{raw} \n\nattachments:{documents["user_query"]}'
-
-                # Handoff to renderer
-                # Your renderer should read documents['system_addendum']
-                # (if any) and append to the system prompt
                 self.session.renderer.live_stream(documents, meta_data)
-
-        except KeyboardInterrupt:
-            sys.exit()
-        except EOFError:
+        except (KeyboardInterrupt, EOFError):
             sys.exit()
 
 def seed_from_string(user_input: str) -> int:
@@ -870,291 +880,287 @@ def verify_args(p_args):
     # The issue added to the feature tracker: nothing to verify yet
     return p_args
 
-def _add_arguments(parser: argparse.ArgumentParser, defaults, *, use_defaults: bool) -> None:
-    """Register all CLI options. If use_defaults=False, suppress defaults (for pre-parse)."""
-    D = (lambda name: getattr(defaults, name)) if use_defaults else (lambda _: argparse.SUPPRESS)
+def _default_lookup(defaults, use_defaults):
+    """Return ChatOptions field lookup, or SUPPRESS for the YAML pre-parse."""
+    if use_defaults:
+        return lambda name: getattr(defaults, name)
+    return lambda _name: argparse.SUPPRESS
 
-    # =========================================================================
-    # MODEL CONFIGURATION
-    # =========================================================================
-    story = parser.add_argument_group("Story Model Options")
+
+def _add_llm_group(parser, title, prefix, dests, D):
+    """Add the standard --*-llm/--*-server/--*-temp/--*-top_p group.
+
+    dests maps keys 'llm', 'host', 'temp', 'topp' to ChatOptions field names.
+    """
+    group = parser.add_argument_group(title)
+    group.add_argument(
+        f'--{prefix}-llm', metavar='', dest=dests['llm'], type=str,
+        default=D(dests['llm']), help='Model (default: %(default)s)',
+    )
+    group.add_argument(
+        f'--{prefix}-server', metavar='', dest=dests['host'], type=str,
+        default=D(dests['host']), help='Server address (default: %(default)s)',
+    )
+    group.add_argument(
+        f'--{prefix}-temp', metavar='', dest=dests['temp'], type=float,
+        default=D(dests['temp']), help='Temperature (default: %(default)s)',
+    )
+    group.add_argument(
+        f'--{prefix}-top_p', metavar='', dest=dests['topp'], type=float,
+        default=D(dests['topp']), help='top_p (default: %(default)s)',
+    )
+    return group
+
+
+def _add_core_model_args(parser, D):
+    """Story, preconditioner, and embedding CLI flags (irregular dest names)."""
+    story = parser.add_argument_group('Story Model Options')
     story.add_argument('--model', metavar='', default=D('model'),
                        help='Model (default: %(default)s)')
-    story.add_argument('--model-server', metavar='', dest='host', type=str, default=D('host'),
-                       help='Server address (default: %(default)s)')
+    story.add_argument('--model-server', metavar='', dest='host', type=str,
+                       default=D('host'), help='Server address (default: %(default)s)')
     story.add_argument('--model-temp', metavar='', type=float, default=D('model_temp'),
                        help='Temperature (default: %(default)s)')
     story.add_argument('--model-top_p', metavar='', dest='model_topp', type=float,
                        default=D('model_topp'), help='top_p (default: %(default)s)')
 
-    pre_model = parser.add_argument_group("Preconditioner Model (lightweight model) Options")
+    pre_model = parser.add_argument_group(
+        'Preconditioner Model (lightweight model) Options',
+    )
     pre_model.add_argument('--pre-llm', metavar='', dest='preconditioner', type=str,
-                           default=D('preconditioner'), help='Model (default: %(default)s)')
+                           default=D('preconditioner'),
+                           help='Model (default: %(default)s)')
     pre_model.add_argument('--pre-server', metavar='', dest='pre_host', type=str,
-                           default=D('pre_host'), help='Server address (default: %(default)s)')
+                           default=D('pre_host'),
+                           help='Server address (default: %(default)s)')
     pre_model.add_argument('--pre-temp', metavar='', type=float, default=D('pre_temp'),
                            help='Temperature (default: %(default)s)')
     pre_model.add_argument('--pre-top_p', metavar='', type=float, dest='pre_topp',
                            default=D('pre_topp'), help='top_p (default: %(default)s)')
 
-    embedding_model = parser.add_argument_group("Embedding Model Options")
-    embedding_model.add_argument('--embedding-llm', metavar='', dest='embeddings', type=str,
-                                 default=D('embeddings'), help='Model (default: %(default)s)')
-    embedding_model.add_argument('--embedding-server', metavar='', dest='emb_host', type=str,
-                                 default=D('emb_host'),
-                                 help='Server address (default: %(default)s)')
-
-    # Optional story models
-    polisher_model = parser.add_argument_group(
-        "Polisher Model Options (optionally polish output)"
+    embedding_model = parser.add_argument_group('Embedding Model Options')
+    embedding_model.add_argument(
+        '--embedding-llm', metavar='', dest='embeddings', type=str,
+        default=D('embeddings'), help='Model (default: %(default)s)',
     )
-    polisher_model.add_argument('--polisher-llm', metavar='', default=D('polisher_llm'),
-                                help='Model (default: %(default)s)')
-    polisher_model.add_argument('--polisher-server', metavar='', dest='polisher_host', type=str,
-                                default=D('polisher_host'),
-                                help='Server address (default: %(default)s)')
-    polisher_model.add_argument('--polisher-temp', metavar='', type=float,
-                                default=D('polisher_temp'),
-                                help='Temperature (default: %(default)s)')
-    polisher_model.add_argument('--polisher-top_p', metavar='', type=float, dest='polisher_topp',
-                                default=D('polisher_topp'), help='top_p (default: %(default)s)')
-    polisher_model.add_argument('--polisher-cnt', metavar='', default=D('polisher_cnt'),
-             help='The number of passes to polish final content (default: %(default)s)\n'
-             'Warning: Models tend to balloon out of proportions. Start low.')
-
-    nsfw_model = parser.add_argument_group("NSFW Model Options (optional)")
-    nsfw_model.add_argument('--nsfw-llm', metavar='', default=D('nsfw_llm'),
-                            help='Model (default: %(default)s)')
-    nsfw_model.add_argument('--nsfw-server', metavar='', dest='nsfw_host', type=str,
-                            default=D('nsfw_host'), help='Server address (default: %(default)s)')
-    nsfw_model.add_argument('--nsfw-temp', metavar='', type=float, default=D('nsfw_temp'),
-                            help='Temperature (default: %(default)s)')
-    nsfw_model.add_argument('--nsfw-top_p', metavar='', type=float, dest='nsfw_topp',
-                            default=D('nsfw_topp'), help='top_p (default: %(default)s)')
-
-    entity_model = parser.add_argument_group(
-        "NPC Character Creation Model Options (optional)"
+    embedding_model.add_argument(
+        '--embedding-server', metavar='', dest='emb_host', type=str,
+        default=D('emb_host'), help='Server address (default: %(default)s)',
     )
-    entity_model.add_argument('--entity-llm', metavar='', dest='entity_llm', type=str,
-                              default=D('entity_llm'), help='Model (default: %(default)s)')
-    entity_model.add_argument('--entity-server', metavar='', dest='entity_host', type=str,
-                              default=D('entity_host'),
-                              help='Server address (default: %(default)s)')
-    entity_model.add_argument('--entity-temp', metavar='', type=float, default=D('entity_temp'),
-                              help='Temperature (default: %(default)s)')
-    entity_model.add_argument('--entity-top_p', metavar='', type=float, dest='entity_topp',
-                              default=D('entity_topp'), help='top_p (default: %(default)s)')
 
-    # Model orchestration
-    vision_model = parser.add_argument_group("Vision Model Options (optional)")
-    vision_model.add_argument('--vision-llm', metavar='', dest='vision_llm', type=str,
-                              default=D('vision_llm'), help='Model (default: %(default)s)')
-    vision_model.add_argument('--vision-server', metavar='', dest='vision_host', type=str,
-                              default=D('vision_host'),
-                              help='Server address (default: %(default)s)')
-    vision_model.add_argument('--vision-temp', metavar='', type=float, default=D('vision_temp'),
-                              help='Temperature (default: %(default)s)')
-    vision_model.add_argument('--vision-top_p', metavar='', type=float, dest='vision_topp',
-                              default=D('vision_topp'), help='top_p (default: %(default)s)')
 
-    agent_model = parser.add_argument_group("Agentic Model Options (optional)")
-    agent_model.add_argument('--agent-llm', metavar='', dest='agent_llm', type=str,
-                             default=D('agent_llm'), help='Model (default: %(default)s)')
-    agent_model.add_argument('--agent-server', metavar='', dest='agent_host', type=str,
-                             default=D('agent_host'), help='Server address (default: %(default)s)')
-    agent_model.add_argument('--agent-temp', metavar='', type=float, default=D('agent_temp'),
-                             help='Agent Model Temperature (default: %(default)s)')
-    agent_model.add_argument('--agent-top_p', metavar='', type=float, dest='agent_topp',
-                             default=D('agent_topp'), help='top_p (default: %(default)s)')
-
-    casual_model = parser.add_argument_group("Casual Model Options (optional)")
-    casual_model.add_argument('--casual-llm', metavar='', dest='casual_llm', type=str,
-                              default=D('casual_llm'), help='Model (default: %(default)s)')
-    casual_model.add_argument('--casual-server', metavar='', dest='casual_host', type=str,
-                              default=D('casual_host'),
-                              help='Server address (default: %(default)s)')
-    casual_model.add_argument('--casual-temp', metavar='', type=float, default=D('casual_temp'),
-                              help='Temperature (default: %(default)s)')
-    casual_model.add_argument('--casual-top_p', metavar='', type=float, dest='casual_topp',
-                              default=D('casual_topp'), help='top_p (default: %(default)s)')
-
-    general_model = parser.add_argument_group("General Model Options (optional)")
-    general_model.add_argument('--general-llm', metavar='', dest='general_llm', type=str,
-                               default=D('general_llm'), help='Model (default: %(default)s)')
-    general_model.add_argument('--general-server', metavar='', dest='general_host', type=str,
-                               default=D('general_host'),
-                               help='Server address (default: %(default)s)')
-    general_model.add_argument('--general-temp', metavar='', type=float, default=D('general_temp'),
-                               help='Temperature (default: %(default)s)')
-    general_model.add_argument('--general-top_p', metavar='', type=float, dest='general_topp',
-                               default=D('general_topp'), help='top_p (default: %(default)s)')
-
-    coder_model = parser.add_argument_group("Coder Model Options (optional)")
-    coder_model.add_argument('--coder-llm', metavar='', dest='coder_llm', type=str,
-                             default=D('coder_llm'), help='Model (default: %(default)s)')
-    coder_model.add_argument('--coder-server', metavar='', dest='coder_host', type=str,
-                             default=D('coder_host'), help='Server address (default: %(default)s)')
-    coder_model.add_argument('--coder-temp', metavar='', type=float, default=D('coder_temp'),
-                             help='Coder Model Temperature (default: %(default)s)')
-    coder_model.add_argument('--coder-top_p', metavar='', type=float, dest='coder_topp',
-                             default=D('coder_topp'), help='top_p (default: %(default)s)')
-
-    struct_model = parser.add_argument_group(
-        "Analysis/Reasoning Model Options (optional)"
+def _add_optional_model_args(parser, D):
+    """Optional orchestrated models (polisher through structured)."""
+    polisher = _add_llm_group(
+        parser, 'Polisher Model Options (optionally polish output)', 'polisher',
+        {'llm': 'polisher_llm', 'host': 'polisher_host',
+         'temp': 'polisher_temp', 'topp': 'polisher_topp'},
+        D,
     )
-    struct_model.add_argument('--structured-llm', metavar='', dest='structured_llm', type=str,
-                              default=D('structured_llm'),
-                              help='Model (default: %(default)s)')
-    struct_model.add_argument('--structured-server', metavar='', dest='structured_host', type=str,
-                              default=D('structured_host'),
-                              help='Server address (default: %(default)s)')
-    struct_model.add_argument('--structured-temp', metavar='', type=float,
-                              default=D('structured_temp'),
-                              help='Temperature (default: %(default)s)')
-    struct_model.add_argument('--structured-top_p', metavar='', type=float, dest='structured_topp',
-                              default=D('structured_topp'), help='top_p (default: %(default)s)')
+    polisher.add_argument(
+        '--polisher-cnt', metavar='', default=D('polisher_cnt'),
+        help='The number of passes to polish final content (default: %(default)s)\n'
+             'Warning: Models tend to balloon out of proportions. Start low.',
+    )
+    groups = (
+        ('NSFW Model Options (optional)', 'nsfw',
+         {'llm': 'nsfw_llm', 'host': 'nsfw_host',
+          'temp': 'nsfw_temp', 'topp': 'nsfw_topp'}),
+        ('NPC Character Creation Model Options (optional)', 'entity',
+         {'llm': 'entity_llm', 'host': 'entity_host',
+          'temp': 'entity_temp', 'topp': 'entity_topp'}),
+        ('Vision Model Options (optional)', 'vision',
+         {'llm': 'vision_llm', 'host': 'vision_host',
+          'temp': 'vision_temp', 'topp': 'vision_topp'}),
+        ('Agentic Model Options (optional)', 'agent',
+         {'llm': 'agent_llm', 'host': 'agent_host',
+          'temp': 'agent_temp', 'topp': 'agent_topp'}),
+        ('Casual Model Options (optional)', 'casual',
+         {'llm': 'casual_llm', 'host': 'casual_host',
+          'temp': 'casual_temp', 'topp': 'casual_topp'}),
+        ('General Model Options (optional)', 'general',
+         {'llm': 'general_llm', 'host': 'general_host',
+          'temp': 'general_temp', 'topp': 'general_topp'}),
+        ('Coder Model Options (optional)', 'coder',
+         {'llm': 'coder_llm', 'host': 'coder_host',
+          'temp': 'coder_temp', 'topp': 'coder_topp'}),
+        ('Analysis/Reasoning Model Options (optional)', 'structured',
+         {'llm': 'structured_llm', 'host': 'structured_host',
+          'temp': 'structured_temp', 'topp': 'structured_topp'}),
+    )
+    for title, prefix, dests in groups:
+        _add_llm_group(parser, title, prefix, dests, D)
 
-    # =========================================================================
-    # USER / APPLICATION CONFIGURATION
-    # =========================================================================
-    user_args = parser.add_argument_group("User Options")
+
+def _add_user_and_api_args(parser, D):
+    """User identity and API key flags."""
+    user_args = parser.add_argument_group('User Options')
     user_args.add_argument('--name', metavar='', default=D('name'), type=str,
-                           help='Your assistant\'s name (default: %(default)s)')
-    user_args.add_argument('--user-name', metavar='', default=D('user_name'), type=str,
-                           help='Your character\'s name (default: %(default)s)')
+                           help="Your assistant's name (default: %(default)s)")
+    user_args.add_argument('--user-name', metavar='', default=D('user_name'),
+                           type=str,
+                           help="Your character's name (default: %(default)s)")
     user_args.add_argument('--sex', metavar='', default=D('sex'), type=str,
-                           help='Your character\'s sex (helps with pronouns) '
+                           help="Your character's sex (helps with pronouns) "
                                 '(default: %(default)s)')
-    user_args.add_argument('--character-sheet', metavar='', default=D('character_sheet'), type=str,
-                           help='Your character sheet (default: %(default)s)')
-    user_args.add_argument('--time-zone', metavar='', default=D('time_zone'), type=str,
-                           help='Your assistant\'s time zone (default: %(default)s)')
+    user_args.add_argument(
+        '--character-sheet', metavar='', default=D('character_sheet'), type=str,
+        help='Your character sheet (default: %(default)s)',
+    )
+    user_args.add_argument('--time-zone', metavar='', default=D('time_zone'),
+                           type=str,
+                           help="Your assistant's time zone (default: %(default)s)")
 
-    api_args = parser.add_argument_group("API / Service Options")
+    api_args = parser.add_argument_group('API / Service Options')
     api_args.add_argument('--api-key', metavar='', default=D('api_key'), type=str,
                           help='Your API Key (default: REDACTED)')
-    api_args.add_argument('--tavily-key', metavar='', default=D('tavily_key'), type=str,
-                          help='Your Tavily API Key (default: REDACTED)')
+    api_args.add_argument('--tavily-key', metavar='', default=D('tavily_key'),
+                          type=str, help='Your Tavily API Key (default: REDACTED)')
 
-    # =========================================================================
-    # CONTEXT / RAG / HISTORY
-    # =========================================================================
-    context_args = parser.add_argument_group("Context / RAG / History Options")
-    context_args.add_argument('--rag-matches', metavar='', dest='matches', type=int,
-                              default=D('matches'),
-                              help='Number of results to pull from *each* RAG (USER\'s, and AI\'s)'
-                              '\n(default: %(default)s)')
-    context_args.add_argument('--history-sessions', metavar='', type=int,
-                              default=D('history_sessions'),
-                              help='Chat history responses available in context\n'
-                                   '(default: %(default)s)')
-    context_args.add_argument('--unmolested-sessions', metavar='', type=int,
-                              default=D('unmolested_sessions'),
-                              help='Chat history responses available before staggering occurs.\n'
-                                   'Set to 0 to disable (default: %(default)s)')
-    context_args.add_argument('--lookback', metavar='',type=int, default=D('lookback'),
-                              help='Max turns to use when computing unmolested-sessions.\n'
-                                   'A value of None = exponential decay of entire history\n'
-                                   '(default: %(default)s)')
-    context_args.add_argument('--history-dir', metavar='', dest='vector_dir', type=str,
-                              default=D('vector_dir'),
-                              help='Your RAG and Chat History directory. It is dynamically\n'
-                              'generated and therefore safe to delete if you wish to physically\n'
-                              'remove all past information.\n(default: %(default)s)')
 
-    # =========================================================================
-    # IMPORTING
-    # =========================================================================
-    import_args = parser.add_argument_group("Import Options")
+def _add_context_args(parser, D):
+    """RAG, history, and import flags."""
+    context_args = parser.add_argument_group('Context / RAG / History Options')
+    context_args.add_argument(
+        '--rag-matches', metavar='', dest='matches', type=int,
+        default=D('matches'),
+        help="Number of results to pull from *each* RAG (USER's, and AI's)\n"
+             '(default: %(default)s)',
+    )
+    context_args.add_argument(
+        '--history-sessions', metavar='', type=int,
+        default=D('history_sessions'),
+        help='Chat history responses available in context\n'
+             '(default: %(default)s)',
+    )
+    context_args.add_argument(
+        '--unmolested-sessions', metavar='', type=int,
+        default=D('unmolested_sessions'),
+        help='Chat history responses available before staggering occurs.\n'
+             'Set to 0 to disable (default: %(default)s)',
+    )
+    context_args.add_argument(
+        '--lookback', metavar='', type=int, default=D('lookback'),
+        help='Max turns to use when computing unmolested-sessions.\n'
+             'A value of None = exponential decay of entire history\n'
+             '(default: %(default)s)',
+    )
+    context_args.add_argument(
+        '--history-dir', metavar='', dest='vector_dir', type=str,
+        default=D('vector_dir'),
+        help='Your RAG and Chat History directory. It is dynamically\n'
+             'generated and therefore safe to delete if you wish to physically\n'
+             'remove all past information.\n(default: %(default)s)',
+    )
+
+    import_args = parser.add_argument_group('Import Options')
+    gold = (
+        'Use --assistant-mode to populate the assistant GOLD RAG.'
+    )
     import_args.add_argument('--import-pdf', metavar='', type=str,
-                             help='Path to PDF to pre-populate GOLD RAG.\n'
-                                  'Use --assistant-mode to populate the assistant GOLD RAG.')
+                             help='Path to PDF to pre-populate GOLD RAG.\n' + gold)
     import_args.add_argument('--import-txt', metavar='', type=str,
-                             help='Path to TXT to pre-populate GOLD RAG.\n'
-                                  'Use --assistant-mode to populate the assistant GOLD RAG.')
+                             help='Path to TXT to pre-populate GOLD RAG.\n' + gold)
     import_args.add_argument('--import-web', metavar='', type=str,
-                             help='URL to pre-populate GOLD RAG.\n'
-                                  'Use --assistant-mode to populate the assistant GOLD RAG.')
-    import_args.add_argument('--import-dir', metavar='', type=str,
-                             help='Path to recursively find and import assorted files\n'
-                                  '(*.md, *.html, *.txt, *.pdf, *.py).\n'
-                                  'Use --assistant-mode to populate the assistant GOLD RAG\n'
-                                  'with *.* file patterns.')
+                             help='URL to pre-populate GOLD RAG.\n' + gold)
+    import_args.add_argument(
+        '--import-dir', metavar='', type=str,
+        help='Path to recursively find and import assorted files\n'
+             '(*.md, *.html, *.txt, *.pdf, *.py).\n'
+             'Use --assistant-mode to populate the assistant GOLD RAG\n'
+             'with *.* file patterns.',
+    )
 
-    # =========================================================================
-    # INTERFACE
-    # =========================================================================
-    ui_args = parser.add_argument_group("Interface Options")
-    ui_args.add_argument('--light-mode', action='store_true', default=D('light_mode'),
+
+def _add_runtime_args(parser, D):
+    """Interface, behavior, generation, display, agent, and debug flags."""
+    ui_args = parser.add_argument_group('Interface Options')
+    ui_args.add_argument('--light-mode', action='store_true',
+                         default=D('light_mode'),
                          help='Use a color scheme suitable for light-background terminals.')
-    ui_args.add_argument('-v', '--verbose', action='store_true', default=D('verbose'),
+    ui_args.add_argument('-v', '--verbose', action='store_true',
+                         default=D('verbose'),
                          help='Do not hide what the model is thinking\n'
                               '(if the model supports thinking).')
 
-    # =========================================================================
-    # BEHAVIOR
-    # =========================================================================
-    behavior_args = parser.add_argument_group("Behavior Options")
-    behavior_args.add_argument('--assistant-mode', action='store_true', default=D('assistant_mode'),
-                               help='Switch to Assistant Mode')
-    behavior_args.add_argument('--disable-thinking', action='store_true',
-                               default=D('disable_thinking'),
-                               help='Do not utilize reasoning, even if the model supports it.\n'
-                                    '(default: %(default)s)')
-    behavior_args.add_argument('--use-rags', action='store_true', default=D('no_rags'),
-                               help='Use RAGs regardless of assistant-mode.\n'
-                                    'No effect when not also using assistant-mode.')
+    behavior_args = parser.add_argument_group('Behavior Options')
+    behavior_args.add_argument(
+        '--assistant-mode', action='store_true', default=D('assistant_mode'),
+        help='Switch to Assistant Mode',
+    )
+    behavior_args.add_argument(
+        '--disable-thinking', action='store_true',
+        default=D('disable_thinking'),
+        help='Do not utilize reasoning, even if the model supports it.\n'
+             '(default: %(default)s)',
+    )
+    behavior_args.add_argument(
+        '--use-rags', action='store_true', default=D('no_rags'),
+        help='Use RAGs regardless of assistant-mode.\n'
+             'No effect when not also using assistant-mode.',
+    )
 
-    # =========================================================================
-    # GENERATION
-    # =========================================================================
-    generation_args = parser.add_argument_group("Generation Options")
-    generation_args.add_argument('--repeat-penalty', metavar='', type=float,
-                                 default=D('repeat_penalty'),
-                                 help='Model repeat penalty (default: %(default)s)')
-    generation_args.add_argument('--frequency-penalty', metavar='', type=float,
-                                 default=D('frequency_penalty'),
-                                 help='Model frequency penalty (default: %(default)s)')
-    generation_args.add_argument('--presence-penalty', metavar='', type=float,
-                                 default=D('presence_penalty'),
-                                 help='Model presence penalty (default: %(default)s)')
-    generation_args.add_argument('--seed',metavar='', type=str, default=D('seed'),
+    generation_args = parser.add_argument_group('Generation Options')
+    generation_args.add_argument(
+        '--repeat-penalty', metavar='', type=float, default=D('repeat_penalty'),
+        help='Model repeat penalty (default: %(default)s)',
+    )
+    generation_args.add_argument(
+        '--frequency-penalty', metavar='', type=float,
+        default=D('frequency_penalty'),
+        help='Model frequency penalty (default: %(default)s)',
+    )
+    generation_args.add_argument(
+        '--presence-penalty', metavar='', type=float,
+        default=D('presence_penalty'),
+        help='Model presence penalty (default: %(default)s)',
+    )
+    generation_args.add_argument('--seed', metavar='', type=str, default=D('seed'),
                                  help='Model(s) seed (default: %(default)s)')
-    generation_args.add_argument('--context-window',metavar='', type=int,
-                                 default=D('context_window'),
-                                 help='Does nothing except beautify the color map of "context".\n'
-                                      'Enter the maximum context window set on the server.\n'
-                                      '(default: %(default)s)')
-    generation_args.add_argument('--completion-tokens', metavar='', dest='completion_tokens',
-                                 type=int, default=D('completion_tokens'),
-                                 help='The maximum tokens the LLM can respond with\n'
-                                      '(default: %(default)s)')
+    generation_args.add_argument(
+        '--context-window', metavar='', type=int, default=D('context_window'),
+        help='Does nothing except beautify the color map of "context".\n'
+             'Enter the maximum context window set on the server.\n'
+             '(default: %(default)s)',
+    )
+    generation_args.add_argument(
+        '--completion-tokens', metavar='', dest='completion_tokens',
+        type=int, default=D('completion_tokens'),
+        help='The maximum tokens the LLM can respond with\n'
+             '(default: %(default)s)',
+    )
 
-    # =========================================================================
-    # DISPLAY / FORMATTING
-    # =========================================================================
-    display_args = parser.add_argument_group("Display / Formatting Options")
-    display_args.add_argument('--syntax-style', metavar='', dest='syntax_theme', type=str,
-                              default=D('syntax_theme'),
-                              help='Your desired syntax-highlight theme (default: %(default)s).\n'
-                                   'See https://pygments.org/styles/ for available themes.')
+    display_args = parser.add_argument_group('Display / Formatting Options')
+    display_args.add_argument(
+        '--syntax-style', metavar='', dest='syntax_theme', type=str,
+        default=D('syntax_theme'),
+        help='Your desired syntax-highlight theme (default: %(default)s).\n'
+             'See https://pygments.org/styles/ for available themes.',
+    )
 
-    # =========================================================================
-    # AGENTIC TOOLS
-    # =========================================================================
-    agent_args = parser.add_argument_group("Agentic Tool Options")
-    agent_args.add_argument('--distrust-confidence',metavar='', type=float,
-                            default=D('distrust_confidence'),
-                            help='How much do you distrust the model\'s self-assessment.\n'
-                                 'Lower = fewer searches; higher = more searches.\n'
-                                 '(0.0 = never, 1.0 = always; default: %(default)s)')
+    agent_args = parser.add_argument_group('Agentic Tool Options')
+    agent_args.add_argument(
+        '--distrust-confidence', metavar='', type=float,
+        default=D('distrust_confidence'),
+        help="How much do you distrust the model's self-assessment.\n"
+             'Lower = fewer searches; higher = more searches.\n'
+             '(0.0 = never, 1.0 = always; default: %(default)s)',
+    )
 
-    # =========================================================================
-    # DEBUGGING
-    # =========================================================================
-    debug_args = parser.add_argument_group("Debugging Options")
-    debug_args.add_argument('-d', '--debug', action='store_true', default=D('debug'),
+    debug_args = parser.add_argument_group('Debugging Options')
+    debug_args.add_argument('-d', '--debug', action='store_true',
+                            default=D('debug'),
                             help='Print preconditioning message, prompt, etc.')
+
+
+def _add_arguments(parser: argparse.ArgumentParser, defaults, *, use_defaults: bool) -> None:
+    """Register all CLI options. If use_defaults=False, suppress defaults."""
+    lookup = _default_lookup(defaults, use_defaults)
+    _add_core_model_args(parser, lookup)
+    _add_optional_model_args(parser, lookup)
+    _add_user_and_api_args(parser, lookup)
+    _add_context_args(parser, lookup)
+    _add_runtime_args(parser, lookup)
 
 def parse_args(argv, yaml_opts):
     """Two-stage parse so help shows effective defaults: CLI > YAML > dataclass."""
@@ -1213,29 +1219,29 @@ if __name__ == '__main__':
     args = parse_args(sys.argv[1:], opts)
     _opts = ChatOptions.from_args(current_dir, args, opts)
     dark_rich_142_styles = Theme({
-            "markdown.h1": "bold #FFFFFF",
-            "markdown.h2": "bold #CCCCCC",
-            "markdown.h3": "bold #999999",
-            "markdown.h4": "italic #777777",
-            "markdown.h5": "#555555",
-            "markdown.h6": "#333333",
-            "markdown.item.bullet": "yellow",
-            "markdown.hr": "yellow",
-            "markdown.table.header": "bold white",
-            "markdown.table.border": "bright_black",
+            'markdown.h1': 'bold #FFFFFF',
+            'markdown.h2': 'bold #CCCCCC',
+            'markdown.h3': 'bold #999999',
+            'markdown.h4': 'italic #777777',
+            'markdown.h5': '#555555',
+            'markdown.h6': '#333333',
+            'markdown.item.bullet': 'yellow',
+            'markdown.hr': 'yellow',
+            'markdown.table.header': 'bold white',
+            'markdown.table.border': 'bright_black',
         })
     light_rich_142_styles = Theme({
-            "markdown.h1": "bold #000000",
-            "markdown.h2": "bold #333333",
-            "markdown.h3": "bold #666666",
-            "markdown.h4": "bold italic #888888",
-            "markdown.h5": "italic #888888",
-            "markdown.h6": "#888888",
-            "markdown.item.bullet": "dark_orange",
-            "markdown.hr": "dark_orange",
-            "markdown.table.header": "bold black",
-            "markdown.table.border": "bright_black",
-            "markdown.code": "black on #e6e6e6",
+            'markdown.h1': 'bold #000000',
+            'markdown.h2': 'bold #333333',
+            'markdown.h3': 'bold #666666',
+            'markdown.h4': 'bold italic #888888',
+            'markdown.h5': 'italic #888888',
+            'markdown.h6': '#888888',
+            'markdown.item.bullet': 'dark_orange',
+            'markdown.hr': 'dark_orange',
+            'markdown.table.header': 'bold black',
+            'markdown.table.border': 'bright_black',
+            'markdown.code': 'black on #e6e6e6',
         })
 
     console = Console(theme=light_rich_142_styles if _opts.light_mode else dark_rich_142_styles)
@@ -1253,7 +1259,7 @@ if __name__ == '__main__':
             if os.path.exists(args.import_pdf):
                 import_data.extract_text_from_pdf(args)
             else:
-                print(f"Error: The file at {args.import_pdf} does not exist.")
+                print(f'Error: The file at {args.import_pdf} does not exist.')
                 sys.exit(1)
         if args.import_web:
             import_data.extract_text_from_web(args)

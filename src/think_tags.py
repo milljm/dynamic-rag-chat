@@ -22,46 +22,47 @@ from typing import Any
 
 # Namespaced (MiniMax). Do not make `mm:` optional — that is what used to
 # treat an inner <think> as a real tag.
-NS_START_RE = re.compile(r"<\s*mm:(think|thinking|reasoning)\s*>", re.I)
-NS_END_RE = re.compile(r"</\s*mm:(think|thinking|reasoning)\s*>", re.I)
+NS_START_RE = re.compile(r'<\s*mm:(think|thinking|reasoning)\s*>', re.I)
+NS_END_RE = re.compile(r'</\s*mm:(think|thinking|reasoning)\s*>', re.I)
 # Bare tags. Must NOT match <mm:think>.
-BARE_START_RE = re.compile(r"<\s*(think|thinking|reasoning)\s*>", re.I)
-BARE_END_RE = re.compile(r"</\s*(think|thinking|reasoning)\s*>", re.I)
+BARE_START_RE = re.compile(r'<\s*(think|thinking|reasoning)\s*>', re.I)
+BARE_END_RE = re.compile(r'</\s*(think|thinking|reasoning)\s*>', re.I)
 
 # Kept for TUI callers that still import these names.
 THINK_START_RE = re.compile(
-    r"<\s*(mm:)?(think|thinking|reasoning)\s*>", re.I
+    r'<\s*(mm:)?(think|thinking|reasoning)\s*>', re.I
 )
 THINK_END_RE = re.compile(
-    r"</\s*(mm:)?(think|thinking|reasoning)\s*>", re.I
+    r'</\s*(mm:)?(think|thinking|reasoning)\s*>', re.I
 )
 
 
 def tag_ns(match: re.Match[str] | None) -> str:
+    """Return the captured think-tag name (mm: vs bare), lowercased."""
     if not match:
-        return ""
-    return (match.group(1) or "").lower()
+        return ''
+    return (match.group(1) or '').lower()
 
 
 def _blank_content(piece: Any) -> bool:
     """LangChain sends None, '', or [] on reasoning-only chunks."""
-    return piece is None or piece == "" or piece == []
+    return piece is None or piece == '' or piece == []
 
 
 def chunk_text(chunk: Any) -> tuple[str, str]:
     """Return (content, reasoning_extra) even when LangChain sends content=None."""
-    piece = getattr(chunk, "content", None)
+    piece = getattr(chunk, 'content', None)
     if _blank_content(piece):
-        piece = ""
+        piece = ''
     elif not isinstance(piece, str):
         piece = str(piece)
-    extra = getattr(chunk, "reasoning_content", None)
+    extra = getattr(chunk, 'reasoning_content', None)
     if not extra:
-        kwargs = getattr(chunk, "additional_kwargs", None) or {}
+        kwargs = getattr(chunk, 'additional_kwargs', None) or {}
         if isinstance(kwargs, dict):
-            extra = kwargs.get("reasoning_content") or kwargs.get("reasoning")
+            extra = kwargs.get('reasoning_content') or kwargs.get('reasoning')
     if not isinstance(extra, str):
-        extra = "" if extra is None else str(extra)
+        extra = '' if extra is None else str(extra)
     return piece, extra
 
 
@@ -73,7 +74,7 @@ def _earliest(*matches: re.Match[str] | None) -> re.Match[str] | None:
 
 
 def split_think(
-    text: str, in_think: bool, ns: str = "", never_think: bool = False
+    text: str, in_think: bool, ns: str = '', never_think: bool = False
 ) -> tuple[str, str, bool, str, bool]:
     """Strip think blocks.
 
@@ -81,22 +82,22 @@ def split_think(
     ``</mm:think>``. Empty text does not latch never_think (shadow think).
     """
     if never_think:
-        return text or "", "", False, "", True
+        return text or '', '', False, '', True
 
     content: list[str] = []
     reasoning: list[str] = []
-    rest = text or ""
-    ns = (ns or "").lower()
+    rest = text or ''
+    ns = (ns or '').lower()
     while rest:
         if in_think:
-            end = NS_END_RE.search(rest) if ns == "mm:" else BARE_END_RE.search(rest)
+            end = NS_END_RE.search(rest) if ns == 'mm:' else BARE_END_RE.search(rest)
             if not end:
                 reasoning.append(rest)
                 break
             reasoning.append(rest[: end.start()])
             rest = rest[end.end() :]
             in_think = False
-            ns = ""
+            ns = ''
             never_think = True
             if rest:
                 content.append(rest)
@@ -109,10 +110,10 @@ def split_think(
             never_think = True
             break
         content.append(rest[: match.start()])
-        ns = "mm:" if NS_START_RE.match(match.group(0)) else ""
+        ns = 'mm:' if NS_START_RE.match(match.group(0)) else ''
         rest = rest[match.end() :]
         in_think = True
-    return "".join(content), "".join(reasoning), in_think, ns, never_think
+    return ''.join(content), ''.join(reasoning), in_think, ns, never_think
 
 
 class ThinkFeed:
@@ -121,7 +122,7 @@ class ThinkFeed:
     def __init__(
         self,
         in_think: bool = False,
-        ns: str = "",
+        ns: str = '',
         never_think: bool = False,
         shadow_think: bool = False,
     ) -> None:
@@ -132,17 +133,17 @@ class ThinkFeed:
 
     def feed(self, piece: str) -> tuple[str, str]:
         """Return (visible, thought) for one content piece."""
-        text = piece or ""
+        text = piece or ''
         if self.never_think:
-            return text, ""
+            return text, ''
 
         if not self.in_think and not self.shadow_think and not text:
             self.shadow_think = True
-            return "", ""
+            return '', ''
 
         if self.shadow_think:
             if not text:
-                return "", ""
+                return '', ''
             # First non-blank after null tokens: gpt-oss answer — unless
             # MiniMax is opening a namespaced block on this same chunk.
             stripped = text.lstrip()
@@ -151,9 +152,9 @@ class ThinkFeed:
             else:
                 self.shadow_think = False
                 self.in_think = False
-                self.ns = ""
+                self.ns = ''
                 self.never_think = True
-                return text, ""
+                return text, ''
 
         visible, thought, self.in_think, self.ns, self.never_think = split_think(
             text, self.in_think, self.ns, self.never_think

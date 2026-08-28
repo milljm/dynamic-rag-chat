@@ -23,9 +23,9 @@ def load_pdf(path: str) -> list:
     reader = PdfReader(path)
     docs = []
     for i, page in enumerate(reader.pages):
-        text = page.extract_text() or ""
+        text = page.extract_text() or ''
         docs.append(
-            Document(page_content=text, metadata={"source": str(path), "page": i})
+            Document(page_content=text, metadata={'source': str(path), 'page': i})
         )
     return docs
 
@@ -176,16 +176,16 @@ class ChatOptions:
                 object.__setattr__(self, field_name, self.host)
         # Set Orchestration models to default model if not set
         mode_fields = {
-            "casual": ("casual_llm", "casual_host"),
-            "coder": ("coder_llm", "coder_host"),
-            "structured": ("structured_llm", "structured_host"),
-            "general": ("general_llm", "general_host"),
-            "nsfw": ("nsfw_llm", "nsfw_host"),
+            'casual': ('casual_llm', 'casual_host'),
+            'coder': ('coder_llm', 'coder_host'),
+            'structured': ('structured_llm', 'structured_host'),
+            'general': ('general_llm', 'general_host'),
+            'nsfw': ('nsfw_llm', 'nsfw_host'),
             }
         for _, (llm_field, host_field) in mode_fields.items():
             value = getattr(self, llm_field)
 
-            if not value or str(value).strip().lower() in {"", "none", "not_set"}:
+            if not value or str(value).strip().lower() in {'', 'none', 'not_set'}:
                 object.__setattr__(self, llm_field, self.model)
                 object.__setattr__(self, host_field, self.host)
 
@@ -218,7 +218,7 @@ class ChatOptions:
     def _build(cls,
                current_dir: str | Path,
                raw: Mapping[str, Any],
-               base: "ChatOptions | None" = None,) -> "ChatOptions":
+               base: 'ChatOptions | None' = None,) -> 'ChatOptions':
         """
         Convert *any* dict-like object (from YAML or argparse)
         into valid kwargs for the dataclass.
@@ -338,7 +338,7 @@ class CommonUtils():
             elif isinstance(val, bool):
                 result[key] = str(val).lower()  # optional: keep as string for uniformity
             elif val is None:
-                result[key] = "none"
+                result[key] = 'none'
             else:
                 result[key] = str(val)
         return result
@@ -401,38 +401,38 @@ class CommonUtils():
         """
 
         if not text:
-            return ""
+            return ''
 
         # --- remove markdown fences (common with LLMs) ---
-        text = re.sub(r"```(?:json)?", "", text)
+        text = re.sub(r'```(?:json)?', '', text)
 
         # --- normalize python booleans ---
-        text = re.sub(r"\bTrue\b", "true", text)
-        text = re.sub(r"\bFalse\b", "false", text)
-        text = re.sub(r"\bNone\b", "null", text)
+        text = re.sub(r'\bTrue\b', 'true', text)
+        text = re.sub(r'\bFalse\b', 'false', text)
+        text = re.sub(r'\bNone\b', 'null', text)
 
         # --- locate first json object ---
-        start = text.find("{")
+        start = text.find('{')
         if start == -1:
-            return ""
+            return ''
 
         depth = 0
         end = None
         for i, ch in enumerate(text[start:], start):
-            if ch == "{":
+            if ch == '{':
                 depth += 1
-            elif ch == "}":
+            elif ch == '}':
                 depth -= 1
                 if depth == 0:
                     end = i + 1
                     break
 
         if end is None:
-            return ""
+            return ''
         candidate = text[start:end]
         # --- json repairs
         # remove stray double quote after numbers
-        candidate = re.sub(r'(:\s*\d+(?:\.\d+)?)"', r"\1", candidate)
+        candidate = re.sub(r'(:\s*\d+(?:\.\d+)?)"', r'\1', candidate)
         # --- strict JSON parse ---
         try:
             obj = json.loads(candidate)
@@ -527,31 +527,31 @@ class CommonUtils():
 
     def empty_chat_history(self) -> dict:
         """Default branched history. Never a list — callers do .items()."""
-        assistant = bool(getattr(self.opts, "assistant_mode", False))
+        assistant = bool(getattr(self.opts, 'assistant_mode', False))
         return {
-            "story": [],
-            "assistant": [],
-            "current": "assistant" if assistant else "story",
-            "branch_modes": {},
-            "assistant_mode": assistant,
+            'story': [],
+            'assistant': [],
+            'current': 'assistant' if assistant else 'story',
+            'branch_modes': {},
+            'assistant_mode': assistant,
         }
 
     @staticmethod
     def _read_pickle_dict(path: str) -> dict | None:
         try:
-            with open(path, "rb") as handle:
+            with open(path, 'rb') as handle:
                 data = pickle.load(handle)
         except FileNotFoundError:
             return None
         except (pickle.UnpicklingError, EOFError) as exc:
-            print(f"Warning: could not read {path}: {exc}")
+            print(f'Warning: could not read {path}: {exc}')
             return None
         except Exception as exc:  # pylint: disable=broad-exception-caught
-            print(f"Warning: Error loading chat: {exc}")
+            print(f'Warning: Error loading chat: {exc}')
             return None
         if isinstance(data, dict):
             return data
-        print(f"Warning: {path} is a {type(data).__name__}, expected dict")
+        print(f'Warning: {path} is a {type(data).__name__}, expected dict')
         return None
 
     def save_chat(self, history)->None:
@@ -564,14 +564,14 @@ class CommonUtils():
                                    style=f'color({self.opts.color})', highlight=True)
             return
         if not isinstance(history, dict):
-            print(f"Error saving chat: history is {type(history).__name__}, not dict")
+            print(f'Error saving chat: history is {type(history).__name__}, not dict')
             return
         history_file = os.path.join(self.opts.vector_dir, 'chat_history.pkl')
-        tmp = history_file + ".tmp"
-        bak = history_file + ".bak"
+        tmp = history_file + '.tmp'
+        bak = history_file + '.bak'
         try:
             os.makedirs(self.opts.vector_dir, exist_ok=True)
-            with open(tmp, "wb") as handle:
+            with open(tmp, 'wb') as handle:
                 pickle.dump(history, handle)
                 handle.flush()
                 os.fsync(handle.fileno())
@@ -584,7 +584,7 @@ class CommonUtils():
         except FileNotFoundError as e:
             print(f'Error saving chat. Check --history-dir\n{e}')
         except Exception as exc:  # pylint: disable=broad-exception-caught
-            print(f"Error saving chat: {exc}")
+            print(f'Error saving chat: {exc}')
             try:
                 os.remove(tmp)
             except OSError:
@@ -597,9 +597,9 @@ class CommonUtils():
         history_file = os.path.join(self.opts.vector_dir, 'chat_history.pkl')
         loaded = self._read_pickle_dict(history_file)
         if loaded is None:
-            loaded = self._read_pickle_dict(history_file + ".bak")
+            loaded = self._read_pickle_dict(history_file + '.bak')
             if loaded is not None:
-                print(f"Warning: restored chat history from {history_file}.bak")
+                print(f'Warning: restored chat history from {history_file}.bak')
         if loaded is None:
             if isinstance(self.chat_history_session, dict):
                 return self.chat_history_session
@@ -618,7 +618,7 @@ class CommonUtils():
         """ Save the LLMs prompt, overwriting the previous one """
         prompt_file = os.path.join(self.opts.vector_dir, 'llm_prompt.pkl')
         try:
-            with open(prompt_file, "wb") as f:
+            with open(prompt_file, 'wb') as f:
                 pickle.dump(prompt, f)
         except FileNotFoundError as e:
             print(f'Error saving LLM prompt. Check --history-dir\n{e}')
@@ -628,7 +628,7 @@ class CommonUtils():
         """ Persist LLM dynamic prompt (load) """
         prompt_file = os.path.join(self.opts.vector_dir, 'llm_prompt.pkl')
         try:
-            with open(prompt_file, "rb") as f:
+            with open(prompt_file, 'rb') as f:
                 prompt_str = pickle.load(f)
         except FileNotFoundError:
             return ''
@@ -671,4 +671,3 @@ class CommonUtils():
                    f':{my_time.hour}:{my_time.minute}:{my_time.second}'
                    f' {"AM" if my_time.hour < 12 else "PM"}')
         return _str_fmt
-

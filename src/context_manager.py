@@ -54,7 +54,7 @@ class ContextManager(PromptManager):
                                   api_key=args.api_key,
                                   seed = args.seed,
                                   request_timeout=150,
-                                  output_version="v0",
+                                  output_version='v0',
                                   use_responses_api=False)
 
         self.entity_llm = ChatOpenAI(base_url=args.entity_host,
@@ -65,7 +65,7 @@ class ContextManager(PromptManager):
                                   api_key=args.api_key,
                                   seed = args.seed,
                                   request_timeout=150,
-                                  output_version="v0",
+                                  output_version='v0',
                                   use_responses_api=False)
 
         self.filter_builder = FilterBuilder()
@@ -75,14 +75,14 @@ class ContextManager(PromptManager):
     @staticmethod
     def _is_message_list(history: list) -> bool:
         """True when history is the new role/content format."""
-        return bool(history) and isinstance(history[0], dict) and "role" in history[0]
+        return bool(history) and isinstance(history[0], dict) and 'role' in history[0]
 
     @staticmethod
     def _turn_count(messages: list) -> int:
         if not messages:
             return 0
         if ContextManager._is_message_list(messages):
-            return sum(1 for m in messages if m.get("role") == "user")
+            return sum(1 for m in messages if m.get('role') == 'user')
         return len(messages)
 
     @staticmethod
@@ -103,8 +103,8 @@ class ContextManager(PromptManager):
         """
         def to_text(item) -> str:
             if isinstance(item, dict):
-                return item.get("content", "") or ""
-            return str(item) if item is not None else ""
+                return item.get('content', '') or ''
+            return str(item) if item is not None else ''
 
         def is_overlap_duplicate(a: str, b: str) -> bool:
             s, l = (a, b) if len(a) < len(b) else (b, a)
@@ -170,7 +170,7 @@ class ContextManager(PromptManager):
         # pylint: disable-next=no-member # dynamic prompts (see self.__build_prompts)
         human_prompt = prompts.get_prompt(f'{prompts.tag_prompt_file}_human.md')
         human_tmpl = PromptTemplate(template=human_prompt,
-                                    template_format="jinja2")
+                                    template_format='jinja2')
         human_msg = HumanMessagePromptTemplate(prompt=human_tmpl)
 
         prompt_template = ChatPromptTemplate.from_messages([human_msg])
@@ -299,7 +299,7 @@ class ContextManager(PromptManager):
         # pylint: disable-next=no-member # dynamic prompts (see self.__build_prompts)
         human_prompt = prompts.get_prompt(f'{prompts.entity_prompt_file}_human.md')
         human_tmpl = PromptTemplate(template=human_prompt,
-                                    template_format="jinja2")
+                                    template_format='jinja2')
         human_msg = HumanMessagePromptTemplate(prompt=human_tmpl)
 
         prompt_template = ChatPromptTemplate.from_messages([human_msg])
@@ -449,7 +449,7 @@ class ContextManager(PromptManager):
         """ Return bool if content benefits from a web search """
         try:
             for tag in meta_tags:
-                if tag.tag == "search_internet":
+                if tag.tag == 'search_internet':
                     return tag.content is True
         #pylint: disable-next=broad-exception-caught   # LLMs can get so many things wrong
         except Exception:
@@ -475,7 +475,7 @@ class ContextManager(PromptManager):
                 candidates = entry
             elif isinstance(entry, str):
                 # Remove brackets and normalize
-                entry = entry.strip().lstrip("[").rstrip("]")
+                entry = entry.strip().lstrip('[').rstrip(']')
                 # Split on common delimiters
                 candidates = self.common.regex.entities.split(entry)
             else:
@@ -590,143 +590,152 @@ class ContextManager(PromptManager):
 
         return selected + recent
 
+    def _active_branch(self, history: dict) -> str:
+        """Return the pickle branch name for this turn."""
+        if self.opts.assistant_mode:
+            return 'assistant'
+        return history.get('current', 'story')
+
+    def _tag_user_query(self, query: str, documents: dict):
+        """Run the pre-processor and print debug output. None on failure."""
+        self.console.print(
+            'Processing query (meta tagging for RAG)...',
+            style=f'color({self.opts.color})',
+            highlight=False,
+        )
+        (_, meta_tags, error) = self.pre_processor(query, documents)
+        self.common.write_debug(
+            f'handle_context_preprocess-{self.pre_llm.model_name}',
+            meta_tags,
+        )
+        if self.debug:
+            self.console.print(
+                f'TAG RETRIEVAL:\n{meta_tags}\n\n',
+                style=f'color({self.opts.color})',
+                highlight=False,
+            )
+        if not error:
+            return None
+        return meta_tags
+
+    def _apply_meta_to_documents(self, documents: dict, meta_tags) -> None:
+        """Copy tags onto documents without clobbering existing keys."""
+        documents['RAGTags'] = meta_tags
+        documents['explicit'] = self.is_explicit(meta_tags)
+        if self.use_agent(meta_tags) and self.opts.assistant_mode:
+            documents['use_agent'] = True
+            documents['agent_ran'] = False
+        documents['entities'] = '---\n\n'.join(self.prompt_entities(meta_tags))
+        documents['known_characters'] = ','.join(
+            self.scene.get_scene().get('known_characters', []),
+        )
+        if self._turn_count(documents['chat_history']) > self.opts.unmolested_sessions:
+            documents['chat_history'] = self.stagger_history(documents)
+        gold = dict(documents)
+        documents.update(meta_tags)
+        documents.update(gold)
+        if documents.get('content_type', False):
+            documents['content_type'] = (
+                '- Respond in the following format: ',
+                f'{documents["content_type"]}',
+            )
+
+    def _collection_prefix(self, branch: str, collection: str) -> str:
+        """Chroma collection name prefix for this branch."""
+        if self.opts.assistant_mode:
+            return 'assistant_'
+        if collection == 'gold_documents':
+            return ''
+        return f'{branch}_'
+
+    def _fill_rag_collections(self, documents, meta_tags, query, branch):
+        """Retrieve, dedupe, and stringify each RAG collection.
+
+        Returns (pre_tokens, post_tokens).
+        """
+        pre_tokens = 0
+        post_tokens = 0
+        collections = [
+            self.common.attributes.collections[x]
+            for x in self.common.attributes.collections
+        ]
+        self.console.print(
+            'Gathering RAG data...',
+            style=f'color({self.opts.color})',
+            highlight=False,
+        )
+        for collection in collections:
+            prefix = self._collection_prefix(branch, collection)
+            name = f'{prefix}{collection}'
+            if self.debug:
+                self.console.print(
+                    f'Collection: {name}',
+                    style=f'color({self.opts.color})',
+                    highlight=False,
+                )
+            storage = []
+            storage.extend(self.handle_topics(meta_tags, query, name, self.mode))
+            retrieved = self.rag.retrieve(query, name)
+            if self.debug:
+                self.console.print(
+                    f'Data:\n{retrieved}\n\n',
+                    style=f'color({self.opts.color})',
+                    highlight=False,
+                )
+            storage.extend(retrieved)
+            pages = [doc.page_content for doc in storage]
+            pre_tokens += sum(self.token_retriever(page) for page in pages)
+            documents[collection] = self.deduplication(
+                documents['chat_history'], pages,
+            )
+            post_tokens += sum(
+                self.token_retriever(page) for page in documents[collection]
+            )
+            documents[collection] = self.common.stringify_lists(
+                documents[collection],
+            )
+        return pre_tokens, post_tokens
+
+    @staticmethod
+    def _stringify_chat_history(documents: dict) -> None:
+        """Flatten role/content messages into USER:/AI: lines."""
+        chat_lines = []
+        for msg in documents['chat_history']:
+            if isinstance(msg, dict):
+                role = 'USER' if msg.get('role') == 'user' else 'AI'
+                chat_lines.append(f'{role}: {msg.get("content", "")}')
+            else:
+                chat_lines.append(str(msg))
+        documents['chat_history'] = '\n'.join(chat_lines)
+
     def handle_context(self, documents: dict,
                              direction='query')->tuple[dict[str,list], int, list]:
-        """ Method to handle all the lovely context """
-        # Retrieve context from AI and User RAG and Chat History
-        if direction == 'query':
-            pre_tokens = 0
-            post_tokens = 0
-            history = documents['history'] # shorthand
-            if self.opts.assistant_mode:
-                branch = 'assistant'
-            else:
-                branch = history.get('current', 'story')
-            collection_list = [self.common.attributes.collections[x] for
-                                x in self.common.attributes.collections]
+        """Assemble RAG + history for a query, or post-process a reply."""
+        if direction != 'query':
+            return self.post_process(documents)
 
-            # column cnt
-            documents['terminal_width'] = int(os.get_terminal_size().columns) - 5
-            # populate chat history
-            documents['chat_history'] = history[branch]
+        history = documents['history']
+        branch = self._active_branch(history)
+        documents['terminal_width'] = int(os.get_terminal_size().columns) - 5
+        documents['chat_history'] = history[branch]
+        documents['additional_content'] = self.get_explicit()
+        documents['ooc_system'] = self.get_ooc()
+        if self.opts.assistant_mode and not self.opts.no_rags:
+            return (documents, 0, 0, [])
 
-            documents['additional_content'] = self.get_explicit()
-            documents['ooc_system'] = self.get_ooc()
+        query = documents.get('user_query', '')
+        meta_tags = self._tag_user_query(query, documents)
+        if meta_tags is None:
+            return ([], 0, 0, [])
 
-            if self.opts.assistant_mode and not self.opts.no_rags:
-                return (documents, pre_tokens, post_tokens, [])
-
-            query = documents.get('user_query', '')
-
-            # tag the users query
-            self.console.print('Processing query (meta tagging for RAG)...',
-                               style=f'color({self.opts.color})',
-                               highlight=False)
-            (_, meta_tags, error) = self.pre_processor(query, documents)
-            self.common.write_debug(f'handle_context_preprocess-{self.pre_llm.model_name}',
-                                     meta_tags)
-            if self.debug:
-                self.console.print(f'TAG RETRIEVAL:\n{meta_tags}\n\n',
-                                    style=f'color({self.opts.color})',
-                                    highlight=False)
-            if not error:
-                return ([],0,0,[])
-
-            # Add tags so they can be passed around
-            documents['RAGTags'] = meta_tags
-
-            # Populate explicit content if triggered
-            documents['explicit'] = self.is_explicit(meta_tags)
-
-            # Use agent if pre-processor believes that would help
-            if self.use_agent(meta_tags) and self.opts.assistant_mode:
-                documents['use_agent'] = True
-                documents['agent_ran'] = False
-
-            # grab entities and perform another tagging process (with character sheets)
-            documents['entities'] = '---\n\n'.join(self.prompt_entities(meta_tags))
-            documents['known_characters'] = ','.join(
-                           self.scene.get_scene().get('known_characters', [])
-                       )
-
-            if self._turn_count(documents['chat_history']) > self.opts.unmolested_sessions:
-                documents['chat_history'] = self.stagger_history(documents)
-
-            # Make all meta_tags available for prompt templating operations, without overwriting
-            # important already established keys.
-            _gold = dict(documents)
-            documents.update(meta_tags)
-            documents.update(_gold)
-
-            # If content_type is populated, instruct the LLM to respond in kind
-            if documents.get('content_type', False):
-                documents['content_type'] = ('- Respond in the following format: ',
-                                                f'{documents["content_type"]}')
-            self.console.print('Gathering RAG data...',
-                               style=f'color({self.opts.color})',
-                               highlight=False)
-            for collection in collection_list:
-                if self.opts.assistant_mode:
-                    g_branch = 'assistant_'
-                else:
-                    g_branch = f'{branch}_'
-
-                if not self.opts.assistant_mode and collection == 'gold_documents':
-                    g_branch = ''
-
-                if self.debug:
-                    self.console.print(f'Collection: {g_branch}{collection}',
-                                       style=f'color({self.opts.color})',
-                                       highlight=False)
-                storage = []
-                # field-filtering RAG retrieval specific for document_topics
-                storage.extend(self.handle_topics(meta_tags,
-                                                  query,
-                                                  f'{g_branch}{collection}',
-                                                  self.mode))
-
-                # general retrieval
-                _retrieved = self.rag.retrieve(query, f'{g_branch}{collection}')
-                if self.debug:
-                    self.console.print(f'Data:\n{_retrieved}\n\n',
-                                       style=f'color({self.opts.color})',
-                                       highlight=False)
-                storage.extend(_retrieved)
-
-                # Record pre-token counts
-                pages = list(map(lambda doc: doc.page_content, storage))
-                for page in pages:
-                    pre_tokens += self.token_retriever(page)
-
-                # Remove duplicate RAG matches
-                documents[collection] = self.deduplication(documents['chat_history'], pages)
-
-                # Record post-token counts
-                for page in documents[collection]:
-                    post_tokens += self.token_retriever(page)
-
-                # Stringify RAG retrieval lists
-                documents[collection] = self.common.stringify_lists(documents[collection])
-
-            # Stringify lists in chat_history
-            chat_lines = []
-            for msg in documents['chat_history']:
-                if isinstance(msg, dict):
-                    role = 'USER' if msg.get('role') == 'user' else 'AI'
-                    content = msg.get('content', '')
-                    chat_lines.append(f'{role}: {content}')
-                else:
-                    # safety net for any remaining old-format items
-                    chat_lines.append(str(msg))
-            documents['chat_history'] = '\n'.join(chat_lines)
-            # Store the users query to their RAG, now that we are done pre-processing
-            # (so as not to bring back identical information in their query)
-            # A little unorthodox, but the first item in the list is the user's query
-            self.rag.store_data(query,
-                                tags_metadata=meta_tags,
-                                collection=f'{branch}_{self.common.attributes.collections["user"]}')
-            # Return data collected
-            return (documents, pre_tokens, post_tokens, meta_tags)
-
-        # Store data (non-blocking)
-        return self.post_process(documents)
+        self._apply_meta_to_documents(documents, meta_tags)
+        pre_tokens, post_tokens = self._fill_rag_collections(
+            documents, meta_tags, query, branch,
+        )
+        self._stringify_chat_history(documents)
+        self.rag.store_data(
+            query,
+            tags_metadata=meta_tags,
+            collection=f'{branch}_{self.common.attributes.collections["user"]}',
+        )
+        return (documents, pre_tokens, post_tokens, meta_tags)

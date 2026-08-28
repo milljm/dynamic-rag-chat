@@ -19,7 +19,7 @@ from langchain_ollama import OllamaEmbeddings
 from langchain_chroma import Chroma
 from .chat_utils import CommonUtils, ChatOptions, RAGTag  # for Type Hinting
 # Silence initial RAG database being empty
-logging.getLogger("chromadb").setLevel(logging.ERROR)
+logging.getLogger('chromadb').setLevel(logging.ERROR)
 
 
 class BM25Retriever(BaseRetriever):
@@ -31,7 +31,8 @@ class BM25Retriever(BaseRetriever):
     k: int = 4
 
     @classmethod
-    def from_documents(cls, documents: list[Document], **kwargs) -> "BM25Retriever":
+    def from_documents(cls, documents: list[Document], **kwargs) -> 'BM25Retriever':
+        """Build a BM25 index over Document.page_content."""
         docs = list(documents)
         if not docs:
             return cls(vectorizer=None, docs=[], **kwargs)
@@ -39,6 +40,8 @@ class BM25Retriever(BaseRetriever):
         return cls(vectorizer=BM25Okapi(tokenized), docs=docs, **kwargs)
 
     def _get_relevant_documents(self, query: str, *, run_manager=None) -> list[Document]:
+        """Rank documents for query; run_manager is unused (BaseRetriever API)."""
+        del run_manager
         if not self.docs:
             return []
         return list(self.vectorizer.get_top_n(query.split(), self.docs, n=self.k))
@@ -305,88 +308,93 @@ class RAG():
             # pylint: enable=protected-access
             client.delete_collection(f_source)
 
-    def clone_collection(self, source: str, target: str, *, overwrite: bool = False) -> None:
-        """
-        Clone Chroma contents (documents/metadatas/embeddings if present) from `source` -> `target`,
-        and mirror the ParentDocumentRetriever docstore folder.
-        """
-        if not source or not target or source == target:
-            raise ValueError("clone_collection: source/target must be different, non-empty names.")
+    def _clone_chroma_payload(self, f_source: str, f_target: str, overwrite: bool) -> None:
+        """Copy one Chroma collection's documents/metadatas/embeddings."""
+        src_vs = self._vector_store(f_source)
+        dst_vs = self._vector_store(f_target)
+        # pylint: disable=protected-access
+        src_col = src_vs._collection
+        dst_col = dst_vs._collection
+        # pylint: enable=protected-access
+        if overwrite:
+            try:
+                ids = (dst_col.get() or {}).get('ids') or []
+                if ids:
+                    dst_col.delete(ids=ids)
+            except (ValueError, RuntimeError, OSError):
+                pass
+        try:
+            payload = src_col.get(include=['documents', 'metadatas', 'embeddings'])
+        except (ValueError, RuntimeError, OSError) as exc:
+            raise RuntimeError(
+                f"Failed to read f_source collection '{f_source}': {exc}",
+            ) from exc
+        ids = payload.get('ids') or []
+        if not ids:
+            return
+        docs = payload.get('documents') or [None] * len(ids)
+        metas = payload.get('metadatas') or [{} for _ in ids]
+        embs = payload.get('embeddings')
+        new_ids = [f'{f_target}_{i}_{uuid4().hex}' for i, _ in enumerate(ids)]
+        try:
+            if embs is not None:
+                dst_col.add(
+                    ids=new_ids, documents=docs, metadatas=metas, embeddings=embs,
+                )
+            else:
+                dst_col.add(ids=new_ids, documents=docs, metadatas=metas)
+        except (ValueError, RuntimeError, OSError) as exc:
+            raise RuntimeError(
+                f"Failed to write f_target collection '{f_target}': {exc}",
+            ) from exc
 
-        # Vector stores
-        collection_list = [self.common.attributes.collections[x]
-                           for x in self.common.attributes.collections]
+    def _clone_docstore_dir(self, f_source: str, f_target: str, overwrite: bool) -> None:
+        """Mirror the ParentDocumentRetriever on-disk store."""
+        src_store_dir = os.path.join(self.opts.vector_dir, f_source)
+        dst_store_dir = os.path.join(self.opts.vector_dir, f_target)
+        try:
+            if os.path.exists(dst_store_dir) and overwrite:
+                shutil.rmtree(dst_store_dir)
+            if os.path.exists(src_store_dir):
+                shutil.copytree(src_store_dir, dst_store_dir, dirs_exist_ok=True)
+            else:
+                os.makedirs(dst_store_dir, exist_ok=True)
+        except (OSError, PermissionError) as exc:
+            raise RuntimeError(
+                f"Failed cloning docstore '{src_store_dir}' -> "
+                f"'{dst_store_dir}': {exc}",
+            ) from exc
+
+    def clone_collection(self, source: str, target: str, *, overwrite: bool = False) -> None:
+        """Clone Chroma + parent-docstore from source branch to target."""
+        if not source or not target or source == target:
+            raise ValueError(
+                'clone_collection: source/target must be different, non-empty names.',
+            )
+        collection_list = [
+            self.common.attributes.collections[x]
+            for x in self.common.attributes.collections
+        ]
         for collection in collection_list:
             if collection == 'gold_documents':
                 continue
             f_source = f'{source}_{collection}'
             f_target = f'{target}_{collection}'
             if self.opts.debug:
-                self.console.print(f'\nSOURCE COLLECTION >>>{source}_{collection}<<<\n'
-                                    f'TARGET COLLECTION: >>>{target}_{collection}<<<',
-                                    style=f'color({self.opts.color})',
-                                    highlight=False)
-
-            src_vs = self._vector_store(f_source)
-            dst_vs = self._vector_store(f_target)
-            # pylint: disable=protected-access
-            src_col = src_vs._collection
-            dst_col = dst_vs._collection
-            # pylint: enable=protected-access
-
-            # Optionally clear f_target before cloning
-            if overwrite:
-                try:
-                    existing = dst_col.get()  # returns {"ids":[...], ...}
-                    ids = existing.get("ids") or []
-                    if ids:
-                        dst_col.delete(ids=ids)
-                except (ValueError, RuntimeError, OSError):
-                    pass
-
-            # Pull everything from f_source (Chroma returns ids even if not requested)
-            try:
-                payload = src_col.get(include=["documents", "metadatas", "embeddings"])
-            except (ValueError, RuntimeError, OSError) as e:
-                raise RuntimeError(f"Failed to read f_source collection '{f_source}': {e}") from e
-
-            ids   = payload.get("ids") or []
-            docs  = payload.get("documents") or [None] * len(ids)
-            metas = payload.get("metadatas") or [{} for _ in ids]
-            embs  = payload.get("embeddings")  # may be None if an embedding function is used
-
-            # Re-id for f_target (safe even if collections are separate)
-            new_ids = [f"{f_target}_{i}_{uuid4().hex}" for i, _ in enumerate(ids)]
-            try:
-                if ids:
-                    if embs is not None:
-                        dst_col.add(ids=new_ids, documents=docs, metadatas=metas, embeddings=embs)
-                    else:
-                        dst_col.add(ids=new_ids, documents=docs, metadatas=metas)
-            except (ValueError, RuntimeError, OSError) as e:
-                raise RuntimeError(f"Failed to write f_target collection '{f_target}': {e}") from e
-
-            # Clone docstore directory used by ParentDocumentRetriever
-            src_store_dir = os.path.join(self.opts.vector_dir, f_source)
-            dst_store_dir = os.path.join(self.opts.vector_dir, f_target)
-            try:
-                if os.path.exists(dst_store_dir):
-                    if overwrite:
-                        shutil.rmtree(dst_store_dir)
-                    # if not overwriting, keep existing contents and merge
-                if os.path.exists(src_store_dir):
-                    shutil.copytree(src_store_dir, dst_store_dir, dirs_exist_ok=True)
-                else:
-                    os.makedirs(dst_store_dir, exist_ok=True)  # ensure f_target exists
-            except (OSError, PermissionError) as e:
-                raise RuntimeError(f"Failed cloning docstore '{src_store_dir}' -> "
-                                f"'{dst_store_dir}': {e}") from e
-
-            if getattr(self.opts, "debug", False):
-                self.console.print(f"[green]Cloned RAG collection[/green] '{f_source}' "
-                                   f"➜ '{f_target}'",
-                                    highlight=False)
-
+                self.console.print(
+                    f'\nSOURCE COLLECTION >>>{source}_{collection}<<<\n'
+                    f'TARGET COLLECTION: >>>{target}_{collection}<<<',
+                    style=f'color({self.opts.color})',
+                    highlight=False,
+                )
+            self._clone_chroma_payload(f_source, f_target, overwrite)
+            self._clone_docstore_dir(f_source, f_target, overwrite)
+            if getattr(self.opts, 'debug', False):
+                self.console.print(
+                    f"[green]Cloned RAG collection[/green] '{f_source}' "
+                    f"➜ '{f_target}'",
+                    highlight=False,
+                )
 
     def build_collection_from_texts(self,
                                     target: str,
@@ -396,7 +404,7 @@ class RAG():
         Rebuild `target` collection from raw turn texts; also reset the docstore folder.
         """
         if not target:
-            raise ValueError("build_collection_from_texts: target name cannot be empty.")
+            raise ValueError('build_collection_from_texts: target name cannot be empty.')
         collection_list = [self.common.attributes.collections[x]
                            for x in self.common.attributes.collections]
         for collection in collection_list:
@@ -416,7 +424,7 @@ class RAG():
             if overwrite:
                 try:
                     existing = col.get()
-                    old_ids = existing.get("ids") or []
+                    old_ids = existing.get('ids') or []
                     if old_ids:
                         col.delete(ids=old_ids)
                 except (ValueError, RuntimeError, OSError):
@@ -434,18 +442,18 @@ class RAG():
             # Add texts
             ids, docs, metas = [], [], []
             for i, text in enumerate(texts, start=1):
-                doc_id = f"{f_target}_{i}_{uuid4().hex}"
+                doc_id = f'{f_target}_{i}_{uuid4().hex}'
                 ids.append(doc_id)
                 docs.append(text)
-                metas.append({"turn": i})
+                metas.append({'turn': i})
                 # (optional) persist each turn into the docstore for ParentDocumentRetriever parity
                 try:
                     with open(os.path.join(store_dir,
-                                        f"{i:05d}_{doc_id}.txt"),
-                                        "w", encoding="utf-8") as f:
+                                        f'{i:05d}_{doc_id}.txt'),
+                                        'w', encoding='utf-8') as f:
                         f.write(text)
                 except (OSError, PermissionError) as e:
-                    raise RuntimeError(f"Failed writing turn {i} to "
+                    raise RuntimeError(f'Failed writing turn {i} to '
                                        f"docstore '{store_dir}': {e}") from e
 
             if ids:
@@ -456,7 +464,7 @@ class RAG():
                 except (ValueError, RuntimeError, OSError) as e:
                     raise RuntimeError(f"Failed adding documents to '{f_target}': {e}") from e
 
-            if getattr(self.opts, "debug", False):
+            if getattr(self.opts, 'debug', False):
                 self.console.print(
                     f"[green]Built RAG collection '{f_target}' from {len(texts)} texts.[/green]",
                     highlight=False

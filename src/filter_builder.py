@@ -34,7 +34,7 @@ class FilterBuilder:
                 continue
             # Handle the content, splitting it if there are multiple values
             condition_values = tag.content.split(',') if ',' in tag.content else [tag.content]
-            condition = {tag.tag: {"$in": condition_values}}
+            condition = {tag.tag: {'$in': condition_values}}
             if tag.tag == field:
                 must_conditions.append(condition)
             else:
@@ -44,11 +44,11 @@ class FilterBuilder:
             return None
         # Build final filter object
         if not must_conditions:
-            return {"$or": soft_conditions}
+            return {'$or': soft_conditions}
         if not soft_conditions:
-            return {"$and": must_conditions}
+            return {'$and': must_conditions}
         return {
-            "$and": must_conditions + soft_conditions
+            '$and': must_conditions + soft_conditions
         }
 
     def build(self, tags: List[RAGTag[str,str]], field: str) -> Union[Dict, None]:

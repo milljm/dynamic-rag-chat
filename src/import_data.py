@@ -39,7 +39,10 @@ class ImportData:
                            f' Split: [bold]{repr(self.child_splitter._separators[0])}[/]')
             # pylint: enable=protected-access
         except AttributeError:
-            self.parent_split = f'Parent=[bold]2000[/]/[bold]1000[/] Split: [bold]{repr("\n\n")}[/]'
+            newline = repr('\n\n')
+            self.parent_split = (
+                f'Parent=[bold]2000[/]/[bold]1000[/] Split: [bold]{newline}[/]'
+            )
             self.child_split = f'Child=[bold]100[/]/[bold]100[/] Split: [bold]{repr(".")}[/]'
 
     def _install_sigint(self):
@@ -84,7 +87,7 @@ class ImportData:
 
         # Fallback: not enough data yet — use file-level
         if not file_processed or file_total is None:
-            return "Calculating..."
+            return 'Calculating...'
         elapsed = time.time() - start_time
         rate = elapsed / file_processed
         return str(timedelta(seconds=max(0, int(rate * (file_total - file_processed)))))
@@ -166,11 +169,13 @@ class ImportData:
         """
         k = kwargs # short hand
         table = Table.grid()
-        proc = f'{" [italic red]LLM Pre-Processor/Tagging[/]" if k.get("processing",
-                                                                       False) else ""}'
-        proc = f'{proc} {"[yellow]⚠️  Retrying:[/]" if k.get("retry", False) else ""}'
-        proc = f'{proc} [dim]{k.get("message", False)}[/]' if k.get("retry", False) else proc
-        stor = f'{"[italic red]RAG Update[/]" if k.get("storing", False) else ""}'
+        proc = ''
+        if k.get('processing', False):
+            proc = ' [italic red]LLM Pre-Processor/Tagging[/]'
+        if k.get('retry', False):
+            proc = f'{proc} [yellow]⚠️  Retrying:[/]'
+            proc = f'{proc} [dim]{k.get("message", False)}[/]'
+        stor = '[italic red]RAG Update[/]' if k.get('storing', False) else ''
         meta = f'[dim]Applying Meta Tags to Children: {parent[2][:4]}[/]'
         table.add_row(f'[bold]Current File:[/] {os.path.basename(file_path)}')
         table.add_row(f'[bold green]Parent Chunk:[/] {parent[0]+1} / {parent[1]}{proc}')
@@ -182,7 +187,7 @@ class ImportData:
         elif not parent[2] and k.get('storing', False):
             table.add_row('[dim]Warning: No Meta Data[/]')
             self.state['failed'].add((file_path, 'No Meta Data gathered'))
-        return Panel(table, title="🔄 Processing RAG Input", border_style="blue")
+        return Panel(table, title='🔄 Processing RAG Input', border_style='blue')
 
     def do_parentdocs(self, data: str,
                             file_path: str)->tuple[bool,str]:
@@ -210,8 +215,8 @@ class ImportData:
         meta_tags = []
         for cnt, split_doc in enumerate(split_docs):
             if self._interrupt_requested:
-                print(f"\n[yellow]Interrupted. Skipping {len(split_docs) - cnt} "
-                    f"remaining parent chunks in [bold]{os.path.basename(file_path)}[/].[/]")
+                print(f'\n[yellow]Interrupted. Skipping {len(split_docs) - cnt} '
+                    f'remaining parent chunks in [bold]{os.path.basename(file_path)}[/].[/]')
                 sys.exit(0)
             chunk_start = time.time()
             self.state['current_parent'] = [cnt+1, len(split_docs)]
@@ -448,7 +453,7 @@ class ImportData:
         """ extract plain text from web address """
         response = requests.get(v_args.import_web, timeout=300)
         if response.status_code == 200:
-            print(f"Document loaded from: {v_args.import_web}")
+            print(f'Document loaded from: {v_args.import_web}')
             soup = BeautifulSoup(response.content, 'html.parser')
             text = soup.get_text()
             self.store_data(text, '')
