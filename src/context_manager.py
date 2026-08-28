@@ -10,8 +10,8 @@ being supplied to the LLM. It utilizing several methods:
 import os
 from difflib import SequenceMatcher
 import threading
-from langchain.schema import Document
-from langchain.prompts import ChatPromptTemplate, PromptTemplate
+from langchain_core.documents import Document
+from langchain_core.prompts import ChatPromptTemplate, PromptTemplate
 from langchain_core.prompts import HumanMessagePromptTemplate
 from langchain_openai import ChatOpenAI
 from openai import APITimeoutError
@@ -43,6 +43,9 @@ class ContextManager(PromptManager):
                                      args,
                                      prompt_model=args.preconditioner)
 
+        # output_version=v0 keeps chunk.content as a string so ThinkFeed
+        # still sees MiniMax / gpt-oss reasoning tokens. use_responses_api=False
+        # keeps LM Studio / Ollama on Chat Completions.
         self.pre_llm = ChatOpenAI(base_url=args.pre_host,
                                   model=args.preconditioner,
                                   temperature=args.pre_temp,
@@ -50,7 +53,9 @@ class ContextManager(PromptManager):
                                   max_tokens=8096,
                                   api_key=args.api_key,
                                   seed = args.seed,
-                                  request_timeout=150)
+                                  request_timeout=150,
+                                  output_version="v0",
+                                  use_responses_api=False)
 
         self.entity_llm = ChatOpenAI(base_url=args.entity_host,
                                   model=args.entity_llm,
@@ -59,7 +64,9 @@ class ContextManager(PromptManager):
                                   max_tokens=4096,
                                   api_key=args.api_key,
                                   seed = args.seed,
-                                  request_timeout=150)
+                                  request_timeout=150,
+                                  output_version="v0",
+                                  use_responses_api=False)
 
         self.filter_builder = FilterBuilder()
         self.prompts.build_prompts()

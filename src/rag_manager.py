@@ -6,21 +6,42 @@ import re
 import logging
 import shutil
 from uuid import uuid4
-from typing import List
-from langchain_community.retrievers import BM25Retriever
-from langchain import retrievers  # for Type Hinting
-from langchain.retrievers import EnsembleRetriever
-from langchain.retrievers import ParentDocumentRetriever
-from langchain.storage import LocalFileStore
-from langchain.storage._lc_store import create_kv_docstore
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.schema import Document
+from typing import Any, List
+from rank_bm25 import BM25Okapi
+from pydantic import ConfigDict, Field
+from langchain_classic.retrievers import EnsembleRetriever, ParentDocumentRetriever
+from langchain_classic.storage import LocalFileStore, create_kv_docstore
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_core.documents import Document
+from langchain_core.retrievers import BaseRetriever
 from langchain_openai import OpenAIEmbeddings
 from langchain_ollama import OllamaEmbeddings
 from langchain_chroma import Chroma
 from .chat_utils import CommonUtils, ChatOptions, RAGTag  # for Type Hinting
 # Silence initial RAG database being empty
 logging.getLogger("chromadb").setLevel(logging.ERROR)
+
+
+class BM25Retriever(BaseRetriever):
+    """rank_bm25 wrapper. langchain-community's copy is sunsetting."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+    vectorizer: Any = None
+    docs: list[Document] = Field(default_factory=list)
+    k: int = 4
+
+    @classmethod
+    def from_documents(cls, documents: list[Document], **kwargs) -> "BM25Retriever":
+        docs = list(documents)
+        if not docs:
+            return cls(vectorizer=None, docs=[], **kwargs)
+        tokenized = [d.page_content.split() for d in docs]
+        return cls(vectorizer=BM25Okapi(tokenized), docs=docs, **kwargs)
+
+    def _get_relevant_documents(self, query: str, *, run_manager=None) -> list[Document]:
+        if not self.docs:
+            return []
+        return list(self.vectorizer.get_top_n(query.split(), self.docs, n=self.k))
 
 class RAG():
     """
@@ -166,7 +187,7 @@ class RAG():
         _retriever.k = self.opts.matches
         return _retriever
 
-    def _chroma_retriever(self, collection: str, kwargs)->retrievers:
+    def _chroma_retriever(self, collection: str, kwargs)->BaseRetriever:
         """
         ### Chroma Retriever
 

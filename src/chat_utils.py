@@ -15,6 +15,20 @@ from typing import NamedTuple
 import pytz
 import yaml
 
+def load_pdf(path: str) -> list:
+    """Read a PDF with pypdf. Replaces langchain_community.PyPDFLoader."""
+    from pypdf import PdfReader
+    from langchain_core.documents import Document
+
+    reader = PdfReader(path)
+    docs = []
+    for i, page in enumerate(reader.pages):
+        text = page.extract_text() or ""
+        docs.append(
+            Document(page_content=text, metadata={"source": str(path), "page": i})
+        )
+    return docs
+
 class RAGTag(NamedTuple):
     """
     namedtuple class constructor

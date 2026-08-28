@@ -90,6 +90,8 @@ class Orchestration():
                                         api_key=args.api_key,
                                         extra_body = extra_body,
                                         seed = args.seed,
+                                        output_version="v0",
+                                        use_responses_api=False,
                                     )
 
     def _route_story(self, documents)->ChatOpenAI:

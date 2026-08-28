@@ -1,23 +1,24 @@
 #!/usr/bin/env python3
 """ Chat Main executable/entry point """
 # /// script
-# requires-python = ">=3.12"
+# requires-python = ">=3.10"
 # dependencies = [
-#     "langchain==0.3.24",
-#     "langchain-core==0.3.59",
-#     "langchain_ollama==0.3.2",
-#     "langchain_openai==0.3.16",
-#     "langchain_chroma==0.2.3",
-#     "langchain-community==0.3.23",
-#     "chromadb==0.6.3",
-#     "pydantic==2.11.3",
-#     "posthog==4.0.0",
+#     "langchain==1.3.18",
+#     "langchain-core==1.6.1",
+#     "langchain-classic==1.0.8",
+#     "langchain_ollama==1.1.0",
+#     "langchain_openai==1.6.0",
+#     "langchain_chroma==1.1.0",
+#     "langchain-text-splitters==1.1.2",
+#     "chromadb>=1.3.5,<2.0.0",
+#     "pydantic>=2.7.4,<3",
+#     "posthog",
 #     "prompt_toolkit",
 #     "rich",
 #     "rank_bm25",
 #     "pypdf",
 #     "pytz",
-#     "pillow"
+#     "pillow",
 #     "cloudscraper",
 #     "beautifulsoup4",
 #     "pygments",
@@ -50,7 +51,6 @@ from bs4 import BeautifulSoup
 from PIL import Image
 from prompt_toolkit import PromptSession
 from prompt_toolkit.key_binding import KeyBindings
-from langchain_community.document_loaders import PyPDFLoader
 from src import ContextManager
 from src import RAG
 from src import RenderWindow
@@ -58,6 +58,7 @@ from src import CommonUtils, ChatOptions
 from src import ImportData
 from src import SceneManager
 from src import Orchestration
+from src.chat_utils import load_pdf
 posthog.disabled = True
 dark_rich_142_styles = {
     "markdown.h1": "bold #FFFFFF",
@@ -487,14 +488,7 @@ class Chat():
     def _process_pdf(self, included_file: str) -> tuple:
         """Process PDF files."""
         icon = "📕"
-        data = ""
-        loader = PyPDFLoader(included_file)
-        pages = []
-        for page in loader.lazy_load():
-            pages.append(page)
-        page_texts = list(map(lambda doc: doc.page_content, pages))
-        for page_text in page_texts:
-            data += page_text
+        data = "".join(doc.page_content for doc in load_pdf(included_file))
         return icon, data
 
     def _process_url(self, url: str) -> tuple:

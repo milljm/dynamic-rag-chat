@@ -1,7 +1,7 @@
 """ agent tools for use by tooling capable models """
 import typing
 from ddgs import DDGS
-from langchain.tools import BaseTool
+from langchain_core.tools import BaseTool
 from pydantic import BaseModel, Field
 
 class DuckDuckGoSearchInput(BaseModel):
