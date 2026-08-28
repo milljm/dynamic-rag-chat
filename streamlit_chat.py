@@ -984,6 +984,8 @@ def call_llm_stream(
     '''Stream LLM tokens and fill StreamMetrics.'''
     status.markdown('Working — RAG / agent / prompt…')
     renderer.set_llm(meta, documents)
+    if renderer.orchestrator.requires_agent(meta, documents):
+        status.markdown('Agent tool web search…')
     messages = renderer.get_messages(meta, documents)
     status.markdown(f"Streaming `{renderer.llm.model_name}`")
     metrics.model = renderer.llm.model_name
