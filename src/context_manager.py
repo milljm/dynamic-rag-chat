@@ -559,7 +559,7 @@ class ContextManager(PromptManager):
         return selected + recent
 
     def _active_branch(self, history: dict) -> str:
-        """Return the pickle branch name for this turn."""
+        """Return the history branch name for this turn."""
         if self.opts.assistant_mode:
             return 'assistant'
         return history.get('current', 'story')

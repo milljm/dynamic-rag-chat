@@ -37,6 +37,117 @@ class RAGTag(NamedTuple):
     tag: str
     content: str|list
 
+
+HISTORY_JSON = 'chat_history.json'
+HISTORY_PKL = 'chat_history.pkl'
+HISTORY_VERSION = 1
+HISTORY_META_KEYS = frozenset({
+    'current', 'assistant_mode', 'branch_modes', 'version',
+})
+
+
+def _json_default(obj: Any):
+    """Best-effort conversion for leftover pickle types."""
+    as_dict = getattr(obj, '_asdict', None)
+    if callable(as_dict):
+        return as_dict()
+    if isinstance(obj, (set, tuple)):
+        return list(obj)
+    if isinstance(obj, bytes):
+        return obj.decode('utf-8', errors='replace')
+    if isinstance(obj, Path):
+        return str(obj)
+    return str(obj)
+
+
+def _read_json_dict(path: str) -> dict | None:
+    """Load a JSON object from `path`, or None if missing/corrupt/not a dict."""
+    try:
+        with open(path, 'r', encoding='utf-8') as handle:
+            data = json.load(handle)
+    except FileNotFoundError:
+        return None
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
+        print(f'Warning: could not read {path}: {exc}')
+        return None
+    if isinstance(data, dict):
+        return data
+    print(f'Warning: {path} is a {type(data).__name__}, expected dict')
+    return None
+
+
+def _read_pickle_dict(path: str) -> dict | None:
+    """Load a pickle dict from `path` (legacy chat_history.pkl)."""
+    try:
+        with open(path, 'rb') as handle:
+            data = pickle.load(handle)
+    except FileNotFoundError:
+        return None
+    except (pickle.UnpicklingError, EOFError) as exc:
+        print(f'Warning: could not read {path}: {exc}')
+        return None
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        print(f'Warning: Error loading chat: {exc}')
+        return None
+    if isinstance(data, dict):
+        return data
+    print(f'Warning: {path} is a {type(data).__name__}, expected dict')
+    return None
+
+
+def _atomic_write_json(path: str, data: dict) -> None:
+    """Write JSON via tmp + fsync + replace. Keeps path.bak on success."""
+    tmp = path + '.tmp'
+    bak = path + '.bak'
+    os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
+    with open(tmp, 'w', encoding='utf-8') as handle:
+        json.dump(data, handle, ensure_ascii=False, indent=2, default=_json_default)
+        handle.write('\n')
+        handle.flush()
+        os.fsync(handle.fileno())
+    if os.path.exists(path):
+        try:
+            os.replace(path, bak)
+        except OSError:
+            pass
+    os.replace(tmp, path)
+
+
+def load_history_from_dir(vector_dir: str, *, migrate: bool = True) -> dict | None:
+    """Load history from JSON, falling back to legacy pickle.
+
+    When a pickle is the only source and `migrate` is true, write JSON so the
+    next boot never needs pickle again. The .pkl file is left in place.
+    """
+    json_path = os.path.join(vector_dir, HISTORY_JSON)
+    pkl_path = os.path.join(vector_dir, HISTORY_PKL)
+    loaded = _read_json_dict(json_path)
+    source = 'json' if loaded is not None else ''
+    if loaded is None:
+        loaded = _read_json_dict(json_path + '.bak')
+        if loaded is not None:
+            print(f'Warning: restored chat history from {json_path}.bak')
+            source = 'json'
+    if loaded is None:
+        loaded = _read_pickle_dict(pkl_path)
+        if loaded is None:
+            loaded = _read_pickle_dict(pkl_path + '.bak')
+            if loaded is not None:
+                print(f'Warning: restored chat history from {pkl_path}.bak')
+        if loaded is not None:
+            source = 'pickle'
+    if loaded is None:
+        return None
+    loaded.setdefault('version', HISTORY_VERSION)
+    if source == 'pickle' and migrate:
+        try:
+            _atomic_write_json(json_path, loaded)
+            print(f'Migrated chat history pickle → {json_path}')
+        except OSError as exc:
+            print(f'Warning: could not migrate history to JSON: {exc}')
+    return loaded
+
+
 @dataclass
 class StandardAttributes:
     """ Data class to hold immutable project attributes """
@@ -538,30 +649,11 @@ class CommonUtils():
             'current': 'assistant' if assistant else 'story',
             'branch_modes': {},
             'assistant_mode': assistant,
+            'version': HISTORY_VERSION,
         }
 
-    @staticmethod
-    def _read_pickle_dict(path: str) -> dict | None:
-        try:
-            with open(path, 'rb') as handle:
-                data = pickle.load(handle)
-        except FileNotFoundError:
-            return None
-        except (pickle.UnpicklingError, EOFError) as exc:
-            print(f'Warning: could not read {path}: {exc}')
-            return None
-        except Exception as exc:  # pylint: disable=broad-exception-caught
-            print(f'Warning: Error loading chat: {exc}')
-            return None
-        if isinstance(data, dict):
-            return data
-        print(f'Warning: {path} is a {type(data).__name__}, expected dict')
-        return None
-
     def save_chat(self, history)->None:
-        """ Persist chat history (save). Atomic replace so a crash cannot
-        truncate chat_history.pkl (Spur used to pickle full image dataUrls).
-        """
+        """Persist chat history as JSON. Atomic replace + .bak."""
         if self.opts.continue_from != -1:
             if self.opts.debug:
                 self.console.print('CONTINUE_FROM Enabled. Not saving chat',
@@ -570,21 +662,12 @@ class CommonUtils():
         if not isinstance(history, dict):
             print(f'Error saving chat: history is {type(history).__name__}, not dict')
             return
-        history_file = os.path.join(self.opts.vector_dir, 'chat_history.pkl')
+        history.setdefault('version', HISTORY_VERSION)
+        history_file = os.path.join(self.opts.vector_dir, HISTORY_JSON)
         tmp = history_file + '.tmp'
-        bak = history_file + '.bak'
         try:
-            os.makedirs(self.opts.vector_dir, exist_ok=True)
-            with open(tmp, 'wb') as handle:
-                pickle.dump(history, handle)
-                handle.flush()
-                os.fsync(handle.fileno())
-            if os.path.exists(history_file):
-                try:
-                    os.replace(history_file, bak)
-                except OSError:
-                    pass
-            os.replace(tmp, history_file)
+            _atomic_write_json(history_file, history)
+            self.chat_history_session = history
         except FileNotFoundError as e:
             print(f'Error saving chat. Check --history-dir\n{e}')
         except Exception as exc:  # pylint: disable=broad-exception-caught
@@ -595,15 +678,8 @@ class CommonUtils():
                 pass
 
     def load_chat(self)->dict:
-        """ Persist chat history (load). Never sys.exit — Spur is an HTTP server.
-        Truncated pickles fall back to .bak, then to in-memory/empty history.
-        """
-        history_file = os.path.join(self.opts.vector_dir, 'chat_history.pkl')
-        loaded = self._read_pickle_dict(history_file)
-        if loaded is None:
-            loaded = self._read_pickle_dict(history_file + '.bak')
-            if loaded is not None:
-                print(f'Warning: restored chat history from {history_file}.bak')
+        """Load JSON history, migrating pickle if that is all we have."""
+        loaded = load_history_from_dir(self.opts.vector_dir, migrate=True)
         if loaded is None:
             if isinstance(self.chat_history_session, dict):
                 return self.chat_history_session
