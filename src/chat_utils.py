@@ -444,6 +444,30 @@ class CommonUtils():
         return {tag.tag: tag.content for tag in tags}
 
     @staticmethod
+    def history_line(msg: dict) -> str:
+        """One USER:/AI: line, plus [attached: …] when the turn had files."""
+        role = 'USER' if msg.get('role') == 'user' else 'AI'
+        content = msg.get('content', '')
+        names = []
+        for att in msg.get('attachments') or []:
+            if isinstance(att, dict) and att.get('name'):
+                names.append(str(att['name']))
+        if names:
+            return f'{role}: {content}\n[attached: {", ".join(names)}]'
+        return f'{role}: {content}'
+
+    @staticmethod
+    def record_attachment(documents: dict, name: str, text: str = '',
+                          kind: str = 'text') -> None:
+        """Track a user file so it can be gold-ingested after this turn's retrieve."""
+        documents.setdefault('attachment_texts', [])
+        documents['attachment_texts'].append({
+            'name': name or 'file',
+            'text': text or '',
+            'kind': kind or 'text',
+        })
+
+    @staticmethod
     def normalize_metadata_for_rag(meta: dict)->dict:
         """ serialize values for RAG meta-fields """
         result = {}

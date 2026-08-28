@@ -19,6 +19,7 @@ try:
         load_history_from_dir,
         _atomic_write_json,
         _read_json_dict,
+        CommonUtils,
     )
 except ImportError:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -29,6 +30,7 @@ except ImportError:
         load_history_from_dir,
         _atomic_write_json,
         _read_json_dict,
+        CommonUtils,
     )
 
 
@@ -113,6 +115,31 @@ class ChatHistoryJsonTest(unittest.TestCase):
             asst = loaded['story'][-1]
             self.assertEqual(asst['reasoning'], 'The user said hi; greet them.')
             self.assertEqual(asst['content'], 'Hello.')
+
+
+class AttachmentHelpersTest(unittest.TestCase):
+    """History lines and attachment bookkeeping."""
+
+    def test_history_line_includes_filenames(self):
+        line = CommonUtils.history_line({
+            'role': 'user',
+            'content': 'what does this do?',
+            'attachments': [{'name': 'spur-server.py', 'kind': 'text'}],
+        })
+        self.assertIn('USER: what does this do?', line)
+        self.assertIn('[attached: spur-server.py]', line)
+
+    def test_history_line_plain(self):
+        line = CommonUtils.history_line({'role': 'assistant', 'content': 'hi'})
+        self.assertEqual(line, 'AI: hi')
+
+    def test_record_attachment(self):
+        docs = {}
+        CommonUtils.record_attachment(docs, 'a.py', text='print(1)', kind='text')
+        CommonUtils.record_attachment(docs, 'pic.png', kind='image')
+        self.assertEqual(len(docs['attachment_texts']), 2)
+        self.assertEqual(docs['attachment_texts'][0]['name'], 'a.py')
+        self.assertEqual(docs['attachment_texts'][1]['kind'], 'image')
 
 
 if __name__ == '__main__':

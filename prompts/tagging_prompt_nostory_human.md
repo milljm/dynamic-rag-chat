@@ -112,7 +112,7 @@ CRITICAL: If user is asking about files they are attaching, simply answer "routi
  - Not 100% sure about answer → ≤ 0.5
  - SPECIAL: Any mention of attachments → override your score and set to 1.0 and set `assistant_mode` appropriately (best guess based on INPUT_TEXT):
   - Images go to 'vision'
-  - Programming files go to 'code'
+  - Programming files go to 'coding'
   - All other files go to 'structured'
 
 # JSON SCHEMA
@@ -124,9 +124,9 @@ CRITICAL: If user is asking about files they are attaching, simply answer "routi
     "language": string,
     "assistant_mode": string,
     "assistant_mode_reason": string,
-    "model_confidence": float,
+    "assistant_mode_confidence": float,
     "answer": string,
-    "answer_confidence": float,
+    "answer_confidence": float
   }
 }
 

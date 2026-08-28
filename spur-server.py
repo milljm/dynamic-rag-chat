@@ -48,7 +48,11 @@ from chat import (  # noqa: E402
     seed_from_string,
 )
 from src.think_tags import ThinkFeed  # noqa: E402
-from src.chat_utils import HISTORY_META_KEYS, load_history_from_dir  # noqa: E402
+from src.chat_utils import (  # noqa: E402
+    HISTORY_META_KEYS,
+    CommonUtils,
+    load_history_from_dir,
+)
 
 LOCKED_BRANCHES = frozenset({'assistant', 'story'})
 # Metadata keys in the history file — not message lists.
@@ -598,6 +602,7 @@ def fold_uploads(documents: dict, images: list, files: list) -> dict:
         name = item.get('name', 'file')
         text = item.get('text', '')
         documents['dynamic_files'] += f'\n--- {name} ---\n\n{text}\n\n'
+        CommonUtils.record_attachment(documents, name, text=str(text), kind='text')
     return documents
 
 
@@ -698,6 +703,16 @@ def _prepare_chat_documents(chat, body: dict) -> tuple[dict, list]:
     documents = fold_uploads(
         documents, body.get('images') or [], body.get('files') or [],
     )
+    # Image attachments: stub in gold (pixels stay this-turn for vision).
+    for att in body.get('attachments') or []:
+        if not isinstance(att, dict):
+            continue
+        if att.get('kind') == 'image' or str(att.get('mime') or '').startswith('image/'):
+            CommonUtils.record_attachment(
+                documents, str(att.get('name') or 'image'), kind='image',
+            )
+    if not documents.get('no_context'):
+        chat.session.context.ingest_user_attachments(documents, meta)
     if body.get('includeBranch'):
         documents = include_branch(chat, documents, str(body['includeBranch']))
     force_agent = bool(body.get('useAgent')) or parsed.command == 'agent'
