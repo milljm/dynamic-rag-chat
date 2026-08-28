@@ -18,6 +18,7 @@ from langchain_openai import OpenAIEmbeddings
 from langchain_ollama import OllamaEmbeddings
 from langchain_chroma import Chroma
 from .chat_utils import CommonUtils, ChatOptions, RAGTag  # for Type Hinting
+from .filter_builder import metadata_matches
 # Silence initial RAG database being empty
 logging.getLogger('chromadb').setLevel(logging.ERROR)
 
@@ -209,49 +210,49 @@ class RAG():
                                          search_kwargs=kwargs)
         return _retriever
 
-    def retrieve(self, query: str, collection: str, metadatas: dict=None)->list[Document]:
-        """
-        ### Retrieve Documents
+    @staticmethod
+    def _filter_spec(metadatas: dict | None) -> tuple[str | None, list[str]]:
+        """Unpack FilterBuilder `{field, values}` without treating it as a Chroma where."""
+        if not isinstance(metadatas, dict):
+            return None, []
+        values = metadatas.get('values')
+        field = metadatas.get('field')
+        if field and isinstance(values, list):
+            return str(field), [str(v) for v in values if str(v).strip()]
+        return None, []
 
-        Return a list of LangChain Document objects from the RAG `collection` based on
-        `query`. A combination of searches will ensue: field-filtering, similarity, contextual
-        BM25 (in that order), returning the ensemble of all results (duplicates including).
-        It will be necessary to perform any weight/deduplication processes on these results
-        afterwards.
+    def _similar_docs(self, query: str, collection: str, k: int) -> list[Document]:
+        """Similarity search with a specific k."""
+        retriever = self._chroma_retriever(collection, {'k': k})
+        return retriever.invoke(query)
 
-        *key init args:*
-            .. code-block:: python
-                query: str       # the users query
-                collection: str  # the RAG collection to draw from
-                metadatas: dict  # if set, will perform field-filtering match
+    def retrieve(self, query: str, collection: str, metadatas: dict = None) -> list[Document]:
+        """Similarity, then Python-side field membership, then BM25 + parents.
+
+        List tags are stored as comma-joined strings, so Chroma `$in` never
+        matches a single name. Filter those in Python instead.
         """
         if self.opts.matches == 0:
             return []
-        if not metadatas:
-            metadatas = None
+        field, values = self._filter_spec(metadatas)
+        k = self.opts.matches
+        if values:
+            k = max(k * 4, 8)
         try:
-            # Chroma field-filtering retriever
-            ff_retriever = self._chroma_retriever(collection,
-                                                {'k': self.opts.matches, 'filter': metadatas})
-
-            # Chroma similarity retriever
-            ss_retriever = self._chroma_retriever(collection,
-                                                {'k': self.opts.matches})
-
-            documents = self._ensemble_retriever([ff_retriever, ss_retriever],
-                                                [0.5, 0.5],
-                                                query)
-
-            # BM25 results
+            documents = self._similar_docs(query, collection, k)
+            if values:
+                hit = [d for d in documents
+                       if metadata_matches(d.metadata, field, values)]
+                if hit:
+                    documents = hit
             if not documents:
                 return documents
-            bm25_retriever = self._bm25_retriever(documents)
-            documents = bm25_retriever.invoke(query)
-            # grab parent document
+            documents = self._bm25_retriever(documents).invoke(query)
             documents.extend(self._parent_retriever(collection).invoke(query))
         except ValueError:
-            return self.retrieve(query, collection)
-
+            if metadatas:
+                return self.retrieve(query, collection, metadatas=None)
+            return []
         return documents
 
     def store_data(self, data,

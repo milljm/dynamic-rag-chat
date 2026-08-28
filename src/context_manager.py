@@ -12,7 +12,7 @@ from difflib import SequenceMatcher
 import threading
 from langchain_core.documents import Document
 from langchain_core.prompts import ChatPromptTemplate, PromptTemplate
-from langchain_core.prompts import HumanMessagePromptTemplate
+from langchain_core.prompts import HumanMessagePromptTemplate, SystemMessagePromptTemplate
 from langchain_openai import ChatOpenAI
 from openai import APITimeoutError
 from .rag_manager import RAG, RAGTag
@@ -163,6 +163,10 @@ class ContextManager(PromptManager):
         prompts = self.prompts
         query = self.common.normalize_for_dedup(query)
         documents = dict(documents)
+        if not self.opts.assistant_mode:
+            history = documents.get('history') or {}
+            if isinstance(history, dict):
+                self.scene.set_branch(self._active_branch(history))
         # Make only one previous turn available in chat_history when working with pre-conditioning
         if documents.get('chat_history'):
             documents['chat_history'] = self._messages_for_last_n_turns(
@@ -172,8 +176,16 @@ class ContextManager(PromptManager):
         human_tmpl = PromptTemplate(template=human_prompt,
                                     template_format='jinja2')
         human_msg = HumanMessagePromptTemplate(prompt=human_tmpl)
-
-        prompt_template = ChatPromptTemplate.from_messages([human_msg])
+        messages = [human_msg]
+        if not self.opts.assistant_mode:
+            # pylint: disable-next=no-member
+            system_prompt = prompts.get_prompt(f'{prompts.tag_prompt_file}_system.md')
+            if system_prompt and system_prompt.strip():
+                sys_tmpl = PromptTemplate(
+                    template=system_prompt, template_format='jinja2',
+                )
+                messages.insert(0, SystemMessagePromptTemplate(prompt=sys_tmpl))
+        prompt_template = ChatPromptTemplate.from_messages(messages)
 
         prompt = prompt_template.format_messages(**documents)
         if self.debug:
@@ -229,6 +241,8 @@ class ContextManager(PromptManager):
         history = documents['history'] # shorthand
         if not collection:
             collection = self.common.attributes.collections['ai']
+        if not self.opts.assistant_mode:
+            self.scene.set_branch(self._active_branch(history))
 
         # Swap rolls, feeding the LLM's response back at the pre-processor for tagging
         response = documents['llm_response']
@@ -245,36 +259,27 @@ class ContextManager(PromptManager):
                 style=f'color({self.opts.color})', highlight=False)
             return
 
-        scene = dict(self.scene.get_scene())
-        for char in scene['entity']:
-            if self.debug:
-                self.console.print(f'CHAR CHECK:\n{char}\n\n',
-                                style=f'color({self.opts.color})', highlight=False)
-            if self.scene.is_new_character(char):
-                if self.debug:
-                    self.console.print(f'ADD CHAR:\n{char}\n\n',
-                                style=f'color({self.opts.color})', highlight=False)
-                self.create_character(char, roll_reversal)
-
+        self._mint_new_characters(roll_reversal)
         if not self.opts.assistant_mode:
-            self.scene.save_scene()
+            list_rag_tags = self.scene.ground_scene(list_rag_tags)
 
-        # protect against empty or gold RAG (read-only) collections
-        if self.opts.assistant_mode:
-            branch = 'assistant'
-        else:
-            branch = history.get('current', 'story')
+        branch = self._active_branch(history)
         collection = f'{branch}_{collection}'
-
-        # list_rag_tags: list[RAGTag] = self.common.get_tags(response)
-        if not self.opts.assistant_mode:
-            self.scene.ground_scene(list_rag_tags)
         if self.debug:
             self.console.print(f'THREADED META TAGS PARSED: {list_rag_tags}',
                                style=f'color({self.opts.color})',
                                highlight=False)
         rag = RAG(self.console, self.common, self.opts)
         rag.store_data(response, tags_metadata=list_rag_tags, collection=collection)
+
+    def _mint_new_characters(self, documents: dict) -> None:
+        """Write NPC sheets for anyone new in the current scene entity list."""
+        present = self.scene.get_scene().get('entity') or []
+        if isinstance(present, str):
+            present = [present]
+        for char in present:
+            if self.scene.is_new_character(char):
+                self.create_character(char, documents)
 
     def create_character(self, char: str, documents: dict)->None:
         """ Query the Entity LLM to generate a character file based on chat_history """
@@ -434,15 +439,9 @@ class ContextManager(PromptManager):
         return storage
 
     @staticmethod
-    def is_explicit(meta_tags: list[RAGTag[str,str]]) -> bool:
-        """ Return bool if content detected is NSFW """
-        try:
-            rating = [x.content for x in meta_tags if x.tag == 'scene_mode'] # shorthand
-            return 'nsfw' in rating[0].lower()
-        #pylint: disable-next=bare-except   # LLMs can get so many things wrong
-        except:
-            pass
-        return False
+    def is_explicit(meta_tags: list[RAGTag[str, str]]) -> bool:
+        """Return bool if content_rating or scene_mode is nsfw."""
+        return FilterBuilder.tags_are_nsfw(meta_tags)
 
     @staticmethod
     def use_agent(meta_tags: list[RAGTag[str, str]]) -> bool:
@@ -634,6 +633,16 @@ class ContextManager(PromptManager):
         gold = dict(documents)
         documents.update(meta_tags)
         documents.update(gold)
+        for tag in meta_tags:
+            val = tag.content
+            if isinstance(val, list):
+                documents[tag.tag] = ', '.join(str(x) for x in val)
+            else:
+                documents[tag.tag] = val
+        documents.setdefault('player_location', '')
+        documents.setdefault('entity', '')
+        documents.setdefault('audience', '')
+        documents.setdefault('npc_locations', '')
         if documents.get('content_type', False):
             documents['content_type'] = (
                 '- Respond in the following format: ',
@@ -716,6 +725,8 @@ class ContextManager(PromptManager):
 
         history = documents['history']
         branch = self._active_branch(history)
+        if not self.opts.assistant_mode:
+            self.scene.set_branch(branch)
         documents['terminal_width'] = int(os.get_terminal_size().columns) - 5
         documents['chat_history'] = history[branch]
         documents['additional_content'] = self.get_explicit()
