@@ -66,7 +66,7 @@ class ChatHistoryJsonTest(unittest.TestCase):
             self.assertEqual(loaded['story'][0]['role'], 'user')
             json_path = os.path.join(tmp, HISTORY_JSON)
             self.assertTrue(os.path.isfile(json_path))
-            self.assertTrue(os.path.isfile(pkl))  # leftover, not deleted
+            self.assertTrue(os.path.isfile(pkl))
             with open(json_path, encoding='utf-8') as handle:
                 disk = json.load(handle)
             self.assertEqual(disk['story'][0]['content'], 'hi')
@@ -98,6 +98,21 @@ class ChatHistoryJsonTest(unittest.TestCase):
             with open(path, 'w', encoding='utf-8') as handle:
                 json.dump([1, 2, 3], handle)
             self.assertIsNone(load_history_from_dir(tmp, migrate=False))
+
+    def test_assistant_reasoning_roundtrip(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            payload = _hist()
+            payload['story'].append({
+                'role': 'assistant',
+                'content': 'Hello.',
+                'reasoning': 'The user said hi; greet them.',
+            })
+            path = os.path.join(tmp, HISTORY_JSON)
+            _atomic_write_json(path, payload)
+            loaded = load_history_from_dir(tmp, migrate=False)
+            asst = loaded['story'][-1]
+            self.assertEqual(asst['reasoning'], 'The user said hi; greet them.')
+            self.assertEqual(asst['content'], 'Hello.')
 
 
 if __name__ == '__main__':

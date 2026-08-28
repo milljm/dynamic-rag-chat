@@ -523,7 +523,7 @@ def persist_turn(
     attachments: list | None = None,
 ) -> None:
     documents['llm_response'] = response
-    renderer.save_history(documents, response)
+    renderer.save_history(documents, response, reasoning=reasoning)
     common = renderer.common
     hist = common.load_chat()
     if not isinstance(hist, dict):
