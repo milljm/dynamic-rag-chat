@@ -694,8 +694,6 @@ class ContextManager(PromptManager):
         documents['chat_history'] = history[branch]
         documents['additional_content'] = self.get_explicit()
         documents['ooc_system'] = self.get_ooc()
-        if self.opts.assistant_mode and not self.opts.no_rags:
-            return (documents, 0, 0, [])
 
         query = documents.get('user_query', '')
         meta_tags = self._tag_user_query(query, documents)
@@ -703,13 +701,19 @@ class ContextManager(PromptManager):
             return ([], 0, 0, [])
 
         self._apply_meta_to_documents(documents, meta_tags)
-        pre_tokens, post_tokens = self._fill_rag_collections(
-            documents, meta_tags, query, branch,
-        )
+        pre_tokens, post_tokens = 0, 0
+        if not self.opts.no_rags:
+            pre_tokens, post_tokens = self._fill_rag_collections(
+                documents, meta_tags, query, branch,
+            )
+            self.rag.store_data(
+                query,
+                tags_metadata=meta_tags,
+                collection=f'{branch}_{self.common.attributes.collections["user"]}',
+            )
+        else:
+            documents.setdefault('user_documents', '')
+            documents.setdefault('ai_documents', '')
+            documents.setdefault('gold_documents', '')
         self._stringify_chat_history(documents)
-        self.rag.store_data(
-            query,
-            tags_metadata=meta_tags,
-            collection=f'{branch}_{self.common.attributes.collections["user"]}',
-        )
         return (documents, pre_tokens, post_tokens, meta_tags)

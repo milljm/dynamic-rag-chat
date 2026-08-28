@@ -286,11 +286,9 @@ class Chat():
         if o_opts.debug:
             console.print('[italic dim grey30]Debug mode enabled. I will re-read the '
                                'prompt files each time.[/]')
-        if o_opts.assistant_mode and not o_opts.no_rags:
-            console.print('[italic dim grey30]Assistant mode enabled. RAGs disabled'
-                          ' (--use-rags to enable).[/]')
-        elif o_opts.no_rags and o_opts.assistant_mode:
-            console.print('[italic dim grey30]Assistant mode enabled.[/]')
+        if o_opts.assistant_mode:
+            extra = ' RAGs disabled (--no-rags).' if o_opts.no_rags else ''
+            console.print(f'[italic dim grey30]Assistant mode enabled.{extra}[/]')
 
     def prepare_turn(self, raw_user_input: str):
         """
@@ -1095,9 +1093,15 @@ def _add_runtime_args(parser, D):
              '(default: %(default)s)',
     )
     behavior_args.add_argument(
-        '--use-rags', action='store_true', default=D('no_rags'),
-        help='Use RAGs regardless of assistant-mode.\n'
-             'No effect when not also using assistant-mode.',
+        '--no-rags', action='store_true', dest='no_rags',
+        default=D('no_rags'),
+        help='Disable RAG retrieve/store. Tagging and model routing still run.\n'
+             '(default: %(default)s)',
+    )
+    behavior_args.add_argument(
+        '--use-rags', action='store_true', dest='use_rags',
+        default=argparse.SUPPRESS,
+        help=argparse.SUPPRESS,
     )
 
     generation_args = parser.add_argument_group('Generation Options')
