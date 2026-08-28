@@ -2,6 +2,8 @@
 from langchain_openai import ChatOpenAI
 from .chat_utils import ChatOptions, RAGTag # For Type Hinting
 
+MAX_AGENT_CALLS = 2
+
 class Orchestration():
     """ Responsible for instantiating all ChatOpenAI objects """
     def __init__(self, console, args: ChatOptions):
@@ -113,6 +115,9 @@ class Orchestration():
             if tag.tag == "answer_confidence":
                 answer_confidence = float(tag.content)
 
+        # Hard cap: get_messages may run the agent twice (initial + follow-up)
+        if int(documents.get('agent_calls', 0)) >= MAX_AGENT_CALLS:
+            return False
         # Agent previously invoked (get_messages recurses after the search)
         if documents.get('agent_ran', False):
             return False

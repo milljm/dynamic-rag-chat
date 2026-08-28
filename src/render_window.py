@@ -26,9 +26,10 @@ from langchain_openai import ChatOpenAI # For Type Hinting
 from .prompt_manager import PromptManager
 from .context_manager import ContextManager # For Type Hinting
 from .chat_utils import CommonUtils, ChatOptions, RAGTag # For Type Hinting
-from .model_orchestrator import Orchestration
+from .model_orchestrator import Orchestration, MAX_AGENT_CALLS
 from .agent_tools import DuckDuckGoSearchTool
-from .think_tags import ThinkFeed, chunk_text
+from .think_tags import ThinkFeed, chunk_text, split_think
+
 
 # pylint: disable=too-many-instance-attributes  # this is what a dataclass is for
 @dataclass
@@ -138,7 +139,9 @@ class RenderWindow(PromptManager):
         self.agent_prompt = ChatPromptTemplate.from_messages([
             ("system", ('You are a helpful research assistant. Today\'s date is '
                         f'{datetime.today().strftime("%B %d, %Y")}. Use web search to find '
-                        'accurate, up-to-date information.'))
+                        'accurate, up-to-date information. If this is a follow-up search, '
+                        'run a new query that fills the gaps — do not repeat the first '
+                        'search verbatim unless the first results were empty.'))
             ,
             ("user", "{input}"),
             MessagesPlaceholder(variable_name="agent_scratchpad"),
@@ -381,6 +384,124 @@ class RenderWindow(PromptManager):
                     break  # Only handle first HumanMessage
         return messages
 
+    @staticmethod
+    def _llm_text(resp) -> str:
+        piece = getattr(resp, "content", None)
+        if piece is None or piece == "" or piece == []:
+            extra = getattr(resp, "reasoning_content", None) or ""
+            if not extra:
+                kwargs = getattr(resp, "additional_kwargs", None) or {}
+                extra = (kwargs.get("reasoning_content") or "") if isinstance(kwargs, dict) else ""
+            piece = extra or ""
+        if not isinstance(piece, str):
+            piece = str(piece)
+        visible, _, _, _, _ = split_think(piece, False)
+        return (visible or piece).strip()
+
+    @staticmethod
+    def _parse_agent_followup(text: str) -> str | None:
+        """Return a refined query from YES: …, or None for NO / garbage."""
+        lines = [ln.strip() for ln in (text or "").splitlines() if ln.strip()]
+        if not lines:
+            return None
+        for ln in reversed(lines):
+            cleaned = ln.strip("`").strip()
+            upper = cleaned.upper()
+            if upper == "NO" or upper.startswith("NO:") or upper.startswith("NO "):
+                return None
+            if upper.startswith("YES:"):
+                query = cleaned.split(":", 1)[1].strip().strip("\"'")
+                return query or None
+        return None
+
+    def _agent_followup_query(self, documents: dict) -> str | None:
+        """Ask the agent model if another web search is worth it."""
+        if int(documents.get("agent_calls", 0)) >= MAX_AGENT_CALLS:
+            return None
+        original = documents.get("original_user_query") or documents.get("user_query", "")
+        evidence = str(documents.get("dynamic_files") or "")[-6000:]
+        prompt = (
+            "You already ran a web search for this user query:\n"
+            f"{original}\n\n"
+            "Search results:\n"
+            f"{evidence}\n\n"
+            "If the results are enough to answer the user, reply with exactly: NO\n"
+            "If you need one more search, reply with exactly:\n"
+            "YES: <refined search query>\n"
+            "No explanation."
+        )
+        try:
+            resp = self.llm.invoke([HumanMessage(content=prompt)])
+        except Exception:  # pylint: disable=broad-exception-caught
+            return None
+        return self._parse_agent_followup(self._llm_text(resp))
+
+    def _invoke_web_agent(self, documents: dict, polish: bool, meta_data) -> list:
+        """Run AgentExecutor once, then recurse so a follow-up search can happen."""
+        if int(documents.get("agent_calls", 0)) >= MAX_AGENT_CALLS:
+            documents["agent_ran"] = True
+            return self.get_messages(meta_data, documents, polish=polish)
+        documents.setdefault("original_user_query", documents["user_query"])
+        documents.setdefault("dynamic_files", "")
+        documents["agent_calls"] = int(documents.get("agent_calls", 0)) + 1
+        call_n = documents["agent_calls"]
+        documents["agent_ran"] = True
+        agent = create_openai_tools_agent(self.llm, self.agent_tools, self.agent_prompt)
+        agent_executor = AgentExecutor(
+            agent=agent,
+            tools=self.agent_tools,
+            verbose=False,
+            max_iterations=4,
+        )
+        agent_input = (
+            documents.pop("agent_followup_query", None)
+            or documents["original_user_query"]
+        )
+        label = f"({call_n}/{MAX_AGENT_CALLS})"
+        try:
+            self.console.print(
+                f"Agent Tool Web Search {label} (ctl-c to cancel)...",
+                style=f"color({self.state.color})",
+                highlight=False,
+            )
+            result = agent_executor.invoke({"input": agent_input})
+            documents["dynamic_files"] += (
+                f"\n=== AGENT_TOOL_RESULT {label} ===\n{result}\n\n"
+            )
+        except KeyboardInterrupt:
+            documents["dynamic_files"] += (
+                "\n=== AGENT_TOOL_RESULT ===\nUSER CANCELED SEARCH\n\n"
+            )
+            return self.get_messages(meta_data, documents, polish=polish)
+        except Exception:  # pylint: disable=broad-exception-caught
+            self.console.print(
+                "Error running agent!",
+                style=f"color({self.state.color})",
+                highlight=False,
+            )
+            documents["dynamic_files"] += (
+                "\n=== AGENT_TOOL_RESULT ===\n"
+                "ERROR: Tool execution failed.\n"
+                "INSTRUCTION: You must inform the user that the web/tool search failed "
+                "and that you cannot answer reliably without it. "
+                "Do NOT fabricate or guess.\n\n"
+            )
+            documents["agent_error"] = "<AGENT_ERROR: TRUE>"
+            return self.get_messages(meta_data, documents, polish=polish)
+
+        if call_n < MAX_AGENT_CALLS:
+            follow = self._agent_followup_query(documents)
+            if follow:
+                documents["agent_followup_query"] = follow
+                documents["agent_ran"] = False
+                documents["use_agent"] = True
+                self.console.print(
+                    f"Agent follow-up search: {follow}",
+                    style=f"color({self.state.color})",
+                    highlight=False,
+                )
+        return self.get_messages(meta_data, documents, polish=polish)
+
     def get_messages(self,
                      meta_data: RAGTag,
                      documents: dict,
@@ -467,35 +588,9 @@ class RenderWindow(PromptManager):
                           style=f'color({self.state.color})',
                           highlight=False)
 
-        documents['agent_error'] = '<AGENT_ERROR: FALSE>'
+        documents.setdefault('agent_error', '<AGENT_ERROR: FALSE>')
         if self.orchestrator.requires_agent(meta_data, documents):
-            # Let LangChain create the proper prompt template for the agent
-            agent = create_openai_tools_agent(self.llm, self.agent_tools, self.agent_prompt)
-            documents['agent_ran'] = True
-            agent_executor = AgentExecutor(agent=agent, tools=self.agent_tools, verbose=False)
-            try:
-                self.console.print('Agent Tool Web Search (ctl-c to cancel)...',
-                            style=f'color({self.state.color})', highlight=False)
-                result = agent_executor.invoke({"input": documents['user_query']})
-                documents['dynamic_files'] += f'\n=== AGENT_TOOL_RESULT ===\n{result}\n\n'
-                return self.get_messages(meta_data, documents, polish=polish)
-            except KeyboardInterrupt:
-                documents['dynamic_files'] += ('\n=== AGENT_TOOL_RESULT ==='
-                                            '\nUSER CANCELED SEARCH\n\n')
-                return self.get_messages(meta_data, documents, polish=polish)
-            # pylint: disable-next=bare-except # too many ways an LLM can go wrong
-            except:
-                self.console.print('Error running agent!', style=f'color({self.state.color})',
-                                highlight=False)
-                documents['dynamic_files'] += (
-                        '\n=== AGENT_TOOL_RESULT ===\n'
-                        'ERROR: Tool execution failed.\n'
-                        'INSTRUCTION: You must inform the user that the web/tool search failed '
-                        'and that you cannot answer reliably without it. '
-                        'Do NOT fabricate or guess.\n\n'
-                    )
-                documents['agent_error'] = '<AGENT_ERROR: TRUE>'
-                return self.get_messages(meta_data, documents, polish=polish)
+            return self._invoke_web_agent(documents, polish, meta_data)
         self.common.write_debug(f'live_stream-{self.llm.model_name}', messages)
         return messages
 
