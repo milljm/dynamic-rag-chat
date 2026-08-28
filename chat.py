@@ -1,23 +1,25 @@
 #!/usr/bin/env python3
 """ Chat Main executable/entry point """
 # /// script
-# requires-python = ">=3.12"
+# requires-python = ">=3.10"
 # dependencies = [
-#     "langchain==0.3.24",
-#     "langchain-core==0.3.59",
-#     "langchain_ollama==0.3.2",
-#     "langchain_openai==0.3.16",
-#     "langchain_chroma==0.2.3",
-#     "langchain-community==0.3.23",
-#     "chromadb==0.6.3",
-#     "pydantic==2.11.3",
-#     "posthog==4.0.0",
+#     "langchain==1.3.18",
+#     "langchain-core==1.6.1",
+#     "langchain-classic==1.0.8",
+#     "langchain_ollama==1.1.0",
+#     "langchain_openai==1.6.0",
+#     "langchain_chroma==1.1.0",
+#     "langchain-community==0.4.2",
+#     "langchain-text-splitters==1.1.2",
+#     "chromadb>=1.3.5,<2.0.0",
+#     "pydantic>=2.7.4,<3",
+#     "posthog",
 #     "prompt_toolkit",
 #     "rich",
 #     "rank_bm25",
 #     "pypdf",
 #     "pytz",
-#     "pillow"
+#     "pillow",
 #     "cloudscraper",
 #     "beautifulsoup4",
 #     "pygments",

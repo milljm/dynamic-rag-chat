@@ -8,13 +8,11 @@ import shutil
 from uuid import uuid4
 from typing import List
 from langchain_community.retrievers import BM25Retriever
-from langchain import retrievers  # for Type Hinting
-from langchain.retrievers import EnsembleRetriever
-from langchain.retrievers import ParentDocumentRetriever
-from langchain.storage import LocalFileStore
-from langchain.storage._lc_store import create_kv_docstore
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.schema import Document
+from langchain_classic.retrievers import EnsembleRetriever, ParentDocumentRetriever
+from langchain_classic.storage import LocalFileStore, create_kv_docstore
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_core.documents import Document
+from langchain_core.retrievers import BaseRetriever
 from langchain_openai import OpenAIEmbeddings
 from langchain_ollama import OllamaEmbeddings
 from langchain_chroma import Chroma
@@ -166,7 +164,7 @@ class RAG():
         _retriever.k = self.opts.matches
         return _retriever
 
-    def _chroma_retriever(self, collection: str, kwargs)->retrievers:
+    def _chroma_retriever(self, collection: str, kwargs)->BaseRetriever:
         """
         ### Chroma Retriever
 

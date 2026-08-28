@@ -11,11 +11,16 @@ from rich.text import Text
 from rich.align import Align
 from rich.console import Group
 from rich.rule import Rule
-from langchain.prompts import ChatPromptTemplate, PromptTemplate, MessagesPlaceholder
-from langchain.agents import create_openai_tools_agent, AgentExecutor
-from langchain.schema.messages import HumanMessage
-from langchain.schema import BaseMessage, Document   # For Type Hinting
-from langchain_core.prompts import HumanMessagePromptTemplate, SystemMessagePromptTemplate
+from langchain_core.prompts import (
+    ChatPromptTemplate,
+    PromptTemplate,
+    MessagesPlaceholder,
+    HumanMessagePromptTemplate,
+    SystemMessagePromptTemplate,
+)
+from langchain_classic.agents import create_openai_tools_agent, AgentExecutor
+from langchain_core.messages import HumanMessage, BaseMessage
+from langchain_core.documents import Document
 from langchain_tavily import TavilySearch
 from langchain_openai import ChatOpenAI # For Type Hinting
 from .prompt_manager import PromptManager

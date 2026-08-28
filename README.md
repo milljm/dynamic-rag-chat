@@ -171,6 +171,10 @@ cd dynamic-rag-chat
 uv pip install -r requirements.txt
 ```
 
+Python 3.10+ (3.13 is what the conda line above uses). This tree now tracks **LangChain 1.x** ([issue #23](https://github.com/milljm/dynamic-rag-chat/issues/23)). Retrievers / `AgentExecutor` live in `langchain-classic`; prompts, messages, and tools in `langchain-core`.
+
+Chroma jumped with it (`chromadb` 0.6 → 1.x). Existing `vector_data/` written under 0.6 may not open. If retrieve errors after the upgrade, `\reset` the branch or re-import gold.
+
 ### Ollama (local models)
 
 You need a generator, a small pre-conditioner, and an embedding model.
