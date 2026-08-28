@@ -113,9 +113,12 @@ class Orchestration():
             if tag.tag == "answer_confidence":
                 answer_confidence = float(tag.content)
 
-        # Agent previously invoked
+        # Agent previously invoked (get_messages recurses after the search)
         if documents.get('agent_ran', False):
             return False
+        # Explicit: \agent, Spur Agent toggle, or pre-processor search_internet
+        if documents.get('use_agent'):
+            return True
         # Agent requested
         if (answer_confidence <= float(self.args.distrust_confidence)
             or 'agent' in documents.get('in_line_commands', [])):

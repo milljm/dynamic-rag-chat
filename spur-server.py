@@ -701,28 +701,37 @@ async def api_chat(request: Request) -> StreamingResponse:
             yield sse({"type": "status", "message": "Working — RAG / agent / prompt…"}).encode()
             if no_context:
                 parsed = parse_user_input(prompt)
-                documents = chat.no_context(parsed.clean_text or prompt)
+                documents = chat.no_context(parsed.args or parsed.clean_text or prompt)
                 documents["no_context"] = True
                 documents["in_line_commands"] = "Meta: [no-context]"
                 meta = []
             else:
                 parsed = parse_user_input(prompt)
-                documents, meta = chat.prepare_turn(parsed.clean_text or prompt)
+                documents, meta = chat.prepare_turn(
+                    parsed.args or parsed.clean_text or prompt
+                )
                 documents = apply_includes(chat, documents, prompt)
             documents = fold_uploads(
                 documents, body.get("images") or [], body.get("files") or []
             )
             if body.get("includeBranch"):
                 documents = include_branch(chat, documents, str(body["includeBranch"]))
-            if use_agent and chat.opts.assistant_mode:
+            force_agent = use_agent or parsed.command == "agent"
+            if force_agent and chat.opts.assistant_mode:
                 documents["use_agent"] = True
                 documents["agent_ran"] = False
                 documents["in_line_commands"] = "Meta: [agent]"
-                yield sse({"type": "status", "message": "Agent tool web search…"}).encode()
             if body.get("rare"):
                 documents["system_addendum"] = (
                     "Story controls for this turn: " + ", ".join(body["rare"])
                 )
+
+            # Pre-processor can also flip use_agent / low answer_confidence.
+            # Announce the search *before* get_messages blocks on AgentExecutor.
+            if renderer.orchestrator.requires_agent(meta, documents):
+                yield sse(
+                    {"type": "status", "message": "Agent tool web search…"}
+                ).encode()
 
             renderer.set_llm(meta, documents)
             packed = renderer.get_messages(meta, documents)
