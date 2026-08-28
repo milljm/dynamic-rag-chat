@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-'''
+"""
 Streamlit front-end for Dynamic RAG Chat.
-'''
+"""
 from __future__ import annotations
 import base64
 import html
@@ -369,7 +369,7 @@ st.markdown(THEME_CSS, unsafe_allow_html=True)
 # ─────────────────────────────────────────────────────────────────────────────
 @st.cache_resource
 def get_chat_session() -> Chat:
-    '''Construct and cache the Chat / SessionContext stack.'''
+    """Construct and cache the Chat / SessionContext stack."""
     opts = ChatOptions.from_yaml(CURRENT_DIR)
     args = parse_args(sys.argv[1:], opts)
     _opts = ChatOptions.from_args(CURRENT_DIR, args, opts)
@@ -380,7 +380,7 @@ def get_chat_session() -> Chat:
 
 @dataclass
 class StreamMetrics:
-    '''Per-turn generation stats shown under the assistant bubble.'''
+    """Per-turn generation stats shown under the assistant bubble."""
 
     model: str = ''
     token_count: int = 0
@@ -394,7 +394,7 @@ class StreamMetrics:
 
 @dataclass
 class ThinkParser:
-    '''
+    """
     Per-turn thinking splitter. Same state machine as the original
     streamlit is_thinking() / render_window.reveal_thinking():
 
@@ -402,7 +402,7 @@ class ThinkParser:
       The next non-empty chunk is the answer, not more reasoning.
     - First chunk with a <think> tag = tagged reasoning until </think>.
     - First chunk that is already visible text = no reasoning at all.
-    '''
+    """
 
     is_thinking: bool = False
     never_think: bool = False
@@ -412,7 +412,7 @@ class ThinkParser:
     saw_reason: bool = False
 
     def feed_chunk(self, chunk: object) -> None:
-        '''Ingest a LangChain stream chunk, including hidden reasoning fields.'''
+        """Ingest a LangChain stream chunk, including hidden reasoning fields."""
         extra = _chunk_reasoning(chunk)
         if extra:
             self.saw_reason = True
@@ -426,7 +426,7 @@ class ThinkParser:
         self.feed(content)
 
     def feed(self, piece: str | None) -> None:
-        '''Ingest a raw text piece from the token stream.'''
+        """Ingest a raw text piece from the token stream."""
         chunk = piece if piece is not None else ''
         visible = self._classify(chunk)
         if self.is_thinking and not self.never_think and visible:
@@ -436,7 +436,7 @@ class ThinkParser:
             self.answer += visible
 
     def _classify(self, content: str) -> str:
-        '''Return the chunk text that belongs to the current bucket.'''
+        """Return the chunk text that belongs to the current bucket."""
         if self.never_think:
             return content
 
@@ -478,17 +478,17 @@ class ThinkParser:
         return content
 
     def flush(self) -> None:
-        '''No buffered tail in this parser; kept for call-site symmetry.'''
+        """No buffered tail in this parser; kept for call-site symmetry."""
         return
 
     @property
     def reasoning_active(self) -> bool:
-        '''True while we are still inside a think / shadow-think span.'''
+        """True while we are still inside a think / shadow-think span."""
         return self.is_thinking and not self.never_think
 
 
 def _chunk_reasoning(chunk: object) -> str:
-    '''Pull hidden reasoning tokens off LangChain / OpenAI-style chunks.'''
+    """Pull hidden reasoning tokens off LangChain / OpenAI-style chunks."""
     keys = ('reasoning_content', 'reasoning', 'thinking', 'reasoning_text')
     parts: list[str] = []
 
@@ -530,12 +530,12 @@ def _chunk_reasoning(chunk: object) -> str:
 # History / branch helpers
 # ─────────────────────────────────────────────────────────────────────────────
 def _history(chat: Chat) -> dict:
-    '''Load the on-disk chat history document.'''
+    """Load the on-disk chat history document."""
     return chat.session.common.load_chat()
 
 
 def _canonical_mode(name: str) -> bool | None:
-    '''Fixed mode for protected branches: True=assistant, False=story.'''
+    """Fixed mode for protected branches: True=assistant, False=story."""
     if name == 'assistant':
         return True
     if name == 'story':
@@ -544,7 +544,7 @@ def _canonical_mode(name: str) -> bool | None:
 
 
 def _persisted_mode(hist: dict, name: str, fallback: bool = False) -> bool:
-    '''Return the stored assistant-mode flag for a branch.'''
+    """Return the stored assistant-mode flag for a branch."""
     canon = _canonical_mode(name)
     if canon is not None:
         return canon
@@ -552,25 +552,25 @@ def _persisted_mode(hist: dict, name: str, fallback: bool = False) -> bool:
 
 
 def _active_branch(chat: Chat) -> str:
-    '''Return history['current'], defaulting to story.'''
+    """Return history['current'], defaulting to story."""
     return _history(chat).get('current', 'story')
 
 
 def _turn_count(msgs: list) -> int:
-    '''Count user turns in a role/content message list.'''
+    """Count user turns in a role/content message list."""
     if not msgs:
         return 0
     return sum(1 for m in msgs if isinstance(m, dict) and m.get('role') == 'user')
 
 
 def _sync_chat_object(chat: Chat, hist: dict | None = None) -> tuple[str, bool]:
-    '''
+    """
     Keep Chat.chat_branch and Chat.opts.assistant_mode aligned with disk.
 
     chat.get_documents() reads self.chat_branch — if we only mutate the
     JSON file and forget this field, every turn silently uses the stale
     branch.
-    '''
+    """
     hist = hist or _history(chat)
     branch = hist.get('current', 'story')
     mode = _persisted_mode(
@@ -589,13 +589,13 @@ def _sync_chat_object(chat: Chat, hist: dict | None = None) -> tuple[str, bool]:
 
 
 def _refresh_mode_runtime(chat: Chat) -> None:
-    '''
+    """
     PromptManager / ContextManager bake assistant_mode in at construct time.
 
     _match_model() returns 'nostory' whenever args.assistant_mode is True,
     and build_prompts() caches plot_prompt_system / plot_prompt_human.
     Flipping chat.opts.assistant_mode alone does nothing — rebuild files.
-    '''
+    """
     mode = bool(chat.opts.assistant_mode)
     renderer = chat.session.renderer
     context = chat.session.context
@@ -632,7 +632,7 @@ def _refresh_mode_runtime(chat: Chat) -> None:
 
 
 def _prime_toggle(mode: bool) -> None:
-    '''Set toggle state only before the widget exists, or via a pending flag.'''
+    """Set toggle state only before the widget exists, or via a pending flag."""
     if '_pending_assistant_toggle' in st.session_state:
         st.session_state.assistant_toggle = bool(
             st.session_state.pop('_pending_assistant_toggle')
@@ -642,7 +642,7 @@ def _prime_toggle(mode: bool) -> None:
 
 
 def set_assistant_mode(chat: Chat, enabled: bool) -> None:
-    '''Persist the mode of the current user branch (protected branches ignore).'''
+    """Persist the mode of the current user branch (protected branches ignore)."""
     hist = _history(chat)
     current = hist.get('current', 'story')
     canon = _canonical_mode(current)
@@ -657,7 +657,7 @@ def set_assistant_mode(chat: Chat, enabled: bool) -> None:
 
 
 def switch_branch(chat: Chat, name: str) -> tuple[bool, str]:
-    '''Switch to an existing branch and restore its recorded mode.'''
+    """Switch to an existing branch and restore its recorded mode."""
     hist = _history(chat)
     if not isinstance(hist.get(name), list):
         return False, f"Branch '{name}' does not exist."
@@ -686,11 +686,11 @@ def switch_branch(chat: Chat, name: str) -> tuple[bool, str]:
     except Exception as exc:  # pylint: disable=broad-exception-caught
         hist['current'] = old
         chat.session.common.save_chat(hist)
-        return False, f"Switch failed: {exc}"
+        return False, f'Switch failed: {exc}'
 
 
 def create_branch(chat: Chat, name: str, cut_turns: int | None) -> tuple[bool, str]:
-    '''Fork a new branch from the current branch (full clone or first N turns).'''
+    """Fork a new branch from the current branch (full clone or first N turns)."""
     name = (name or '').strip()
     if not name:
         return False, 'Branch name cannot be empty.'
@@ -748,11 +748,11 @@ def create_branch(chat: Chat, name: str, cut_turns: int | None) -> tuple[bool, s
         hist.setdefault('branch_modes', {}).pop(name, None)
         chat.session.common.save_chat(hist)
         chat.chat_branch = src
-        return False, f"RAG sync failed: {exc}"
+        return False, f'RAG sync failed: {exc}'
 
 
 def delete_branch(chat: Chat, name: str) -> tuple[bool, str]:
-    '''Delete a non-protected, non-current branch and its RAG collection.'''
+    """Delete a non-protected, non-current branch and its RAG collection."""
     if name in RESERVED_NAMES or name in LOCKED_BRANCHES:
         return False, f"Cannot delete protected branch '{name}'."
     hist = _history(chat)
@@ -768,16 +768,16 @@ def delete_branch(chat: Chat, name: str) -> tuple[bool, str]:
             chat.session.rag.delete_collection(name)
         vector_dir = getattr(chat.opts, 'vector_dir', '')
         if vector_dir:
-            for path in glob.glob(f"{vector_dir}{os.path.sep}{name}*"):
+            for path in glob.glob(f'{vector_dir}{os.path.sep}{name}*'):
                 if os.path.isdir(path):
                     shutil.rmtree(path, ignore_errors=True)
         return True, f"Deleted '{name}'."
     except Exception as exc:  # pylint: disable=broad-exception-caught
-        return False, f"Delete failed: {exc}"
+        return False, f'Delete failed: {exc}'
 
 
 def reset_branch(chat: Chat) -> tuple[bool, str]:
-    '''Clear history and RAG for the current branch.'''
+    """Clear history and RAG for the current branch."""
     hist = _history(chat)
     branch = hist.get('current', 'story')
     try:
@@ -787,7 +787,7 @@ def reset_branch(chat: Chat) -> tuple[bool, str]:
         chat.session.common.save_chat(hist)
         vector_dir = getattr(chat.opts, 'vector_dir', '')
         if vector_dir:
-            for path in glob.glob(f"{vector_dir}{os.path.sep}{branch}*"):
+            for path in glob.glob(f'{vector_dir}{os.path.sep}{branch}*'):
                 if os.path.isdir(path):
                     shutil.rmtree(path, ignore_errors=True)
         if hasattr(chat.session.renderer, 'clear_ooc'):
@@ -797,11 +797,11 @@ def reset_branch(chat: Chat) -> tuple[bool, str]:
                 pass
         return True, f"Reset '{branch}'."
     except Exception as exc:  # pylint: disable=broad-exception-caught
-        return False, f"Reset failed: {exc}"
+        return False, f'Reset failed: {exc}'
 
 
 def delete_last_turn(chat: Chat) -> tuple[bool, str]:
-    '''Remove the last user/assistant pair from the current branch.'''
+    """Remove the last user/assistant pair from the current branch."""
     hist = _history(chat)
     branch = hist.get('current', 'story')
     msgs = hist.get(branch, [])
@@ -822,13 +822,13 @@ def delete_last_turn(chat: Chat) -> tuple[bool, str]:
 
 
 def rewind_to(chat: Chat, n: int) -> tuple[bool, str]:
-    '''Keep only the first n turns of the current branch.'''
+    """Keep only the first n turns of the current branch."""
     hist = _history(chat)
     branch = hist.get('current', 'story')
     msgs = hist.get(branch, [])
     total = _turn_count(msgs)
     if not 1 <= n <= total:
-        return False, f"Rewind needs 1 ≤ N ≤ {total}."
+        return False, f'Rewind needs 1 ≤ N ≤ {total}.'
     hist[branch] = msgs[: n * 2]
     chat.session.common.save_chat(hist)
     if hasattr(chat.session.renderer, 'clear_ooc'):
@@ -836,11 +836,11 @@ def rewind_to(chat: Chat, n: int) -> tuple[bool, str]:
             chat.session.renderer.clear_ooc()
         except Exception:  # pylint: disable=broad-exception-caught
             pass
-    return True, f"Rewound to turn {n} of {total}."
+    return True, f'Rewound to turn {n} of {total}.'
 
 
 def list_branches(chat: Chat) -> dict:
-    '''Return {name: {count, preview}} for every real history branch.'''
+    """Return {name: {count, preview}} for every real history branch."""
     hist = _history(chat)
     out = {}
     for _name, _msgs in hist.items():
@@ -862,7 +862,7 @@ def list_branches(chat: Chat) -> dict:
 
 
 def load_ui_messages(chat: Chat) -> list[dict]:
-    '''Build the Streamlit transcript from the active branch on disk.'''
+    """Build the Streamlit transcript from the active branch on disk."""
     hist = _history(chat)
     branch = hist.get('current', 'story')
     msgs = hist.get(branch, []) or []
@@ -890,14 +890,14 @@ def persist_turn(
     reasoning: str = '',
     footer: str = '',
 ) -> None:
-    '''
+    """
     Write the completed turn through RenderWindow.save_history, then stamp
     optional extras onto the last assistant message.
 
     History schema stays a list of {role, content, ...} dicts. chat.py /
     context_manager / save_history only read role + content, so extra keys
     are ignored by the terminal UI and by RAG stringify.
-    '''
+    """
     documents['llm_response'] = response
     renderer.save_history(documents, response)
     extra = {}
@@ -917,7 +917,7 @@ def persist_turn(
 
 
 def handle_attachments(documents: dict) -> dict:
-    '''Fold Streamlit uploads into documents['dynamic_images'/'dynamic_files'].'''
+    """Fold Streamlit uploads into documents['dynamic_images'/'dynamic_files']."""
     attachments = st.session_state.get('attachments') or []
     if not attachments:
         return documents
@@ -945,17 +945,17 @@ def handle_attachments(documents: dict) -> dict:
                         base64.b64encode(out.getvalue()).decode('utf-8')
                     )
             except Exception:  # pylint: disable=broad-exception-caught
-                documents['dynamic_files'] += f"\n--- {name} ---\n<unreadable image>\n"
+                documents['dynamic_files'] += f'\n--- {name} ---\n<unreadable image>\n'
         elif mime == 'application/pdf':
             tmp_path = None
             try:
                 with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as tmp:
                     tmp.write(data)
                     tmp_path = tmp.name
-                text = "".join(doc.page_content for doc in load_pdf(tmp_path))
-                documents['dynamic_files'] += f"\n--- {name} ---\n\n{text}\n\n"
+                text = ''.join(doc.page_content for doc in load_pdf(tmp_path))
+                documents['dynamic_files'] += f'\n--- {name} ---\n\n{text}\n\n'
             except Exception as exc:  # pylint: disable=broad-exception-caught
-                documents['dynamic_files'] += f"\n--- {name} ---\n<pdf error: {exc}>\n"
+                documents['dynamic_files'] += f'\n--- {name} ---\n<pdf error: {exc}>\n'
             finally:
                 if tmp_path:
                     try:
@@ -970,7 +970,7 @@ def handle_attachments(documents: dict) -> dict:
                     text = data.decode('latin-1')
                 except Exception:  # pylint: disable=broad-exception-caught
                     text = '<binary content, could not decode>'
-            documents['dynamic_files'] += f"\n--- {name} ---\n\n{text}\n\n"
+            documents['dynamic_files'] += f'\n--- {name} ---\n\n{text}\n\n'
     return documents
 
 
@@ -981,13 +981,13 @@ def call_llm_stream(
     metrics: StreamMetrics,
     status,
 ) -> Generator:
-    '''Stream LLM tokens and fill StreamMetrics.'''
+    """Stream LLM tokens and fill StreamMetrics."""
     status.markdown('Working — RAG / agent / prompt…')
     renderer.set_llm(meta, documents)
     if renderer.orchestrator.requires_agent(meta, documents):
         status.markdown('Agent tool web search…')
     messages = renderer.get_messages(meta, documents)
-    status.markdown(f"Streaming `{renderer.llm.model_name}`")
+    status.markdown(f'Streaming `{renderer.llm.model_name}`')
     metrics.model = renderer.llm.model_name
     metrics.prompt_tokens = documents.get('prompt_tokens', 0)
     metrics.token_savings = documents.get('token_savings', 0)
@@ -1009,11 +1009,11 @@ CMD_RE = re.compile(r'^[ \t]*\\(?P<cmd>[A-Za-z0-9_\-\?]+)(?:[ \t]+(?P<args>.*))?
 
 
 def try_handle_command(chat: Chat, raw: str) -> bool:
-    '''
+    """
     Handle a leading slash command.
 
     Return True if the input was consumed (no LLM call).
-    '''
+    """
     first = raw.strip().splitlines()[0] if raw.strip() else ''
     matched = CMD_RE.match(first)
     if not matched:
@@ -1030,7 +1030,7 @@ def try_handle_command(chat: Chat, raw: str) -> bool:
 
     if cmd == 'turn':
         hist = _history(chat)
-        st.info(f"Turn {_turn_count(hist.get(chat.chat_branch, []))}")
+        st.info(f'Turn {_turn_count(hist.get(chat.chat_branch, []))}')
         return True
 
     if cmd == 'delete-last':
@@ -1078,7 +1078,7 @@ def try_handle_command(chat: Chat, raw: str) -> bool:
 
 
 def apply_inline_flags(documents: dict, raw: str) -> dict:
-    '''Stamp \\agent / \\no-context onto the documents dict when present.'''
+    """Stamp \\agent / \\no-context onto the documents dict when present."""
     first = raw.strip().splitlines()[0] if raw.strip() else ''
     matched = CMD_RE.match(first)
     if not matched:
@@ -1101,7 +1101,7 @@ def render_bubble(
     attachments: list | None = None,
     slot=None,
 ) -> None:
-    '''Paint an iMessage-style row. slot=st.empty() to update in place.'''
+    """Paint an iMessage-style row. slot=st.empty() to update in place."""
     side = 'user' if role == 'user' else 'assistant'
     chips = ''
     if attachments:
@@ -1116,17 +1116,17 @@ def render_bubble(
     markup = (
         f'<div class="imsg {side}"><div class="imsg-col">'
         f'<div class="imsg-bubble">\n\n{chips}{content}\n\n</div>'
-        f"{foot}</div></div>"
+        f'{foot}</div></div>'
     )
     target = slot if slot is not None else st
     target.markdown(markup, unsafe_allow_html=True)
 
 
 def render_reasoning(slot, text: str, model_name: str = '', live: bool = False) -> None:
-    '''Collapsed reasoning panel. Look stays the same; body is click-to-reveal.'''
+    """Collapsed reasoning panel. Look stays the same; body is click-to-reveal."""
     title = 'Reasoning…' if live else 'Reasoning'
     if model_name:
-        title = f"{title} [{html.escape(str(model_name))}]"
+        title = f'{title} [{html.escape(str(model_name))}]'
     if text and text.strip():
         body = html.escape(text).replace('\n', '<br>')
     elif live:
@@ -1135,7 +1135,7 @@ def render_reasoning(slot, text: str, model_name: str = '', live: bool = False) 
         body = '<em>This model did not stream its reasoning tokens.</em>'
     slot.markdown(
         f'<details class="reason-panel">'
-        f"<summary>🤔 {title}</summary>"
+        f'<summary>🤔 {title}</summary>'
         f'<div class="reason-body">{body}</div></details>',
         unsafe_allow_html=True,
     )
@@ -1188,7 +1188,7 @@ _locked = _branch in LOCKED_BRANCHES
 
 
 def _on_toggle():
-    '''Persist the sidebar mode toggle.'''
+    """Persist the sidebar mode toggle."""
     set_assistant_mode(_chat, bool(st.session_state.assistant_toggle))
 
 
@@ -1219,7 +1219,7 @@ if _uploads:
         for _file in _uploads
     ]
     for _uploaded in _uploads:
-        st.sidebar.caption(f"📎 {_uploaded.name}")
+        st.sidebar.caption(f'📎 {_uploaded.name}')
 elif not st.session_state.get('_hold_attachments'):
     st.session_state.attachments = []
 st.sidebar.divider()
@@ -1231,7 +1231,7 @@ _modes = _hist.get('branch_modes', {})
 
 
 def _switch_to(_name: str) -> None:
-    '''Button callback: switch branch and reload the transcript.'''
+    """Button callback: switch branch and reload the transcript."""
     _ok, _message = switch_branch(_chat, _name)
     st.session_state.pending_notice = _message
     if _ok:
@@ -1239,7 +1239,7 @@ def _switch_to(_name: str) -> None:
 
 
 def _delete_named(_name: str) -> None:
-    '''Button callback: delete a branch.'''
+    """Button callback: delete a branch."""
     _ok, _message = delete_branch(_chat, _name)
     st.session_state.pending_notice = _message
 
@@ -1265,7 +1265,7 @@ else:
         with _card_col:
             st.button(
                 _label,
-                key=f"br_{_name}",
+                key=f'br_{_name}',
                 use_container_width=True,
                 disabled=_active,
                 help=_preview or (None if _active else f"Switch to '{_name}'"),
@@ -1276,7 +1276,7 @@ else:
             with _del_col:
                 st.button(
                     '×',
-                    key=f"del_{_name}",
+                    key=f'del_{_name}',
                     use_container_width=True,
                     help=f"Delete '{_name}'",
                     on_click=_delete_named,
@@ -1390,7 +1390,7 @@ if _incoming:
     try:
         _documents, _meta_data = _chat.prepare_turn(_prompt)
     except Exception as exc:  # pylint: disable=broad-exception-caught
-        st.error(f"Pre-processor failed: {exc}")
+        st.error(f'Pre-processor failed: {exc}')
         st.stop()
 
     if not _documents:
@@ -1460,8 +1460,8 @@ if _incoming:
             except Exception:  # pylint: disable=broad-exception-caught
                 _pretty = _routed
         _footer = (
-            f"{_pretty} · TTFT {_metrics.ttft:.2f}s · gen {_gen_duration:.2f}s · "
-            f"{_metrics.token_count} tok · {_tps:.1f} T/s"
+            f'{_pretty} · TTFT {_metrics.ttft:.2f}s · gen {_gen_duration:.2f}s · '
+            f'{_metrics.token_count} tok · {_tps:.1f} T/s'
         )
         render_bubble(
             'assistant',
@@ -1471,7 +1471,7 @@ if _incoming:
         )
     except Exception as exc:  # pylint: disable=broad-exception-caught
         _status.empty()
-        st.error(f"LLM error: {exc}")
+        st.error(f'LLM error: {exc}')
         _parser.flush()
 
     _saved = {
@@ -1493,7 +1493,7 @@ if _incoming:
                 footer=_footer,
             )
         except Exception as exc:  # pylint: disable=broad-exception-caught
-            st.warning(f"Saved UI turn, but disk/RAG persist failed: {exc}")
+            st.warning(f'Saved UI turn, but disk/RAG persist failed: {exc}')
 
     st.session_state.attachments = []
     # pylint: disable-next=protected-access     # I see no way around this

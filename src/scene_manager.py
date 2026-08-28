@@ -74,7 +74,7 @@ class SceneManager:
         """
         Return True and add to growing list of NPCs, if a new NPC is discovered
         """
-        entry = (character or "").strip().lower()
+        entry = (character or '').strip().lower()
         if self.debug:
             self.console.print(f'ENTITY: {entry} NOT IN KNOWN: '
                         f'{entry not in (c.lower() for c in self.scene["known_characters"])}',
