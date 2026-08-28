@@ -674,11 +674,55 @@ class ContextManager(PromptManager):
         chat_lines = []
         for msg in documents['chat_history']:
             if isinstance(msg, dict):
-                role = 'USER' if msg.get('role') == 'user' else 'AI'
-                chat_lines.append(f'{role}: {msg.get("content", "")}')
+                chat_lines.append(CommonUtils.history_line(msg))
             else:
                 chat_lines.append(str(msg))
         documents['chat_history'] = '\n'.join(chat_lines)
+
+    def ingest_user_attachments(self, documents: dict, meta_tags: list | None) -> None:
+        """Store this turn's files in gold so later turns can retrieve them.
+
+        Attachments arrive *after* handle_context (Spur fold_uploads / {{path}}),
+        so they are not in the user collection yet. Gold is the permanent copy.
+        Images store a stub (pixels stay this-turn-only for vision).
+        Agent search dumps in dynamic_files are not ingested.
+        """
+        documents.setdefault('attached_files_note', '')
+        files = documents.get('attachment_texts') or []
+        if self.opts.no_rags or not files:
+            return
+        history = documents.get('history') or self.common.load_chat()
+        branch = self._active_branch(history)
+        gold = f'{self._collection_prefix(branch, "gold_documents")}gold_documents'
+        names: list[str] = []
+        for rec in files:
+            if not isinstance(rec, dict):
+                continue
+            name = str(rec.get('name') or 'file')
+            kind = str(rec.get('kind') or 'text')
+            text = str(rec.get('text') or '')
+            names.append(name)
+            if kind == 'image':
+                body = (
+                    f'ATTACHED IMAGE: {name}\n'
+                    'The user attached this image. Pixel data is not stored in RAG. '
+                    'Do not ask them to re-attach it; they already did.'
+                )
+            else:
+                clipped = text[:400_000]
+                if not clipped.strip():
+                    continue
+                body = f'ATTACHED FILE: {name}\n\n{clipped}'
+            tags = list(meta_tags or [])
+            tags.append(RAGTag('source', f'attachment:{name}'))
+            tags.append(RAGTag('filename', name.lower()))
+            self.rag.store_data(body, tags_metadata=tags, collection=gold, quiet=True)
+        if names:
+            documents['attached_files_note'] = (
+                'The user attached this turn: ' + ', '.join(names)
+                + '. These files are already in FILES (this turn) and GOLD_DOCUMENTS '
+                '(later turns). Never ask them to attach these files again.'
+            )
 
     def handle_context(self, documents: dict,
                              direction='query')->tuple[dict[str,list], int, list]:

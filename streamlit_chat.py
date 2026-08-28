@@ -23,7 +23,7 @@ from rich.console import Console
 
 from chat import Chat, ChatOptions, SessionContext, parse_args, seed_from_string
 from src import RenderWindow
-from src.chat_utils import RAGTag, load_pdf
+from src.chat_utils import CommonUtils, RAGTag, load_pdf
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Page config MUST be the first Streamlit call
@@ -944,6 +944,7 @@ def handle_attachments(documents: dict) -> dict:
                     documents['dynamic_images'].append(
                         base64.b64encode(out.getvalue()).decode('utf-8')
                     )
+                CommonUtils.record_attachment(documents, name, kind='image')
             except Exception:  # pylint: disable=broad-exception-caught
                 documents['dynamic_files'] += f'\n--- {name} ---\n<unreadable image>\n'
         elif mime == 'application/pdf':
@@ -954,6 +955,7 @@ def handle_attachments(documents: dict) -> dict:
                     tmp_path = tmp.name
                 text = ''.join(doc.page_content for doc in load_pdf(tmp_path))
                 documents['dynamic_files'] += f'\n--- {name} ---\n\n{text}\n\n'
+                CommonUtils.record_attachment(documents, name, text=text, kind='text')
             except Exception as exc:  # pylint: disable=broad-exception-caught
                 documents['dynamic_files'] += f'\n--- {name} ---\n<pdf error: {exc}>\n'
             finally:
@@ -971,6 +973,7 @@ def handle_attachments(documents: dict) -> dict:
                 except Exception:  # pylint: disable=broad-exception-caught
                     text = '<binary content, could not decode>'
             documents['dynamic_files'] += f'\n--- {name} ---\n\n{text}\n\n'
+            CommonUtils.record_attachment(documents, name, text=text, kind='text')
     return documents
 
 
@@ -1399,6 +1402,8 @@ if _incoming:
 
     _documents = handle_attachments(_documents)
     _documents = apply_inline_flags(_documents, _prompt)
+    if not _documents.get('no_context'):
+        _chat.session.context.ingest_user_attachments(_documents, _meta_data)
 
     if _documents.get('no_context') and hasattr(_chat, 'no_context'):
         _body = _prompt

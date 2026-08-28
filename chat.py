@@ -361,6 +361,8 @@ class Chat():
              'dynamic_files'      : '',
              'include_branch'     : '',
              'dynamic_images'     : [],
+             'attachment_texts'   : [],
+             'attached_files_note': '',
              'turn_num'           : turn_count(history[self.chat_branch]) + 1,
              'history_sessions'   : self.opts.history_sessions,
              'name'               : self.opts.name,
@@ -415,7 +417,12 @@ class Chat():
 
     def load_content_as_context(self, user_input: str) -> dict:
         """Parse user_input for all occurrences of {{ /path/to/file }}"""
-        documents = {'dynamic_images': [], 'dynamic_files': '', 'user_query': user_input}
+        documents = {
+            'dynamic_images': [],
+            'dynamic_files': '',
+            'user_query': user_input,
+            'attachment_texts': [],
+        }
         included_files = self.session.common.regex.curly_match.findall(user_input)
 
         def read_file(file_path: str) -> str:
@@ -436,8 +443,14 @@ class Chat():
                                                                           f'{_file} {icon} ✅')
                 if icon == '🖼️':  # Image
                     documents['dynamic_images'].append(data)
+                    self.session.common.record_attachment(
+                        documents, _file, kind='image',
+                    )
                 else:
                     documents['dynamic_files'] += f'\n=== {_file} ===\n{data}\n\n'
+                    self.session.common.record_attachment(
+                        documents, _file, text=str(data), kind='text',
+                    )
 
             else:
                 documents['user_query'] = documents['user_query'].replace(included_file,
@@ -521,6 +534,8 @@ class Chat():
                      'dynamic_files'            : '',
                      'include_branch'           : '',
                      'dynamic_images'           : [],
+                     'attachment_texts'         : [],
+                     'attached_files_note'      : '',
                      'turn_num'                 : 0,
                      'history_sessions'         : 0,
                      collections['ai']          : '',
@@ -819,6 +834,7 @@ class Chat():
             documents['user_query'] = (
                 f'{raw} \n\nattachments:{documents["user_query"]}'
             )
+        self.session.context.ingest_user_attachments(documents, meta_data)
         return documents, meta_data
 
     def chat(self):
