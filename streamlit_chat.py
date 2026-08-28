@@ -19,12 +19,11 @@ from typing import Generator
 
 import streamlit as st
 from PIL import Image
-from langchain_community.document_loaders import PyPDFLoader
 from rich.console import Console
 
 from chat import Chat, ChatOptions, SessionContext, parse_args, seed_from_string
 from src import RenderWindow
-from src.chat_utils import RAGTag
+from src.chat_utils import RAGTag, load_pdf
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Page config MUST be the first Streamlit call
@@ -953,8 +952,7 @@ def handle_attachments(documents: dict) -> dict:
                 with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as tmp:
                     tmp.write(data)
                     tmp_path = tmp.name
-                loader = PyPDFLoader(tmp_path)
-                text = ''.join(doc.page_content for doc in loader.lazy_load())
+                text = "".join(doc.page_content for doc in load_pdf(tmp_path))
                 documents['dynamic_files'] += f"\n--- {name} ---\n\n{text}\n\n"
             except Exception as exc:  # pylint: disable=broad-exception-caught
                 documents['dynamic_files'] += f"\n--- {name} ---\n<pdf error: {exc}>\n"

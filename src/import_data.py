@@ -7,13 +7,13 @@ from datetime import timedelta
 import argparse # for type hinting
 from bs4 import BeautifulSoup
 import requests
-from langchain_community.document_loaders import PyPDFLoader
 from rich.console import Group
 from rich.live import Live
 from rich.panel import Panel
 from rich.table import Table
-import pypdf # for error handling of PyPDFLoader
+import pypdf
 from src import RAGTag
+from src.chat_utils import load_pdf
 
 class ImportData:
     """ handle incoming data and store it accordingly into the RAG """
@@ -424,12 +424,8 @@ class ImportData:
         """ Store imported PDF text directly into the RAG """
         if do_exit:
             print(f'Importing document: {v_args.import_pdf}')
-        loader = PyPDFLoader(v_args.import_pdf)
-        pages = []
         try:
-            for page in loader.lazy_load():
-                pages.append(page)
-            page_texts = list(map(lambda doc: doc.page_content, pages))
+            page_texts = [doc.page_content for doc in load_pdf(v_args.import_pdf)]
             self.store_data(page_texts, v_args.import_pdf)
         except pypdf.errors.PdfStreamError as e:
             print(f'Error loading PDF:\n\n\t{e}\n\nIs this a valid PDF?')

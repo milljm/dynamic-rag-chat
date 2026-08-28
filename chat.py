@@ -9,7 +9,6 @@
 #     "langchain_ollama==1.1.0",
 #     "langchain_openai==1.6.0",
 #     "langchain_chroma==1.1.0",
-#     "langchain-community==0.4.2",
 #     "langchain-text-splitters==1.1.2",
 #     "chromadb>=1.3.5,<2.0.0",
 #     "pydantic>=2.7.4,<3",
@@ -52,7 +51,6 @@ from bs4 import BeautifulSoup
 from PIL import Image
 from prompt_toolkit import PromptSession
 from prompt_toolkit.key_binding import KeyBindings
-from langchain_community.document_loaders import PyPDFLoader
 from src import ContextManager
 from src import RAG
 from src import RenderWindow
@@ -60,6 +58,7 @@ from src import CommonUtils, ChatOptions
 from src import ImportData
 from src import SceneManager
 from src import Orchestration
+from src.chat_utils import load_pdf
 posthog.disabled = True
 dark_rich_142_styles = {
     "markdown.h1": "bold #FFFFFF",
@@ -489,14 +488,7 @@ class Chat():
     def _process_pdf(self, included_file: str) -> tuple:
         """Process PDF files."""
         icon = "📕"
-        data = ""
-        loader = PyPDFLoader(included_file)
-        pages = []
-        for page in loader.lazy_load():
-            pages.append(page)
-        page_texts = list(map(lambda doc: doc.page_content, pages))
-        for page_text in page_texts:
-            data += page_text
+        data = "".join(doc.page_content for doc in load_pdf(included_file))
         return icon, data
 
     def _process_url(self, url: str) -> tuple:
