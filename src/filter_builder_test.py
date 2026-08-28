@@ -57,6 +57,30 @@ class FilterBuilderTest(unittest.TestCase):
         tags = [RAGTag('scene_mode', 'NSFW')]
         self.assertTrue(FilterBuilder.tags_are_nsfw(tags))
 
+    def test_document_topics_same_path_as_entity(self):
+        tags = [
+            RAGTag('document_topics', ['ai', 'programming']),
+            RAGTag('keywords_entities', ['langchain']),
+            RAGTag('language', 'python'),
+        ]
+        spec = FilterBuilder().build(tags, 'document_topics')
+        self.assertEqual(spec['field'], 'document_topics')
+        self.assertEqual(spec['values'], ['ai', 'programming'])
+        self.assertNotIn('keywords_entities', spec)
+        meta = {'document_topics': 'ai, programming, rag'}
+        self.assertTrue(metadata_matches(meta, 'document_topics', ['programming']))
+        self.assertFalse(metadata_matches(meta, 'document_topics', ['cooking']))
+
+    def test_story_and_assistant_fields_do_not_cross(self):
+        tags = [
+            RAGTag('entity', ['mira']),
+            RAGTag('document_topics', ['ai']),
+        ]
+        self.assertEqual(FilterBuilder().build(tags, 'entity')['values'], ['mira'])
+        self.assertEqual(
+            FilterBuilder().build(tags, 'document_topics')['values'], ['ai'],
+        )
+
 
 if __name__ == '__main__':
     unittest.main()

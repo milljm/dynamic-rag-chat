@@ -387,55 +387,24 @@ class ContextManager(PromptManager):
                       query: str,
                       collection: str,
                       field: str)->list[Document]:
-        """
-        ### Main Topic Retrieval
-
-        Perform topic context matching routines focused on RAGTag key: `field`. Each content
-        value in RAGTag(key=`field`, content=[]) will be searched individually in Chroma. The
-        method will split the amount of returned matches evenly based on `--history-matches`.
-
-        *Key init args:*
-            .. code-block:: python
-                meta_tags: list[RAGTag]
-                query: str
-                collection: str
-                field: str
-        *Returns:*
-            .. code-block:: python
-                return list[Document]
-        """
+        """Retrieve by must-field: `entity` in story, `document_topics` in assistant."""
         storage = []
 
         # Perhaps the user does not want to use RAG
         if self.opts.matches == 0:
             return storage
 
-        # Return immediately if we somehow have no topic field available
-        topic_field = [x for x in meta_tags if x.tag == field]
-        if not topic_field:
+        values = self.filter_builder.values_for(meta_tags, field)
+        if not values:
             return storage
 
-        _meta = list(meta_tags)
-        entity_weights = max(1, int(self.opts.matches * .75))
-
-        # Grab the list of topics, then remove the RAGTag from the list, as Chroma does not
-        # support searching a metadata tag with a list of values in it
-        entities = topic_field[0].content
-        _meta.remove(topic_field[0])
-
-        # In case the pre-processor supplied a string of space separated items or one item
-        if isinstance(entities, str):
-            entities = entities.split(',')
-
-        # Perform a balanced search for each entity/document_topics
-        for a_entity in entities:
-            for _ in range(max(1, int(entity_weights / len(entities)))):
-                storage.extend(self.gather_context(
-                                            query,
-                                            collection,
-                                            [RAGTag(tag=field, content=a_entity.lower()), *_meta],
-                                            field)
-                                            )
+        for value in values:
+            storage.extend(self.gather_context(
+                query,
+                collection,
+                [RAGTag(tag=field, content=value)],
+                field,
+            ))
         return storage
 
     @staticmethod
@@ -684,14 +653,8 @@ class ContextManager(PromptManager):
                 )
             storage = []
             storage.extend(self.handle_topics(meta_tags, query, name, self.mode))
-            retrieved = self.rag.retrieve(query, name)
-            if self.debug:
-                self.console.print(
-                    f'Data:\n{retrieved}\n\n',
-                    style=f'color({self.opts.color})',
-                    highlight=False,
-                )
-            storage.extend(retrieved)
+            if not storage:
+                storage.extend(self.rag.retrieve(query, name))
             pages = [doc.page_content for doc in storage]
             pre_tokens += sum(self.token_retriever(page) for page in pages)
             documents[collection] = self.deduplication(
