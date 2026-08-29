@@ -18,6 +18,9 @@ import { Input } from "@/components/ui/input";
 const fieldClass =
   "flex h-10 w-full rounded-sm bg-secondary px-3 text-sm text-foreground shadow-[var(--shadow-border)] transition-[box-shadow] duration-150 placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70 disabled:cursor-not-allowed disabled:opacity-50";
 
+const modelLabelClass =
+  "text-sm font-medium uppercase tracking-[0.22em] text-foreground";
+
 function Field({
   label,
   hint,
@@ -29,7 +32,7 @@ function Field({
 }) {
   return (
     <label className="grid gap-1">
-      <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+      <span className={modelLabelClass}>
         {label}
       </span>
       {children}
@@ -382,7 +385,7 @@ function SettingsPanel({
                 <div className="mt-3 grid gap-4">
                   {ROUTE_ROWS.map((row) => (
                     <div key={row.id} className="grid gap-1.5">
-                      <span className="text-[11px] font-medium text-foreground">
+                      <span className={modelLabelClass}>
                         {row.label}
                       </span>
                       <ModelSelect
