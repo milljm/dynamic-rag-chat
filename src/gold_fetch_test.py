@@ -31,6 +31,24 @@ class TakeNeedGoldTest(unittest.TestCase):
         _, name = take_need_gold('<NEED_GOLD:`spur-server.py`>')
         self.assertEqual(name, 'spur-server.py')
 
+    def test_placeholder_filename_is_ignored(self):
+        text = 'The tag looks like <NEED_GOLD:filename> when you explain it.'
+        vis, name = take_need_gold(text)
+        self.assertIsNone(name)
+        self.assertEqual(vis, text)
+
+    def test_placeholder_with_ext_is_ignored(self):
+        vis, name = take_need_gold('<NEED_GOLD:filename.py>')
+        self.assertIsNone(name)
+        self.assertIn('filename.py', vis)
+
+    def test_real_tag_after_placeholder(self):
+        vis, name = take_need_gold(
+            'e.g. <NEED_GOLD:filename>\n<NEED_GOLD:README.md>\n',
+        )
+        self.assertEqual(name, 'README.md')
+        self.assertIn('<NEED_GOLD:filename>', vis)
+        self.assertNotIn('README.md>', vis)
 
 class GoldNeedFeedTest(unittest.TestCase):
     """Hold back the tag across chunks."""
@@ -62,6 +80,19 @@ class GoldNeedFeedTest(unittest.TestCase):
         rest = a + feed.flush()
         self.assertEqual(rest, 'x < 3 and y > 4')
 
+    def test_placeholder_does_not_complete(self):
+        feed = GoldNeedFeed()
+        a, hit = feed.feed('copy this: <NEED_GOLD:filename>')
+        self.assertFalse(hit)
+        self.assertIsNone(feed.filename)
+        self.assertEqual(a + feed.flush(), 'copy this: <NEED_GOLD:filename>')
+
+    def test_real_tag_after_placeholder_in_stream(self):
+        feed = GoldNeedFeed()
+        a, hit = feed.feed('<NEED_GOLD:filename> then <NEED_GOLD:README.md>')
+        self.assertTrue(hit)
+        self.assertEqual(feed.filename, 'README.md')
+        self.assertEqual(a, '<NEED_GOLD:filename> then ')
 
 class RecallStatusTest(unittest.TestCase):
     """Status line for Recalling Documents."""
