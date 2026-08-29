@@ -2,9 +2,9 @@
 
 Browser UI for [dynamic-rag-chat](https://github.com/milljm/dynamic-rag-chat). This folder is the view; `../spur-server.py` is the HTTP contract.
 
-![Spur](docs/screenshot.png)
+![Spur](docs/screenshot.jpg)
 
-Light mode. Code fences have a Pygments theme dropdown (sticky; auto is fruity / stata-light).
+Light mode. Code fences have a Pygments theme dropdown (sticky; auto is coffee / stata-light).
 
 ![Spur light](docs/screenshot-light.jpg)
 
