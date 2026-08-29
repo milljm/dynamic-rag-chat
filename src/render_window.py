@@ -29,6 +29,7 @@ from .chat_utils import CommonUtils, ChatOptions, RAGTag # For Type Hinting
 from .model_orchestrator import Orchestration, MAX_AGENT_CALLS
 from .agent_tools import DuckDuckGoSearchTool
 from .think_tags import ThinkFeed, chunk_text, split_think
+from .gold_fetch import MAX_GOLD_FETCHES, take_need_gold
 
 
 # pylint: disable=too-many-instance-attributes  # this is what a dataclass is for
@@ -750,6 +751,38 @@ class RenderWindow(PromptManager):
                 current_response = ''
         return current_response, first_token_at
 
+    def _resume_gold_fetches(
+        self, assembled: str, documents: dict, meta_data, messages,
+        footer_meta, color, live, inference_start, first_token_at,
+    ) -> str:
+        """Fetch gold files the model asked for and continue this turn."""
+        del messages
+        if not self.opts.assistant_mode:
+            visible, _ = take_need_gold(assembled)
+            return visible
+        fetches = 0
+        while fetches < MAX_GOLD_FETCHES:
+            visible, fname = take_need_gold(assembled)
+            assembled = visible
+            if not fname:
+                break
+            if not self.state.context.fetch_gold_file(documents, fname):
+                break
+            fetches += 1
+            documents['gold_resume'] = visible
+            self.renderable.response = Text(
+                f'Fetching gold: {fname}...', style=f'color({color}',
+            )
+            self.render_chat(live)
+            packed = self.get_messages(meta_data, documents)
+            more, later = self._consume_model_stream(
+                packed, documents, footer_meta, color, live, inference_start,
+            )
+            if later and not first_token_at:
+                first_token_at = later
+            assembled = (visible.rstrip() + '\n' + more).strip()
+        return assembled
+
     def _run_polisher(self, documents, meta_data, footer_meta, color, live,
                       inference_start, first_token_at, current_response) -> str:
         """Optional polish passes; returns the last pass text."""
@@ -843,6 +876,10 @@ class RenderWindow(PromptManager):
                 current_response, first_token_at = self._consume_model_stream(
                     messages, documents, footer_meta, color, live,
                     inference_start,
+                )
+                current_response = self._resume_gold_fetches(
+                    current_response, documents, meta_data, messages,
+                    footer_meta, color, live, inference_start, first_token_at,
                 )
             except Exception as exc:  # pylint: disable=broad-exception-caught
                 error_text = (

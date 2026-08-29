@@ -48,6 +48,7 @@ from chat import (  # noqa: E402
     seed_from_string,
 )
 from src.think_tags import ThinkFeed  # noqa: E402
+from src.gold_fetch import GoldNeedFeed, MAX_GOLD_FETCHES  # noqa: E402
 from src.chat_utils import (  # noqa: E402
     HISTORY_META_KEYS,
     CommonUtils,
@@ -741,9 +742,13 @@ def _reset_renderer_think(renderer) -> None:
 
 def _iter_sse_chunks(
     renderer, packed, documents: dict, stats: dict,
-    route: str = '', context: int = 0,
+    route: str = '', context: int = 0, meta=None,
 ) -> Iterator[bytes]:
-    """Yield token/reasoning/status/usage SSE frames for one LLM stream."""
+    """Yield token/reasoning/status/usage SSE frames for one LLM stream.
+
+    If the model emits <NEED_GOLD:file>, fetch that gold file and resume
+    in this same turn (assistant mode, capped).
+    """
     _reset_renderer_think(renderer)
     started = time.time()
     first = True
@@ -751,33 +756,72 @@ def _iter_sse_chunks(
     tokens = 0
     answer = ''
     reasoning = ''
-    parser = ThinkFeed()
     model = getattr(renderer.llm, 'model_name', '')
+    fetches = 0
+    assistant = bool(getattr(renderer.opts, 'assistant_mode', False))
 
     def bump(count: int = 1) -> None:
         nonlocal tokens
         tokens += max(1, count)
 
-    for chunk in renderer.stream_response(packed):
-        if first:
-            ttft = time.time() - started
-            first = False
-            yield sse({
-                'type': 'status',
-                'message': 'Streaming…',
-                'model': model or '',
-                'route': route or '',
-                'context': context or 0,
-            }).encode()
-        visible, thought = parser.feed_chunk(chunk)
-        if thought:
-            bump(len(thought.split()))
-            reasoning += thought
-            yield sse({'type': 'reasoning', 'content': thought}).encode()
-        if visible:
-            bump(renderer.response_count(visible))
-            answer += visible
-            yield sse({'type': 'token', 'content': visible}).encode()
+    while True:
+        parser = ThinkFeed()
+        gold_feed = GoldNeedFeed()
+        _reset_renderer_think(renderer)
+        for chunk in renderer.stream_response(packed):
+            if first:
+                ttft = time.time() - started
+                first = False
+                yield sse({
+                    'type': 'status',
+                    'message': 'Streaming…',
+                    'model': model or '',
+                    'route': route or '',
+                    'context': context or 0,
+                }).encode()
+            visible, thought = parser.feed_chunk(chunk)
+            if thought:
+                bump(len(thought.split()))
+                reasoning += thought
+                yield sse({'type': 'reasoning', 'content': thought}).encode()
+            if not visible:
+                continue
+            emit, hit = gold_feed.feed(visible)
+            if emit:
+                bump(renderer.response_count(emit))
+                answer += emit
+                yield sse({'type': 'token', 'content': emit}).encode()
+            if hit:
+                break
+        leftover = gold_feed.flush()
+        if leftover and not gold_feed.filename:
+            bump(renderer.response_count(leftover))
+            answer += leftover
+            yield sse({'type': 'token', 'content': leftover}).encode()
+        fname = gold_feed.filename
+        if (not fname or not assistant or fetches >= MAX_GOLD_FETCHES
+                or meta is None):
+            break
+        if not renderer.state.context.fetch_gold_file(documents, fname):
+            break
+        fetches += 1
+        documents['gold_resume'] = answer
+        yield sse({
+            'type': 'status',
+            'message': f'Fetching gold: {fname}…',
+        }).encode()
+        packed = renderer.get_messages(meta, documents)
+        model = getattr(renderer.llm, 'model_name', '') or model
+        context = renderer.packed_prompt_tokens(packed)
+        documents['prompt_tokens'] = context
+        yield sse({
+            'type': 'status',
+            'message': 'Streaming…',
+            'model': model or '',
+            'route': route or '',
+            'context': context or 0,
+        }).encode()
+
     gen = time.time() - started
     stats.update({
         'answer': answer,
@@ -837,7 +881,8 @@ async def api_chat(request: Request) -> StreamingResponse:
             }).encode()
             stats: dict = {}
             yield from _iter_sse_chunks(
-                renderer, packed, documents, stats, route=route, context=context,
+                renderer, packed, documents, stats,
+                route=route, context=context, meta=meta,
             )
             if ((stats.get('answer') or stats.get('reasoning'))
                     and not documents.get('no_context')):
