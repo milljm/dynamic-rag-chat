@@ -675,6 +675,23 @@ class ContextManager(PromptManager):
         """Whole files in vector_dir/attachments (Documents widget)."""
         return list_attachments(self.opts.vector_dir)
 
+    def fill_documents_index(self, documents: dict) -> None:
+        """Basenames the model may NEED_GOLD. Empty in story mode."""
+        if not self.opts.assistant_mode:
+            documents['documents_index'] = '(story mode — no Documents cabinet)'
+            return
+        names = [
+            str(row.get('name') or '').strip()
+            for row in self.list_gold_files()
+        ]
+        names = [n for n in names if n]
+        if not names:
+            documents['documents_index'] = (
+                '(empty — nothing in the Documents cabinet)'
+            )
+            return
+        documents['documents_index'] = '\n'.join(f'- {n}' for n in names)
+
     def delete_gold_file(self, filename: str) -> bool:
         """Drop a named file from the cabinet and gold chunks."""
         history = self.common.load_chat()
