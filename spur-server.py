@@ -48,7 +48,7 @@ from chat import (  # noqa: E402
     seed_from_string,
 )
 from src.think_tags import ThinkFeed  # noqa: E402
-from src.gold_fetch import GoldNeedFeed, MAX_GOLD_FETCHES  # noqa: E402
+from src.gold_fetch import GoldNeedFeed, MAX_GOLD_FETCHES, recall_status  # noqa: E402
 from src.attachment_store import list_attachments  # noqa: E402
 from src.chat_utils import (  # noqa: E402
     HISTORY_META_KEYS,
@@ -781,6 +781,7 @@ def _iter_sse_chunks(
     reasoning = ''
     model = getattr(renderer.llm, 'model_name', '')
     fetches = 0
+    recalled: list[str] = []
     assistant = bool(getattr(renderer.opts, 'assistant_mode', False))
 
     def bump(count: int = 1) -> None:
@@ -839,10 +840,11 @@ def _iter_sse_chunks(
         if not renderer.state.context.fetch_gold_file(documents, fname):
             break
         fetches += 1
+        recalled.append(fname)
         documents['gold_resume'] = answer
         yield sse({
             'type': 'status',
-            'message': 'Recalling Document…',
+            'message': recall_status(recalled),
         }).encode()
         packed = renderer.get_messages(meta, documents)
         model = getattr(renderer.llm, 'model_name', '') or model
