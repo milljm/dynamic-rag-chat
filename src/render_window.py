@@ -580,6 +580,9 @@ class RenderWindow(PromptManager):
 
         # Format text messages from template
         images = documents.pop('dynamic_images', [])
+        if hasattr(self.state, 'context'):
+            self.state.context.fill_documents_index(documents)
+        documents.setdefault('documents_index', '')
         formatted_messages = prompt_template.format_messages(**documents)
         # Optional: inject images into HumanMessage if present
         messages = self.add_image_block(formatted_messages, images)
