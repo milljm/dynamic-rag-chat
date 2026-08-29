@@ -21,6 +21,7 @@ from .prompt_manager import PromptManager
 from .filter_builder import FilterBuilder
 from .scene_manager import SceneManager
 from .gold_fetch import MAX_GOLD_FETCHES
+from .attachment_store import list_attachments
 
 class ContextManager(PromptManager):
     """ A collection of methods aimed at producing/reducing the context """
@@ -661,11 +662,25 @@ class ContextManager(PromptManager):
                 'Say you do not have that file.\n'
             )
         return True
+
+    def _collection_prefix(self, branch: str, collection: str) -> str:
+        """Chroma collection name prefix for this branch."""
         if self.opts.assistant_mode:
             return 'assistant_'
         if collection == 'gold_documents':
             return ''
         return f'{branch}_'
+
+    def list_gold_files(self) -> list[dict]:
+        """Whole files in vector_dir/attachments (Documents widget)."""
+        return list_attachments(self.opts.vector_dir)
+
+    def delete_gold_file(self, filename: str) -> bool:
+        """Drop a named file from the cabinet and gold chunks."""
+        history = self.common.load_chat()
+        branch = self._active_branch(history)
+        gold = f'{self._collection_prefix(branch, "gold_documents")}gold_documents'
+        return self.rag.delete_named_file(gold, filename)
 
     def _fill_rag_collections(self, documents, meta_tags, query, branch):
         """Retrieve, dedupe, and stringify each RAG collection.

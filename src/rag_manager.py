@@ -19,6 +19,7 @@ from langchain_ollama import OllamaEmbeddings
 from langchain_chroma import Chroma
 from .chat_utils import CommonUtils, ChatOptions, RAGTag  # for Type Hinting
 from .filter_builder import metadata_matches
+from .attachment_store import get_attachment, put_attachment, delete_attachment
 # Silence initial RAG database being empty
 logging.getLogger('chromadb').setLevel(logging.ERROR)
 
@@ -165,6 +166,10 @@ class RAG():
         body = text
         if not body.startswith('ATTACHED FILE:') and not body.startswith('ATTACHED IMAGE:'):
             body = f'ATTACHED FILE: {filename}\n\n{body}'
+        try:
+            put_attachment(self.opts.vector_dir, filename, body)
+        except OSError:
+            pass
         doc = Document(
             page_content=body,
             metadata={'filename': filename.lower(), 'whole_file': 'true'},
@@ -175,7 +180,16 @@ class RAG():
             pass
 
     def get_full_file(self, collection: str, filename: str) -> Document | None:
-        """Return the unsplit gold file, or None."""
+        """Return the unsplit gold file, or None.
+
+        Directory first (vector_dir/attachments), then the docstore key.
+        """
+        text = get_attachment(self.opts.vector_dir, filename)
+        if text:
+            return Document(
+                page_content=text,
+                metadata={'filename': filename.lower(), 'whole_file': 'true'},
+            )
         try:
             got = self._docstore(collection).mget([self._file_key(filename)])
         except Exception:  # pylint: disable=broad-exception-caught
@@ -183,6 +197,43 @@ class RAG():
         if got and got[0] is not None:
             return got[0]
         return None
+
+    def delete_named_file(self, collection: str, filename: str) -> bool:
+        """Remove a whole file from the cabinet and its gold chunks."""
+        name = (filename or '').strip()
+        if not name:
+            return False
+        removed = delete_attachment(self.opts.vector_dir, name)
+        try:
+            self._docstore(collection).mdelete([self._file_key(name)])
+            removed = True
+        except Exception:  # pylint: disable=broad-exception-caught
+            pass
+        try:
+            vector = self._vector_store(collection)
+            # pylint: disable=protected-access
+            payload = vector._collection.get(
+                where={'filename': name.lower()},
+                include=['metadatas'],
+            )
+            ids = list(payload.get('ids') or [])
+            parent_ids = []
+            seen = set()
+            for meta in payload.get('metadatas') or []:
+                if not isinstance(meta, dict):
+                    continue
+                parent = meta.get('doc_id')
+                if parent and parent not in seen:
+                    seen.add(parent)
+                    parent_ids.append(parent)
+            if ids:
+                vector._collection.delete(ids=ids)
+                removed = True
+            if parent_ids:
+                self._docstore(collection).mdelete(parent_ids)
+        except Exception:  # pylint: disable=broad-exception-caught
+            pass
+        return removed
 
     def retrieve_named_files(self, query: str, collection: str) -> list[Document]:
         """If the query names a gold file, return that file in full."""

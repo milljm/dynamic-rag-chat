@@ -49,6 +49,7 @@ from chat import (  # noqa: E402
 )
 from src.think_tags import ThinkFeed  # noqa: E402
 from src.gold_fetch import GoldNeedFeed, MAX_GOLD_FETCHES  # noqa: E402
+from src.attachment_store import list_attachments  # noqa: E402
 from src.chat_utils import (  # noqa: E402
     HISTORY_META_KEYS,
     CommonUtils,
@@ -685,6 +686,28 @@ async def api_mode(request: Request) -> JSONResponse:
     body = await request.json()
     enabled = str(body.get('mode') or '') == 'assistant'
     return _op(set_assistant_mode, get_chat(), enabled)
+
+
+@app.get('/api/documents')
+def api_documents() -> dict[str, Any]:
+    """Whole files in vector_dir/attachments."""
+    return {'documents': list_attachments(_vector_dir())}
+
+
+@app.post('/api/documents/delete')
+async def api_documents_delete(request: Request) -> JSONResponse:
+    """Remove a named file from the cabinet and gold chunks."""
+    body = await request.json()
+    name = str(body.get('name') or '')
+    if not name:
+        return JSONResponse({'ok': False, 'error': 'Missing name', 'message': 'Missing name'})
+    chat = get_chat()
+    ok = chat.session.context.delete_gold_file(name)
+    if not ok:
+        return JSONResponse({
+            'ok': False, 'error': f'Could not delete {name}', 'message': f'Could not delete {name}',
+        })
+    return JSONResponse({'ok': True, 'error': None, 'message': f'Deleted {name}'})
 
 
 def _prepare_chat_documents(chat, body: dict) -> tuple[dict, list]:
