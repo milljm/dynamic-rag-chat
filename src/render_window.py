@@ -771,7 +771,7 @@ class RenderWindow(PromptManager):
             fetches += 1
             documents['gold_resume'] = visible
             self.renderable.response = Text(
-                f'Fetching gold: {fname}...', style=f'color({color}',
+                'Recalling Document...', style=f'color({color}',
             )
             self.render_chat(live)
             packed = self.get_messages(meta_data, documents)

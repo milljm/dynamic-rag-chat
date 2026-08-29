@@ -45,7 +45,14 @@ class GoldNeedFeedTest(unittest.TestCase):
         self.assertEqual(b, '')
         self.assertEqual(feed.filename, 'prompt_manager.py')
 
-    def test_false_angle(self):
+    def test_tag_inside_reasoning_text(self):
+        feed = GoldNeedFeed()
+        a, hit = feed.feed('need the assembler\n')
+        self.assertFalse(hit)
+        b, hit = feed.feed('<NEED_GOLD:prompt_manager.py>')
+        self.assertTrue(hit)
+        self.assertEqual(feed.filename, 'prompt_manager.py')
+        self.assertEqual((a + b).strip(), 'need the assembler')
         feed = GoldNeedFeed()
         a, hit = feed.feed('x < 3 and y > 4')
         self.assertFalse(hit)
