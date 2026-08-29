@@ -117,7 +117,7 @@ https://github.com/user-attachments/assets/07976c98-3935-4b24-a1c0-e09dcd8bf07b
 
 ### RAG layout (what the code actually does)
 
-Each **branch** owns collections named `{branch}_user_documents` and `{branch}_ai_documents`. Story mode can also read an un-prefixed **gold** collection (import-only; not cloned on fork). Assistant gold is `assistant_gold_documents`. In assistant mode, text attachments are stored there on the turn they arrive so later turns can retrieve them. Mentioning a filename in the query (e.g. `spur-server.py`) retrieves that gold file in full. In assistant mode the model can also emit `<NEED_GOLD:filename>` mid-reply; the stream pauses, gold is fetched, and the same turn resumes (at most twice).
+Each **branch** owns collections named `{branch}_user_documents` and `{branch}_ai_documents`. Story mode can also read an un-prefixed **gold** collection (import-only; not cloned on fork). Assistant gold is `assistant_gold_documents`. In assistant mode, text attachments are **chunked into gold** (semantic search) and also stored whole under `vector_dir/attachments/` (filename lookup, NEED_GOLD, Spur Documents widget). Mentioning a filename in the query (e.g. `spur-server.py`) retrieves that file in full. In assistant mode the model can also emit `<NEED_GOLD:filename>` mid-reply; the stream pauses, the file is fetched, and the same turn resumes (at most twice). `--import-dir` stays gold-chunks only — it does not fill the attachments cabinet.
 
 Chunking is parent/child, not a single 100/50 split:
 
