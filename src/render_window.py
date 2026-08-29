@@ -386,18 +386,16 @@ class RenderWindow(PromptManager):
     @staticmethod
     def add_image_block(messages: list[BaseMessage], images: list)->list[BaseMessage]:
         """ add/return image block if images are present """
-        # Optional: inject images into HumanMessage if present
         if images:
             image_blocks = [
                 {
                     'type': 'image_url',
                     'image_url': {
-                        'url': f"data:image/jpeg;base64,{img_b64}"
+                        'url': RenderWindow._as_image_data_url(img_b64),
                     }
                 }
                 for img_b64 in images
             ]
-            # Replace or extend HumanMessage with image blocks
             for i, msg in enumerate(messages):
                 if isinstance(msg, HumanMessage):
                     if isinstance(msg.content, str):
@@ -407,8 +405,16 @@ class RenderWindow(PromptManager):
                         ])
                     elif isinstance(msg.content, list):
                         messages[i].content.extend(image_blocks)
-                    break  # Only handle first HumanMessage
+                    break
         return messages
+
+    @staticmethod
+    def _as_image_data_url(raw) -> str:
+        """Keep data URLs (and their mime). Wrap bare base64 as jpeg."""
+        text = str(raw or '').strip()
+        if text.startswith('data:'):
+            return text
+        return f'data:image/jpeg;base64,{text}'
 
     @staticmethod
     def _llm_text(resp) -> str:
@@ -562,7 +568,9 @@ class RenderWindow(PromptManager):
 
         # One shot VISION population
         documents['vision_capable'] = 'FALSE'
-        if self.orchestrator.get_rout_name(meta_data, documents) == 'vision':
+        has_pixels = bool(documents.get('dynamic_images'))
+        if (has_pixels
+                or self.orchestrator.get_rout_name(meta_data, documents) == 'vision'):
             documents['vision_capable'] = ('TRUE - YOU ARE A VISION CAPABLE MODEL AND BEING '
                                            'PROVIDED ATTACHED IMAGES THIS TURN')
 

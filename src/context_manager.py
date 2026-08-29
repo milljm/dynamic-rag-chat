@@ -806,7 +806,8 @@ class ContextManager(PromptManager):
             notes.append(
                 'THIS TURN the user attached image(s): '
                 + ', '.join(image_names)
-                + '. Pixels are for vision this turn only. Not saved to Documents.'
+                + '. The pixels are in this message. Look at them. '
+                'Do not write code to open the file. Not saved to Documents.'
             )
         if gold_names:
             notes.append(self._attachment_note(gold_names))

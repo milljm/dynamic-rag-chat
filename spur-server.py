@@ -608,15 +608,33 @@ def apply_includes(chat: Chat, documents: dict, raw: str) -> dict:
     return documents
 
 
-def fold_uploads(documents: dict, images: list, files: list) -> dict:
+def fold_uploads(documents: dict, images: list, files: list,
+                 attachments: list | None = None) -> dict:
+    """Pixels from `images` or image attachments; text files into dynamic_files."""
     documents.setdefault('dynamic_images', [])
     documents.setdefault('dynamic_files', '')
-    for img in images or []:
+    seen: set[str] = set()
+    extras: list = list(images or [])
+    for att in attachments or []:
+        if not isinstance(att, dict):
+            continue
+        kind = str(att.get('kind') or '')
+        mime = str(att.get('mime') or '')
+        if kind != 'image' and not mime.startswith('image/'):
+            continue
+        url = att.get('dataUrl') or att.get('data_url')
+        if isinstance(url, str) and url.strip():
+            extras.append(url)
+    for img in extras:
         raw = img
-        if isinstance(raw, str) and ',' in raw and raw.startswith('data:'):
-            raw = raw.split(',', 1)[1]
-        if raw:
-            documents['dynamic_images'].append(raw)
+        if not isinstance(raw, str) or not raw.strip():
+            continue
+        raw = raw.strip()
+        key = raw[:80] + str(len(raw))
+        if key in seen:
+            continue
+        seen.add(key)
+        documents['dynamic_images'].append(raw)
     for item in files or []:
         name = item.get('name', 'file')
         text = item.get('text', '')
@@ -741,16 +759,26 @@ def _prepare_chat_documents(chat, body: dict) -> tuple[dict, list]:
         has_text = any(
             isinstance(a, dict) and a.get('kind') == 'text' for a in atts
         )
+        has_image = bool(body.get('images')) or any(
+            isinstance(a, dict) and (
+                a.get('kind') == 'image'
+                or str(a.get('mime') or '').startswith('image/')
+            )
+            for a in atts
+        )
         documents, meta = chat.prepare_turn(
             parsed.args or parsed.clean_text or prompt,
             extras={
-                'has_images': bool(body.get('images')),
+                'has_images': has_image,
                 'has_files': bool(body.get('files') or has_text),
             },
         )
         documents = apply_includes(chat, documents, prompt)
     documents = fold_uploads(
-        documents, body.get('images') or [], body.get('files') or [],
+        documents,
+        body.get('images') or [],
+        body.get('files') or [],
+        body.get('attachments') or [],
     )
     # Image attachments: stub in gold (pixels stay this-turn for vision).
     for att in body.get('attachments') or []:

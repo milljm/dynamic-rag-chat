@@ -67,10 +67,17 @@ class PromptManager():
         human = self.get_prompt(f'{self.plot_prompt_file}_human.md')
         resume = bool(str(documents.get('gold_resume') or '').strip())
         has_index = bool(documents.get('has_documents_index'))
+        has_images = bool(
+            documents.get('has_images') or documents.get('dynamic_images')
+        )
         parts: list[str] = []
         if resume:
             parts.append(self.get_prompt(f'{self.plot_prompt_file}_resume.md'))
         parts.append(spine)
+        if has_images:
+            extra = f'{self.plot_prompt_file}_images.md'
+            if os.path.exists(extra):
+                parts.append(self.get_prompt(extra))
         if has_index and not resume:
             parts.append(self.get_prompt(f'{self.plot_prompt_file}_need_gold.md'))
         return '\n'.join(parts), human
