@@ -467,6 +467,35 @@ class CommonUtils():
             'kind': kind or 'text',
         })
 
+    _FILE_EXTS = (
+        'py', 'md', 'txt', 'json', 'yaml', 'yml', 'csv', 'pdf', 'js', 'ts',
+        'tsx', 'jsx', 'html', 'css', 'rs', 'go', 'c', 'cpp', 'h', 'hpp',
+        'java', 'sh', 'bash', 'toml', 'ini', 'xml', 'sql', 'ipynb', 'png',
+        'jpg', 'jpeg', 'gif', 'webp', 'svg', 'rb', 'php', 'kt', 'swift',
+        'r', 'lua', 'vue', 'scss', 'rst', 'tex', 'cfg', 'conf',
+    )
+    _FILE_NAME_RE = re.compile(
+        r'(?<![A-Za-z0-9_.-])'
+        r'([A-Za-z][\w.-]*\.(' + '|'.join(_FILE_EXTS) + r'))'
+        r'(?![A-Za-z0-9_.-])',
+        re.IGNORECASE,
+    )
+
+    @classmethod
+    def extract_filenames(cls, text: str) -> list[str]:
+        """Basenames mentioned in user text (spur-server.py, README.md, …)."""
+        if not text:
+            return []
+        seen = set()
+        out = []
+        for match in cls._FILE_NAME_RE.finditer(text):
+            name = match.group(1).lower()
+            if name in seen:
+                continue
+            seen.add(name)
+            out.append(name)
+        return out
+
     @staticmethod
     def normalize_metadata_for_rag(meta: dict)->dict:
         """ serialize values for RAG meta-fields """

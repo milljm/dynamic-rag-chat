@@ -141,6 +141,17 @@ class AttachmentHelpersTest(unittest.TestCase):
         self.assertEqual(docs['attachment_texts'][0]['name'], 'a.py')
         self.assertEqual(docs['attachment_texts'][1]['kind'], 'image')
 
+    def test_extract_filenames(self):
+        names = CommonUtils.extract_filenames(
+            'look at spur-server.py and README.md please',
+        )
+        self.assertEqual(names, ['spur-server.py', 'readme.md'])
+        self.assertEqual(CommonUtils.extract_filenames('no files here'), [])
+        self.assertIn('chat_history.json', CommonUtils.extract_filenames(
+            'the chat_history.json dump',
+        ))
+        self.assertEqual(CommonUtils.extract_filenames('python 3.13 rocks'), [])
+
 
 if __name__ == '__main__':
     unittest.main()

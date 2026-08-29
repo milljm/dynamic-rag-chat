@@ -146,6 +146,99 @@ class RAG():
                     child_splitter=self.child_splitter,
                     parent_splitter=self.parent_splitter)
 
+    @staticmethod
+    def _file_key(filename: str) -> str:
+        """Stable docstore id for a whole gold file."""
+        return f'file:{filename.lower()}'
+
+    def _docstore(self, collection: str):
+        """KV docstore used by ParentDocumentRetriever for this collection."""
+        collection = self._normalize_collection_name(collection)
+        fs = LocalFileStore(os.path.join(self.opts.vector_dir, collection))
+        return create_kv_docstore(fs)
+
+    def store_full_file(self, collection: str, filename: str, text: str) -> None:
+        """Keep the unsplit file so a later filename mention can retrieve all of it."""
+        if not filename or not (text or '').strip():
+            return
+        key = self._file_key(filename)
+        body = text
+        if not body.startswith('ATTACHED FILE:') and not body.startswith('ATTACHED IMAGE:'):
+            body = f'ATTACHED FILE: {filename}\n\n{body}'
+        doc = Document(
+            page_content=body,
+            metadata={'filename': filename.lower(), 'whole_file': 'true'},
+        )
+        try:
+            self._docstore(collection).mset([(key, doc)])
+        except Exception:  # pylint: disable=broad-exception-caught
+            pass
+
+    def get_full_file(self, collection: str, filename: str) -> Document | None:
+        """Return the unsplit gold file, or None."""
+        try:
+            got = self._docstore(collection).mget([self._file_key(filename)])
+        except Exception:  # pylint: disable=broad-exception-caught
+            return None
+        if got and got[0] is not None:
+            return got[0]
+        return None
+
+    def retrieve_named_files(self, query: str, collection: str) -> list[Document]:
+        """If the query names a gold file, return that file in full."""
+        names = CommonUtils.extract_filenames(query)[:2]
+        if not names:
+            return []
+        found = []
+        seen = set()
+        for name in names:
+            doc = self.get_full_file(collection, name)
+            if doc is None:
+                doc = self._parents_for_filename(collection, name)
+            if doc is None:
+                continue
+            key = getattr(doc, 'page_content', '')[:80]
+            if key in seen:
+                continue
+            seen.add(key)
+            found.append(doc)
+        return found
+
+    def _parents_for_filename(self, collection: str, filename: str) -> Document | None:
+        """Fallback: stitch parent chunks tagged with this filename."""
+        try:
+            vector = self._vector_store(collection)
+            # pylint: disable=protected-access
+            payload = vector._collection.get(
+                where={'filename': filename.lower()},
+                include=['metadatas'],
+            )
+        except Exception:  # pylint: disable=broad-exception-caught
+            return None
+        ids = []
+        seen = set()
+        for meta in payload.get('metadatas') or []:
+            if not isinstance(meta, dict):
+                continue
+            parent = meta.get('doc_id')
+            if not parent or parent in seen:
+                continue
+            seen.add(parent)
+            ids.append(parent)
+        if not ids:
+            return None
+        try:
+            parts = self._docstore(collection).mget(ids)
+        except Exception:  # pylint: disable=broad-exception-caught
+            return None
+        texts = [p.page_content for p in parts if p is not None]
+        if not texts:
+            return None
+        return Document(
+            page_content='\n\n'.join(texts),
+            metadata={'filename': filename.lower(), 'whole_file': 'true'},
+        )
+
     def _vector_store(self, collection: str)->Chroma:
         """ Return our Chroma Collections Database """
         collection = self._normalize_collection_name(collection)

@@ -242,8 +242,13 @@ class ImportData:
                     if not status:
                         pass
                     _normal = self.d_session.common.normalize_for_dedup(split_doc)
+                    tags = list(meta_tags)
+                    if file_path:
+                        tags.append(RAGTag(
+                            'filename', os.path.basename(file_path).lower(),
+                        ))
                     self.d_session.rag.store_data(_normal,
-                                                tags_metadata=meta_tags,
+                                                tags_metadata=tags,
                                                 collection=self.g_branch,
                                                 quiet=True)
                     break
@@ -280,6 +285,11 @@ class ImportData:
             if len(self.state['chunk_times']) >= 50:
                 self.state['chunk_times'].pop(0)
             self.state['chunk_times'].append(elapsed_chunk)
+        if file_path:
+            raw = data if isinstance(data, str) else '\n\n'.join(str(x) for x in data)
+            self.d_session.rag.store_full_file(
+                self.g_branch, os.path.basename(file_path), raw[:400_000],
+            )
         return (True, '')
 
     def _do_childdocs(self, child_docs: list[str],
