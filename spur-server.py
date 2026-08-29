@@ -129,6 +129,7 @@ def _opts_snapshot(opts: ChatOptions) -> dict[str, str]:
         'polisher_server': blank(opts.polisher_host),
         'entity_llm': blank(opts.entity_llm),
         'entity_server': blank(opts.entity_host),
+        'tavily_key': blank(opts.tavily_key),
     }
 
 

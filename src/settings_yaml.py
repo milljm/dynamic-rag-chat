@@ -33,7 +33,7 @@ ROUTE_LLM_KEYS = tuple(
     llm for kind, llm, _s in ROUTE_ROWS if kind not in {'pre', 'embedding'}
 )
 
-ALL_KEYS = CORE_KEYS + ROUTE_LLM_KEYS + ROUTE_SERVER_KEYS
+ALL_KEYS = CORE_KEYS + ROUTE_LLM_KEYS + ROUTE_SERVER_KEYS + ('tavily_key',)
 
 _BLANK = frozenset({'', 'none', 'not_set', 'null', '~'})
 

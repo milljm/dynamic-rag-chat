@@ -347,6 +347,19 @@ function SettingsPanel({
                         placeholder="same server"
                         spellCheck={false}
                       />
+                      {row.id === "agent" ? (
+                        <Field
+                          label="Tavily"
+                          hint="Tavily API Key or blank for DuckDuckGo"
+                        >
+                          <Input
+                            type="password"
+                            value={values.tavily_key}
+                            onChange={(e) => patch("tavily_key", e.target.value)}
+                            autoComplete="off"
+                          />
+                        </Field>
+                      ) : null}
                     </div>
                   ))}
                 </div>

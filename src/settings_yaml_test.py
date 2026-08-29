@@ -86,6 +86,12 @@ class SettingsYamlTest(unittest.TestCase):
         self.assertFalse(result['ok'])
         self.assertEqual(result['models'], [])
 
+    def test_tavily_key_roundtrip(self):
+        out = upsert_keys(SAMPLE, {'tavily_key': 'tvly-test'})
+        self.assertIn('tavily_key: tvly-test', out)
+        self.assertEqual(read_values(out)['tavily_key'], 'tvly-test')
+        self.assertEqual(read_values(upsert_keys(out, {'tavily_key': ''}))['tavily_key'], '')
+
 
 if __name__ == '__main__':
     unittest.main()

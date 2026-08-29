@@ -30,6 +30,7 @@ export const SETTINGS_KEYS = [
   "polisher_server",
   "entity_llm",
   "entity_server",
+  "tavily_key",
 ] as const;
 
 export type SettingsKey = (typeof SETTINGS_KEYS)[number];
