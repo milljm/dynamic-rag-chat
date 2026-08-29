@@ -32,6 +32,31 @@ from .think_tags import ThinkFeed, chunk_text, split_think
 from .gold_fetch import MAX_GOLD_FETCHES, take_need_gold, recall_status
 
 
+def _abort_llm_stream(stream) -> None:
+    """Close an in-flight LLM HTTP stream so the next completion can start.
+
+    Breaking a ``for chunk in llm.stream()`` does not close the connection
+    until GC. LM Studio then keeps generating while the resume call waits.
+    """
+    cur = stream
+    seen: set[int] = set()
+    while cur is not None and id(cur) not in seen:
+        seen.add(id(cur))
+        closer = getattr(cur, 'close', None)
+        if callable(closer):
+            try:
+                closer()
+            except Exception:  # pylint: disable=broad-exception-caught
+                pass
+        nxt = None
+        for attr in ('response', '_response', 'http_response'):
+            cand = getattr(cur, attr, None)
+            if cand is not None and cand is not cur:
+                nxt = cand
+                break
+        cur = nxt
+
+
 # pylint: disable=too-many-instance-attributes  # this is what a dataclass is for
 @dataclass
 class StreamState:
@@ -630,9 +655,13 @@ class RenderWindow(PromptManager):
 
     # Stream response as chunks
     def stream_response(self, messages: Document)->object:
-        """ Invoke LLM and stream response """
-        for chunk in self.llm.stream(messages):
-            yield chunk
+        """Invoke LLM and stream response. Always abort the HTTP body on exit."""
+        stream = self.llm.stream(messages)
+        try:
+            for chunk in stream:
+                yield chunk
+        finally:
+            _abort_llm_stream(stream)
 
     def render_footer(self, time_taken: float = 0, generation_time: float = 0, **kwargs) -> Text:
         """ Render footer stats with heatmap colors and token metrics. """
