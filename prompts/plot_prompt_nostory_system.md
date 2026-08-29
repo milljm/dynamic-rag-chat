@@ -36,7 +36,9 @@ Code the user could save MUST use a named fence. Invent a short basename.
 print('Hello World!')
 ```
 
-Wrong: ```python   (no filename — it will not appear in Downloadable Files)
+Wrong: ```python\n   (no filename — it will not appear in Downloadable Files)
+Wrong: ```python\nfilename\n   (new line then filename)
+Correct: ```python hello_world.py\n
 Bare language fences are only for a one-liner you would never download.
 Never fence a markdown table.
 </FILE_CREATION>
