@@ -130,12 +130,20 @@ class Orchestration():
         return False
 
     @staticmethod
-    def _extract_mode(meta_tags: list[RAGTag])->str:
-        """Read assistant_mode from pre-processor tags (default general)."""
+    def _extract_mode(meta_tags: list[RAGTag],
+                      documents: dict | None = None)->str:
+        """Read assistant_mode from pre-processor tags (default general).
+
+        Vision is never a tagger decision — only attached pixels force it.
+        """
         assistant_mode = 'general'
         for tag in meta_tags:
             if tag.tag == 'assistant_mode':
                 assistant_mode = tag.content.lower()
+        if assistant_mode == 'vision' and not Orchestration._requires_vision(
+                documents or {},
+        ):
+            return 'structured'
         return assistant_mode
 
     def _route_assistant(self, meta_tags, documents)->ChatOpenAI:
@@ -146,7 +154,7 @@ class Orchestration():
         if self._requires_vision(documents):
             return self.get_model('vision')
 
-        assistant_mode = self._extract_mode(meta_tags)
+        assistant_mode = self._extract_mode(meta_tags, documents)
         if self.args.debug:
             self.console.print(f'DEBUG: DYNAMIC MODEL CHOSEN: {assistant_mode}',
                                 style=f'color({self.args.color})',highlight=False)
@@ -171,7 +179,7 @@ class Orchestration():
             return 'agent'
         if self._requires_vision(documents):
             return 'vision'
-        return self._extract_mode(meta_tags)
+        return self._extract_mode(meta_tags, documents)
 
     def get_rout_name(self, meta_tags: list[RAGTag],
                       documents: dict | None = None) -> str:

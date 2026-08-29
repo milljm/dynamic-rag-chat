@@ -74,3 +74,15 @@ class PromptManager():
         if has_index and not resume:
             parts.append(self.get_prompt(f'{self.plot_prompt_file}_need_gold.md'))
         return '\n'.join(parts), human
+
+    def compose_nostory_tag(self, documents: dict) -> str:
+        """Tagging human prompt. HAS_IMAGE fragment only when pixels exist."""
+        human = self.get_prompt(f'{self.tag_prompt_file}_human.md')
+        has_images = bool(
+            documents.get('has_images') or documents.get('dynamic_images')
+        )
+        if has_images:
+            piece = f'{self.tag_prompt_file}_images.md'
+            if os.path.exists(piece):
+                human = human.rstrip() + '\n' + self.get_prompt(piece)
+        return human
