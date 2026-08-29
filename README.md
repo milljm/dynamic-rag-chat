@@ -9,9 +9,9 @@ The face of it is **Spur**. One command:
 ./chat.py --spur --assistant-mode
 ```
 
-![Spur — dark](spur/docs/screenshot.png)
+![Spur — dark](spur/docs/screenshot.jpg)
 
-Light mode (washed dust / sand — turn badges still pop). Each code fence has a **theme dropdown** (the Pygments styles). Default is auto: fruity in dark, stata-light in light. Pick one and it sticks until you change it.
+Light mode (washed dust / sand — turn badges still pop). Each code fence has a **theme dropdown** (the Pygments styles). Default is auto: **coffee** in dark, **stata-light** in light. Pick one and it sticks until you change it.
 
 ![Spur — light](spur/docs/screenshot-light.jpg)
 

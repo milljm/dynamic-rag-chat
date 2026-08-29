@@ -29,13 +29,13 @@
   --spur-ttl-warn-bg: rgba(48, 18, 16, 0.82);
   --spur-ttl-warn-shadow: 0 1px 6px rgba(220, 90, 80, 0.35),
     0 0 0 1px rgba(240, 168, 160, 0.22);
-  --spur-hx-kw: #c34b00;
-  --spur-hx-st: #0086d2;
-  --spur-hx-cm: #008800;
-  --spur-hx-nu: #0086f7;
-  --spur-hx-fn: #cb006c;
-  --spur-code: #111111;
-  --spur-code-fg: #ffffff;
+  --spur-hx-kw: #919191;
+  --spur-hx-st: #c9b98f;
+  --spur-hx-cm: #70757a;
+  --spur-hx-nu: #87afaf;
+  --spur-hx-fn: #fdd0c0;
+  --spur-code: #262220;
+  --spur-code-fg: #ddd0c0;
   --spur-paper: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");
 }
 

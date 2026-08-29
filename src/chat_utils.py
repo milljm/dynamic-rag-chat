@@ -292,7 +292,7 @@ class ChatOptions:
     lookback: int | None = None
 
     # ---------- UI ----------
-    syntax_theme: str = 'fruity'
+    syntax_theme: str = 'coffee'
     color: int = field(init=False)
 
     # ---------- bulk import ----------
