@@ -7,12 +7,11 @@ RenderWindow: branches, JSON history, RAG clone/reset, agent tools,
 prepare_turn, stream_response, save_history. LM Studio (or whatever is
 in .chat.yaml) is reached the same way the terminal app already does.
 
-  uv run --with fastapi --with uvicorn spur-server.py
-  # or: pip install fastapi uvicorn && python spur-server.py
+  ./chat.py --spur
+  # or: python spur-server.py   then   VITE_CHAT_API=http://127.0.0.1:8765 npm run dev
 
-Then point the UI at this origin:
-
-  VITE_CHAT_API=http://127.0.0.1:8765
+The UI lives in ./spur/. Built files (if present) are served from
+spur/dist; otherwise ./chat.py --spur starts Vite next to this adapter.
 """
 from __future__ import annotations
 
@@ -1021,8 +1020,16 @@ def health() -> JSONResponse:
     return JSONResponse({'ok': True, 'backend': 'chat.py'})
 
 
-STATIC = os.environ.get('SPUR_STATIC') or os.path.join(ROOT, 'spur-ui')
-if os.path.isdir(STATIC):
+STATIC = os.environ.get('SPUR_STATIC') or ''
+if not STATIC:
+    for _candidate in (
+        os.path.join(ROOT, 'spur', 'dist'),
+        os.path.join(ROOT, 'spur-ui'),
+    ):
+        if os.path.isdir(_candidate):
+            STATIC = _candidate
+            break
+if STATIC and os.path.isdir(STATIC):
     app.mount('/', StaticFiles(directory=STATIC, html=True), name='ui')
 
 

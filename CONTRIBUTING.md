@@ -30,4 +30,7 @@ Same rule: path on the command line, not `-m src.…`.
 3. Import the module under test with the try / `sys.path` fallback the existing files use, so both `python src/foo_test.py` and the harness work.
 4. Run `python test_harness.py` before you open a PR.
 
+The Spur UI lives in `spur/` (no submodule). Python tests do not cover the React tree; after UI changes, `cd spur && npm test` if Node is installed.
+
 PRs that change behavior in `src/` should come with a matching `*_test.py` (or an update to one).
+

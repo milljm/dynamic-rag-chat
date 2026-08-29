@@ -1,0 +1,15 @@
+Spur is the UI. The engine + HTTP adapter live in:
+
+  https://github.com/milljm/dynamic-rag-chat
+
+1. In that repo:
+
+     uv run --with fastapi --with uvicorn spur-server.py
+
+2. In this repo:
+
+     npm install
+     cp .env.example .env
+     npm run dev
+
+Do not keep a second copy of spur-server.py here.

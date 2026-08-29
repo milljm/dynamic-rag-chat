@@ -3,20 +3,20 @@
 **A terminal-first, orchestrated, context-aware chat system powered by LLMs, RAG, and a tagging pre-processor.**
 Built for long-running story work and a capable local assistant — with memory that actually persists.
 
-Also ships two GUIs for the same backend: **Streamlit** (`streamlit_chat.py`) and **[Spur](https://github.com/milljm/spur)**. Spur is the prettier one — a React view that talks to `spur-server.py`, a small FastAPI adapter around `chat.py`.
+Also ships two GUIs for the same backend: **Streamlit** (`streamlit_chat.py`) and **Spur** (`./chat.py --spur`). Spur is the prettier one — a React view in `spur/` talking to `spur-server.py`.
 
 ```bash
 # Terminal
 ./chat.py --assistant-mode
 ./chat.py                       # story mode
 
+# Spur (browser) — one command, same flags
+./chat.py --spur
+./chat.py --spur --assistant-mode
+
 # Streamlit (same flags after --)
 streamlit run streamlit_chat.py -- --assistant-mode
 streamlit run streamlit_chat.py
-
-# Spur — adapter in this repo, UI in milljm/spur
-uv run --with fastapi --with uvicorn spur-server.py
-# then: VITE_CHAT_API=http://127.0.0.1:8765 npm run dev
 ```
 
 ---
@@ -41,7 +41,7 @@ That is the whole product: targeted context, not a bigger window.
 
 - **Terminal UI** — `prompt_toolkit` + `rich` (Markdown in the terminal, optional `--light-mode`)
 - **Streamlit UI** — branch cards, mode toggle, attachments, slash commands, reasoning panel (same `Chat` / `RenderWindow` stack)
-- **Spur UI** — React front-end ([milljm/spur](https://github.com/milljm/spur)). Same stack via `spur-server.py`; just nicer to look at.
+- **Spur UI** — React front-end in `spur/`. `./chat.py --spur` starts the adapter and Vite; just nicer to look at.
 - **Streaming** — token-level generation; Spur shows `Processing Prompt…` / `Streaming…` with `[model] [route] [12.4k]`
 - **Persistent history** — JSON on disk (`vector_dir/chat_history.json`, atomic write + `.bak`). Role/content per branch, including reasoning blocks.
 - **Branches** — fork / switch / delete; RAG collections clone with the fork (`\branch`, `\dbranch`, or the Streamlit / Spur cards)
@@ -165,13 +165,16 @@ You do not need seven models running. Three is enough; the rest are sockets you 
 
 The terminal is the source of truth. Two optional fronts wrap it.
 
-**Streamlit** (`streamlit_chat.py`) is the original GUI. Same flags as `chat.py` after `--`. Fine if you already live in Python.
+**Spur** (`./chat.py --spur`) is the React UI in `spur/`. That flag starts `spur-server.py` on `:8765` and Vite on `:8080`, then opens a browser. Same CLI flags as the terminal (`--assistant-mode`, model hosts, …). The UI never imports LangChain; the adapter owns session, JSON history, RAG, Documents, agent tools, and SSE (reasoning vs visible, `Recalling Document…`). OpenAPI: `http://127.0.0.1:8765/docs`.
 
-**Spur** is a React UI that never imports LangChain. `spur-server.py` sits next to `chat.py` and exposes the same session: branches, JSON history (`chat_history.json`, migrated from pickle on first load), RAG, Documents cabinet, agent tools, SSE tokens (including reasoning vs visible, and `Recalling Document…` when the model asks for a file). The UI is only a view — that is why the adapter lives in *this* repo, not in [milljm/spur](https://github.com/milljm/spur). Point Spur at it with `VITE_CHAT_API=http://127.0.0.1:8765`. OpenAPI is at `http://127.0.0.1:8765/docs`.
+Split-dev (optional): `python spur-server.py` in one terminal, `VITE_CHAT_API=http://127.0.0.1:8765 npm run dev` in `spur/`.
+
+**Streamlit** (`streamlit_chat.py`) is the original GUI. Same flags as `chat.py` after `--`. Fine if you already live in Python.
 
 Spur’s sidebar is **Documents** (permanent cabinet) and **Downloadable Files** (named code fences still in history). Paperclip lives on the composer. Status line: `Processing Prompt…` / `Streaming…` with `[model] [route] [12.4k]`.
 
 Streamlit still works. Spur is just prettier.
+
 
 ## Getting started
 
@@ -185,6 +188,9 @@ conda activate dynamic-rag
 git clone https://github.com/milljm/dynamic-rag-chat.git
 cd dynamic-rag-chat
 uv pip install -r requirements.txt
+# first Spur run also needs Node (conda recipe already has nodejs)
+# cd spur && npm install   # ./chat.py --spur does this if missing
+
 ```
 
 Python 3.10+ (3.13 is what the conda line above uses). This tree now tracks **LangChain 1.x** ([issue #23](https://github.com/milljm/dynamic-rag-chat/issues/23)). Retrievers / `AgentExecutor` live in `langchain-classic`; prompts, messages, and tools in `langchain-core`.
