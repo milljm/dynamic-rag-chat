@@ -652,9 +652,9 @@ class ContextManager(PromptManager):
                     highlight=False,
                 )
             storage = []
-            storage.extend(self.handle_topics(meta_tags, query, name, self.mode))
-            if not storage:
-                storage.extend(self.rag.retrieve(query, name))
+            storage.extend(self._retrieve_collection(
+                meta_tags, query, name, collection,
+            ))
             pages = [doc.page_content for doc in storage]
             pre_tokens += sum(self.token_retriever(page) for page in pages)
             documents[collection] = self.deduplication(
@@ -667,6 +667,25 @@ class ContextManager(PromptManager):
                 documents[collection],
             )
         return pre_tokens, post_tokens
+
+    def _retrieve_collection(self, meta_tags, query: str, name: str,
+                             collection: str) -> list:
+        """Gold: whole file on filename mention, then topic/similarity as usual."""
+        storage = []
+        named = []
+        if collection == 'gold_documents':
+            named = self.rag.retrieve_named_files(query, name)
+            storage.extend(named)
+        extra = self.handle_topics(meta_tags, query, name, self.mode)
+        if named:
+            blob = '\n'.join(doc.page_content for doc in named)
+            extra = [doc for doc in extra if doc.page_content not in blob]
+            storage.extend(extra)
+        else:
+            storage.extend(extra)
+            if not storage:
+                storage.extend(self.rag.retrieve(query, name))
+        return storage
 
     @staticmethod
     def _stringify_chat_history(documents: dict) -> None:
@@ -723,6 +742,7 @@ class ContextManager(PromptManager):
             tags.append(RAGTag('source', f'attachment:{name}'))
             tags.append(RAGTag('filename', name.lower()))
             self.rag.store_data(body, tags_metadata=tags, collection=gold, quiet=True)
+            self.rag.store_full_file(gold, name, body)
 
     def _attachment_note(self, names: list[str]) -> str:
         """Tell the plot prompt these files are already in hand."""
