@@ -69,8 +69,8 @@ Allowed values (choose exactly one):
 - casual → greetings, anything light weight and simple
 - coding → programming files, debugging, writing code, stack traces, refactoring, programming questions, programming languages
 - structured → file analysis, engineering, system design, deep arguments, architectural thinking, general analysis
-- vision → image attachments
 
+Never output assistant_mode vision. The system routes the vision model only when pixels are actually attached this turn (see HAS_IMAGE if present).
 Never output multiple assistant_mode values
 assistant_mode must be exactly one of the allowed strings
 
@@ -110,10 +110,12 @@ CRITICAL: If user is asking about files they are attaching, simply answer "routi
  - Stock prices, weather for a date/location, current events → ≤ 0.2
  - "latest", "[recent year]", "as of" present in query → ≤ 0.4
  - Not 100% sure about answer → ≤ 0.5
- - SPECIAL: Any mention of attachments → override your score and set to 1.0 and set `assistant_mode` appropriately (best guess based on INPUT_TEXT):
-  - Images go to 'vision'
-  - Programming files go to 'coding'
-  - All other files go to 'structured'
+ - SPECIAL: Any mention of attachments → override answer_confidence to 1.0.
+   Classify the *task* (not the file type as vision):
+  - Source / code files → coding
+  - Other documents → structured
+  - Chit-chat about a file already in context → general or casual
+  - Never vision. Talking about an image without pixels is structured.
 
 # JSON SCHEMA
 {

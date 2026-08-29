@@ -286,11 +286,11 @@ class Chat():
             extra = ' RAGs disabled (--no-rags).' if o_opts.no_rags else ''
             console.print(f'[italic dim grey30]Assistant mode enabled.{extra}[/]')
 
-    def prepare_turn(self, raw_user_input: str):
+    def prepare_turn(self, raw_user_input: str, extras: dict | None = None):
         """
         Returns everything Streamlit needs for one turn.
         """
-        documents, meta_data = self.get_documents(raw_user_input)
+        documents, meta_data = self.get_documents(raw_user_input, extras)
         return documents, meta_data
 
     def _branch_exists(self, history, name):
@@ -346,7 +346,7 @@ class Chat():
                     return f.read()
         return ''
 
-    def get_documents(self, user_input)->tuple[dict,list]:
+    def get_documents(self, user_input, extras: dict | None = None)->tuple[dict,list]:
         """
         Populate documents, the object which is fed to prompt formaters, and
         ultimately is what makes up the context for the LLM
@@ -384,6 +384,8 @@ class Chat():
              'qwen_prompts'       : self.qwen_prompt(),
              }
             )
+        if extras:
+            documents.update(extras)
 
         (documents,
          pre_t,

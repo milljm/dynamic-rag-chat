@@ -739,6 +739,7 @@ def _prepare_chat_documents(chat, body: dict) -> tuple[dict, list]:
     else:
         documents, meta = chat.prepare_turn(
             parsed.args or parsed.clean_text or prompt,
+            extras={'has_images': bool(body.get('images'))},
         )
         documents = apply_includes(chat, documents, prompt)
     documents = fold_uploads(
