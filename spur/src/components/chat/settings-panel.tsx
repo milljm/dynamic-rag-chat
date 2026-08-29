@@ -14,6 +14,9 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
+const fieldClass =
+  "flex h-10 w-full rounded-sm bg-secondary px-3 text-sm text-foreground shadow-[var(--shadow-border)] transition-[box-shadow] duration-150 placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70 disabled:cursor-not-allowed disabled:opacity-50";
+
 function Field({
   label,
   hint,
@@ -33,6 +36,52 @@ function Field({
         <span className="text-[11px] text-muted-foreground">{hint}</span>
       ) : null}
     </label>
+  );
+}
+
+function ModelSelect({
+  value,
+  onChange,
+  models,
+  emptyLabel,
+  required,
+}: {
+  value: string;
+  onChange: (next: string) => void;
+  models: string[];
+  emptyLabel?: string;
+  required?: boolean;
+}) {
+  if (models.length === 0) {
+    return (
+      <Input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={emptyLabel}
+        spellCheck={false}
+      />
+    );
+  }
+  const options = [...models];
+  if (value && !options.includes(value)) options.unshift(value);
+  return (
+    <select
+      className={cn(fieldClass, "appearance-auto")}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+    >
+      {emptyLabel ? <option value="">{emptyLabel}</option> : null}
+      {required && !value ? (
+        <option value="" disabled>
+          Select a model…
+        </option>
+      ) : null}
+      {options.map((name) => (
+        <option key={name} value={name}>
+          {name}
+        </option>
+      ))}
+    </select>
   );
 }
 
@@ -91,7 +140,6 @@ function SettingsPanel({
         const payload = await fetchSettings();
         if (cancelled) return;
         const merged = { ...payload.effective, ...payload.values };
-        // Core fields: yaml, then whatever is running. Routes stay yaml-empty = inherit.
         merged.llm_server = payload.values.llm_server || payload.effective.llm_server;
         merged.api_key = payload.values.api_key || payload.effective.api_key || "none";
         merged.model = payload.values.model || payload.effective.model;
@@ -103,7 +151,7 @@ function SettingsPanel({
         if (merged.llm_server) {
           const ping = await pingSettings(merged.llm_server, merged.api_key);
           if (!cancelled && ping.ok) {
-            setModels(ping.models);
+            setModels([...new Set(ping.models)].sort((a, b) => a.localeCompare(b)));
             setPingNote(`${ping.models.length} models`);
           } else if (!cancelled) {
             setPingNote(ping.error || "unreachable");
@@ -118,18 +166,22 @@ function SettingsPanel({
     };
   }, []);
 
-  async function onPing() {
-    if (!values) return;
+  async function onPing(
+    host = values?.llm_server,
+    key = values?.api_key,
+    noisy = true,
+  ) {
+    if (!host) return;
     setPinging(true);
     try {
-      const ping = await pingSettings(values.llm_server, values.api_key);
+      const ping = await pingSettings(host, key || "none");
       if (ping.ok) {
-        setModels(ping.models);
+        setModels([...new Set(ping.models)].sort((a, b) => a.localeCompare(b)));
         setPingNote(`${ping.models.length} models`);
-        toast.success(`Reachable — ${ping.models.length} models`);
+        if (noisy) toast.success(`Reachable — ${ping.models.length} models`);
       } else {
         setPingNote(ping.error || "unreachable");
-        toast.error(ping.error || "Server did not answer");
+        if (noisy) toast.error(ping.error || "Server did not answer");
       }
     } finally {
       setPinging(false);
@@ -159,8 +211,6 @@ function SettingsPanel({
       setSaving(false);
     }
   }
-
-  const listId = "spur-model-list";
 
   return (
     <div className="fixed inset-0 z-[60] flex justify-end">
@@ -203,6 +253,9 @@ function SettingsPanel({
                   <Input
                     value={values.llm_server}
                     onChange={(e) => patch("llm_server", e.target.value)}
+                    onBlur={(e) => {
+                      if (e.target.value) void onPing(e.target.value, values.api_key, false);
+                    }}
                     placeholder="http://127.0.0.1:1234/v1"
                     autoComplete="off"
                     spellCheck={false}
@@ -237,27 +290,27 @@ function SettingsPanel({
                   Required models
                 </h3>
                 <Field label="Generator">
-                  <Input
-                    list={listId}
+                  <ModelSelect
+                    required
                     value={values.model}
-                    onChange={(e) => patch("model", e.target.value)}
-                    spellCheck={false}
+                    onChange={(v) => patch("model", v)}
+                    models={models}
                   />
                 </Field>
                 <Field label="Pre-conditioner">
-                  <Input
-                    list={listId}
+                  <ModelSelect
+                    required
                     value={values.pre_llm}
-                    onChange={(e) => patch("pre_llm", e.target.value)}
-                    spellCheck={false}
+                    onChange={(v) => patch("pre_llm", v)}
+                    models={models}
                   />
                 </Field>
                 <Field label="Embeddings">
-                  <Input
-                    list={listId}
+                  <ModelSelect
+                    required
                     value={values.embedding_llm}
-                    onChange={(e) => patch("embedding_llm", e.target.value)}
-                    spellCheck={false}
+                    onChange={(v) => patch("embedding_llm", v)}
+                    models={models}
                   />
                 </Field>
               </section>
@@ -268,7 +321,7 @@ function SettingsPanel({
                 </summary>
                 <p className="mt-2 text-[11px] text-muted-foreground">
                   Blank inherits the generator. Vision and agent stay unset unless
-                  you name them.
+                  you pick one.
                 </p>
                 <div className="mt-3 grid gap-4">
                   {ROUTE_ROWS.map((row) => (
@@ -276,18 +329,17 @@ function SettingsPanel({
                       <span className="text-[11px] font-medium text-foreground">
                         {row.label}
                       </span>
-                      <Input
-                        list={listId}
+                      <ModelSelect
                         value={values[row.llm]}
-                        onChange={(e) => patch(row.llm, e.target.value)}
-                        placeholder={
+                        onChange={(v) => patch(row.llm, v)}
+                        models={models}
+                        emptyLabel={
                           row.id === "vision" || row.id === "agent"
                             ? "unset"
                             : effective?.model
                               ? `inherits ${effective.model}`
                               : "inherits generator"
                         }
-                        spellCheck={false}
                       />
                       <Input
                         value={values[row.server]}
@@ -299,11 +351,6 @@ function SettingsPanel({
                   ))}
                 </div>
               </details>
-              <datalist id={listId}>
-                {models.map((name) => (
-                  <option key={name} value={name} />
-                ))}
-              </datalist>
             </div>
           )}
         </div>
