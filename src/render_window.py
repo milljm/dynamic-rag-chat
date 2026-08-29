@@ -594,7 +594,35 @@ class RenderWindow(PromptManager):
         if self.orchestrator.requires_agent(meta_data, documents):
             return self._invoke_web_agent(documents, polish, meta_data)
         self.common.write_debug(f'live_stream-{self.llm.model_name}', messages)
+        documents['prompt_tokens'] = self.packed_prompt_tokens(messages)
         return messages
+
+    def packed_prompt_tokens(self, messages) -> int:
+        """Word-count estimate of the packed prompt the LLM will actually see."""
+        total = 0
+        retriever = self.state.context.token_retriever
+        for message in messages or []:
+            total += self._content_tokens(getattr(message, 'content', ''), retriever)
+        return total
+
+    @staticmethod
+    def _content_tokens(content, retriever) -> int:
+        """Count text parts; skip image_url blocks (base64 is not context)."""
+        if content is None:
+            return 0
+        if isinstance(content, str):
+            return retriever(content)
+        if isinstance(content, list):
+            n = 0
+            for part in content:
+                if isinstance(part, dict):
+                    if part.get('type') == 'image_url':
+                        continue
+                    n += retriever(str(part.get('text') or ''))
+                elif part is not None:
+                    n += retriever(str(part))
+            return n
+        return retriever(str(content))
 
     # Stream response as chunks
     def stream_response(self, messages: Document)->object:
@@ -790,9 +818,7 @@ class RenderWindow(PromptManager):
         messages = self.get_messages(meta_data, documents)
         self.llm = self.orchestrator.route(meta_data, documents)
         pre_process_time += time.time() - start_time
-        token_total = documents['prompt_tokens']
-        for message in messages:
-            token_total += self.state.context.token_retriever(message.content)
+        token_total = documents.get('prompt_tokens') or self.packed_prompt_tokens(messages)
         branch = 'assistant' if self.opts.assistant_mode else history.get(
             'current', 'story',
         )
