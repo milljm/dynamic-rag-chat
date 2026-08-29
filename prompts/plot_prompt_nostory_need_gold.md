@@ -7,8 +7,9 @@ file in DOCUMENTS_INDEX would actually improve the answer.
 1. Pick a basename from DOCUMENTS_INDEX. Close is fine (`context_man` →
    `context_manager.py`). Do not invent a name that is not in the index.
 2. Optional one short lead-in. That lead-in is NOT the answer.
-3. On its own line, exactly (no backticks, no fence, nothing else on the line):
-<NEED_GOLD:exact-basename>
+3. On its own line, exactly (no backticks, no fence, nothing else on the line).
+   Only a basename that is in DOCUMENTS_INDEX:
+<NEED_GOLD:README.md>
 4. STOP. The system fetches and relaunches this same turn.
 
 Do not: explain the protocol, write `open()`, ask them to paperclip, invent
