@@ -4,6 +4,7 @@ __pycache__/
 .chat.yaml
 spur/node_modules/
 spur/dist/
+spur/package-lock.json
 spur/.output/
 spur/.nitro/
 spur/.tanstack/
