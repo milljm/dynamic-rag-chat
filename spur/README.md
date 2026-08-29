@@ -4,6 +4,11 @@ Browser UI for [dynamic-rag-chat](https://github.com/milljm/dynamic-rag-chat). T
 
 ![Spur](docs/screenshot.png)
 
+Light mode. Code fences have a Pygments theme dropdown (sticky; auto is fruity / stata-light).
+
+![Spur light](docs/screenshot-light.jpg)
+
+
 ## Run
 
 From the repo root (not this folder):
