@@ -569,10 +569,27 @@ class RenderWindow(PromptManager):
         if self.state.disable_thinking and not polish:
             documents['user_query'] = f'{documents["user_query"]} </think> </think> '
 
+        if hasattr(self.state, 'context'):
+            self.state.context.fill_documents_index(documents)
+        documents.setdefault('documents_index', '')
+        documents.setdefault('has_documents_index', False)
+        documents.setdefault('gold_resume', '')
+        documents.setdefault('attached_files_note', '')
+        documents.setdefault('dynamic_files', '')
+        documents.setdefault('include_branch', '')
+        documents.setdefault('gold_documents', '')
+        documents.setdefault('user_documents', '')
+        documents.setdefault('ai_documents', '')
+        documents.setdefault('chat_history', '')
+        documents.setdefault('agent_error', '<AGENT_ERROR: FALSE>')
+        documents['has_agent_error'] = 'TRUE' in str(documents.get('agent_error') or '')
+
         # pylint: disable=no-member # dynamic prompts (see self.__build_prompts)
         if polish:
             system_prompt = prompts.get_prompt(f'{prompts.polish_prompt_file}_system.md')
             human_prompt = prompts.get_prompt(f'{prompts.polish_prompt_file}_human.md')
+        elif self.opts.assistant_mode:
+            system_prompt, human_prompt = prompts.compose_nostory_plot(documents)
         else:
             system_prompt = prompts.get_prompt(f'{prompts.plot_prompt_file}_system.md')
             human_prompt = prompts.get_prompt(f'{prompts.plot_prompt_file}_human.md')
@@ -605,15 +622,11 @@ class RenderWindow(PromptManager):
 
         # Format text messages from template
         images = documents.pop('dynamic_images', [])
-        if hasattr(self.state, 'context'):
-            self.state.context.fill_documents_index(documents)
-        documents.setdefault('documents_index', '')
         formatted_messages = prompt_template.format_messages(**documents)
         # Optional: inject images into HumanMessage if present
         messages = self.add_image_block(formatted_messages, images)
         documents['dynamic_images'] = images
 
-        # pylint: enable=no-member
         if self.debug:
             self.console.print(f'HEAVY LLM PROMPT (llm.stream()):\n{formatted_messages}\n\n',
                           style=f'color({self.state.color})',

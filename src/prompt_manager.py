@@ -60,3 +60,17 @@ class PromptManager():
             return self.get_prompt(default_path)
         print(f'Prompt not found! I expected to find it at:\n\n\t{path}')
         sys.exit(1)
+
+    def compose_nostory_plot(self, documents: dict) -> tuple[str, str]:
+        """Spine + event fragments. Resume turns do not see the NEED_GOLD cookbook."""
+        spine = self.get_prompt(f'{self.plot_prompt_file}_system.md')
+        human = self.get_prompt(f'{self.plot_prompt_file}_human.md')
+        resume = bool(str(documents.get('gold_resume') or '').strip())
+        has_index = bool(documents.get('has_documents_index'))
+        parts: list[str] = []
+        if resume:
+            parts.append(self.get_prompt(f'{self.plot_prompt_file}_resume.md'))
+        parts.append(spine)
+        if has_index and not resume:
+            parts.append(self.get_prompt(f'{self.plot_prompt_file}_need_gold.md'))
+        return '\n'.join(parts), human

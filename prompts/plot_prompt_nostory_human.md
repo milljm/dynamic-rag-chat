@@ -1,34 +1,52 @@
-{{agent_error}}
+{% if has_agent_error %}
+<AGENT_ERROR: TRUE>
+The agent failed. You must say so and you may not answer the user's question.
+Apologize; a retry usually fixes a search glitch. Mention why if it helps.
+</AGENT_ERROR: TRUE>
+{% endif %}
 <SYSTEM_TIME: {{date_time}}>
 <TURN_NUMBER: {{turn_num}}>
 <LLM_MODEL: You are an AI from model: {{model_name}}>
 <VISION_CAPABLE: {{vision_capable}}>
-<THIS_TURN_ATTACHMENTS - THE USER JUST PAPERCLIPPED THESE. FULL TEXT. EPHEMERAL THIS TURN; THEY BECOME DOCUMENTS AFTER>
+{% if attached_files_note or dynamic_files %}
+<THIS_TURN_ATTACHMENTS - PAPERCLIP THIS TURN. FULL TEXT. DO NOT NEED_GOLD THESE>
 {{attached_files_note}}
-  <FILES - FULL TEXT OF THIS-TURN ATTACHES, OR AGENT WEB SEARCH>
+  <FILES>
 {{dynamic_files}}
   </FILES>
 </THIS_TURN_ATTACHMENTS>
-<BRANCH_SNAPSHOT - CONTENT FROM ANOTHER CHAT_HISTORY USER WANTS SCRUTINIZED>
+{% endif %}
+{% if include_branch %}
+<BRANCH_SNAPSHOT>
 {{include_branch}}
 </BRANCH_SNAPSHOT>
-<DOCUMENTS_INDEX - BASENAMES YOU MAY NEED_GOLD. PICK ONE OF THESE>
+{% endif %}
+{% if has_documents_index %}
+<DOCUMENTS_INDEX - BASENAMES YOU MAY NEED_GOLD>
 {{documents_index}}
 </DOCUMENTS_INDEX>
-<DOCUMENTS - PERMANENT CABINET OF PAST ATTACHMENTS AND CANON. SNIPPETS; NEED_GOLD FOR THE WHOLE FILE>
+{% endif %}
+{% if gold_documents %}
+<DOCUMENTS - CABINET SNIPPETS. NEED_GOLD FOR THE WHOLE FILE>
 {{gold_documents}}
 </DOCUMENTS>
-<USER_RAG - RELEVANT OUT-OF-ORDER DYNAMIC CHUNKS FROM PAST USER TURNS, USE AS FACTS>
+{% endif %}
+{% if user_documents %}
+<USER_RAG - OUT-OF-ORDER CHUNKS FROM PAST USER TURNS>
 {{user_documents}}
 </USER_RAG>
-<AI_RAG - RELEVANT OUT-OF-ORDER DYNAMIC CHUNKS FROM PAST AI TURNS, USE AS FACTS>
+{% endif %}
+{% if ai_documents %}
+<AI_RAG - OUT-OF-ORDER CHUNKS FROM PAST AI TURNS>
 {{ai_documents}}
 </AI_RAG>
-<GOLD_RESUME - UNFINISHED. THE USER ALREADY SAW THIS. DO NOT REPEAT IT.
- THE FILE IS IN FILES (GOLD_FETCH). NOW ANSWER THE USER USING THAT FILE.>
+{% endif %}
+{% if gold_resume %}
+<GOLD_RESUME - THE USER ALREADY SAW THIS. DO NOT REPEAT IT. THE FILE IS IN FILES (GOLD_FETCH). ANSWER NOW.>
 {{gold_resume}}
 </GOLD_RESUME>
-<CHAT_HISTORY - EPHEMERAL. USE FOR CONVERSATION FLOW AND TONE. SUPERSEDES AI_RAG FOR FACTS>
+{% endif %}
+<CHAT_HISTORY - FLOW AND TONE. SUPERSEDES AI_RAG FOR FACTS>
 {{chat_history}}
 </CHAT_HISTORY>
 <USER_INPUT>

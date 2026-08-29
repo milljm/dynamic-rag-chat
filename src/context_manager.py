@@ -677,8 +677,9 @@ class ContextManager(PromptManager):
 
     def fill_documents_index(self, documents: dict) -> None:
         """Basenames the model may NEED_GOLD. Empty in story mode."""
+        documents['has_documents_index'] = False
+        documents['documents_index'] = ''
         if not self.opts.assistant_mode:
-            documents['documents_index'] = '(story mode — no Documents cabinet)'
             return
         names = [
             str(row.get('name') or '').strip()
@@ -686,10 +687,8 @@ class ContextManager(PromptManager):
         ]
         names = [n for n in names if n]
         if not names:
-            documents['documents_index'] = (
-                '(empty — nothing in the Documents cabinet)'
-            )
             return
+        documents['has_documents_index'] = True
         documents['documents_index'] = '\n'.join(f'- {n}' for n in names)
 
     def delete_gold_file(self, filename: str) -> bool:

@@ -16,3 +16,11 @@ The naming convention happens thusly:
 - pre_conditioner_prompt_LLM-NAME_system.md
 - pre_conditioner_prompt_LLM-NAME_system.md
     - both are not used as of yet.
+
+Assistant (`nostory`) plot prompts are composed per turn:
+
+- `plot_prompt_nostory_system.md` — always (identity, buckets, output)
+- `plot_prompt_nostory_need_gold.md` — only when DOCUMENTS_INDEX is non-empty and this is *not* a GOLD_RESUME relaunch
+- `plot_prompt_nostory_resume.md` — prepended on a NEED_GOLD relaunch (cookbook is omitted so the model does not copy the example tag)
+- `plot_prompt_nostory_human.md` — Jinja drops empty THIS_TURN / INDEX / GOLD_RESUME / RAG blocks
+
