@@ -24,3 +24,4 @@ cloudscraper
 streamlit
 nodejs
 fastapi
+uvicorn

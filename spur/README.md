@@ -1,0 +1,43 @@
+# Spur
+
+Browser UI for [dynamic-rag-chat](https://github.com/milljm/dynamic-rag-chat). This folder is the view; `../spur-server.py` is the HTTP contract.
+
+![Spur](docs/screenshot.png)
+
+## Run
+
+From the repo root (not this folder):
+
+```bash
+./chat.py --spur
+./chat.py --spur --assistant-mode
+```
+
+That starts the adapter on `:8765` and Vite on `:8080`. `Ctrl-C` stops both.
+
+Split-dev:
+
+```bash
+python spur-server.py
+# other terminal:
+cd spur
+cp .env.example .env   # VITE_CHAT_API=http://127.0.0.1:8765
+npm install
+npm run dev
+```
+
+Without `VITE_CHAT_API`, the UI is demo mode and never talks to your history. `./chat.py --spur` always sets it.
+
+## What you see
+
+- **Mode / Branches / History / Slash** — the same rules as `chat.py` (`story` and `assistant` are protected).
+- **Composer paperclip** — attach files *this turn*. After the turn they become Documents (assistant mode).
+- **Documents** — whole files in `vector_dir/attachments/`. Mention a name to load it; the model can emit `<NEED_GOLD:file>` and Spur shows `Recalling Document…`.
+- **Downloadable Files** — named code fences on assistant messages still in this branch.
+- **Status** — `Working — RAG / agent / prompt…` → `Processing Prompt… [model] [route] [12.4k]` → `Streaming…`.
+
+SSE events from the adapter: `status`, `token`, `reasoning`, `documents`, `usage`, `done`.
+
+## What Spur does not own
+
+History, RAG, the Documents cabinet, branch lock rules, agent tools, and `save_history` stay in `chat.py`. Edit the adapter next to `chat.py`, not here.

@@ -1,0 +1,16 @@
+node_modules/
+dist/
+.env
+.env.local
+.env.*
+!.env.example
+.vercel/
+.grok/
+attachments/
+screenshots/
+AGENTS.md
+*.pickle
+.DS_Store
+.project_id
+.github_repo
+.node_modules.lock

@@ -2,3 +2,10 @@ vector_data/
 testing_output.txt
 __pycache__/
 .chat.yaml
+spur/node_modules/
+spur/dist/
+spur/.output/
+spur/.nitro/
+spur/.tanstack/
+spur/.env
+spur/.grok/
