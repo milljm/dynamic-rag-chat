@@ -20,6 +20,7 @@ from .chat_utils import CommonUtils, ChatOptions
 from .prompt_manager import PromptManager
 from .filter_builder import FilterBuilder
 from .scene_manager import SceneManager
+from .gold_fetch import MAX_GOLD_FETCHES
 
 class ContextManager(PromptManager):
     """ A collection of methods aimed at producing/reducing the context """
@@ -618,8 +619,48 @@ class ContextManager(PromptManager):
                 f'{documents["content_type"]}',
             )
 
-    def _collection_prefix(self, branch: str, collection: str) -> str:
-        """Chroma collection name prefix for this branch."""
+    def gold_collection_name(self, documents: dict) -> str:
+        """Chroma collection that holds gold for this turn."""
+        history = documents.get('history') or self.common.load_chat()
+        branch = self._active_branch(history)
+        prefix = self._collection_prefix(branch, 'gold_documents')
+        return f'{prefix}gold_documents'
+
+    def fetch_gold_file(self, documents: dict, filename: str) -> bool:
+        """Inject a whole gold file into this turn. Assistant mode only.
+
+        Returns True when the streamer should resume (found or not-found
+        notice). False when we are out of fetches / not assistant.
+        """
+        if not self.opts.assistant_mode or self.opts.no_rags:
+            return False
+        name = (filename or '').strip()
+        if not name:
+            return False
+        used = int(documents.get('gold_fetches', 0))
+        if used >= MAX_GOLD_FETCHES:
+            return False
+        documents['gold_fetches'] = used + 1
+        coll = self.gold_collection_name(documents)
+        found = self.rag.retrieve_named_files(name, coll)
+        blob = '\n\n'.join(
+            getattr(doc, 'page_content', '') for doc in found if doc is not None
+        )
+        documents.setdefault('dynamic_files', '')
+        documents.setdefault('gold_documents', '')
+        label = f'GOLD_FETCH ({used + 1}/{MAX_GOLD_FETCHES}): {name}'
+        if blob.strip():
+            documents['gold_documents'] = (
+                str(documents.get('gold_documents') or '') + '\n\n' + blob
+            )
+            documents['dynamic_files'] += f'\n=== {label} ===\n{blob}\n'
+        else:
+            documents['dynamic_files'] += (
+                f'\n=== {label} ===\n'
+                'Not in gold. Do not ask the user to attach it. '
+                'Say you do not have that file.\n'
+            )
+        return True
         if self.opts.assistant_mode:
             return 'assistant_'
         if collection == 'gold_documents':
