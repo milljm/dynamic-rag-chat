@@ -191,6 +191,14 @@ Python 3.10+ (3.13 is what the conda line above uses). This tree now tracks **La
 
 Chroma jumped with it (`chromadb` 0.6 → 1.x). Existing `vector_data/` written under 0.6 may not open. If retrieve errors after the upgrade, `\reset` the branch or re-import gold.
 
+### Tests
+
+```bash
+python test_harness.py
+```
+
+That runs every `src/*_test.py` as a top-level module (so `src/__init__.py` is not imported). You can still run one file with `python src/think_tags_test.py`.
+
 ### Ollama (local models)
 
 You need a generator, a small pre-conditioner, and an embedding model.
