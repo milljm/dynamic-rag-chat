@@ -320,8 +320,9 @@ function SettingsPanel({
                   Routes
                 </summary>
                 <p className="mt-2 text-[11px] text-muted-foreground">
-                  Blank inherits the generator. Vision and agent stay unset unless
-                  you pick one.
+                  Blank inherits the generator. Vision, agent, and polisher stay
+                  unset unless you pick one. Unset polisher skips the extra
+                  generation pass.
                 </p>
                 <div className="mt-3 grid gap-4">
                   {ROUTE_ROWS.map((row) => (
@@ -334,7 +335,9 @@ function SettingsPanel({
                         onChange={(v) => patch(row.llm, v)}
                         models={models}
                         emptyLabel={
-                          row.id === "vision" || row.id === "agent"
+                          row.id === "vision" ||
+                          row.id === "agent" ||
+                          row.id === "polisher"
                             ? "unset"
                             : effective?.model
                               ? `inherits ${effective.model}`
