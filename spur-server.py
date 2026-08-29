@@ -143,9 +143,15 @@ def _rebuild_chat_from_yaml() -> None:
         opts.verbose = bool(prev.opts.verbose)
         opts.debug = bool(prev.opts.debug)
         opts.no_rags = bool(prev.opts.no_rags)
-        opts.seed = prev.opts.seed
         opts.light_mode = bool(prev.opts.light_mode)
         opts.disable_thinking = bool(prev.opts.disable_thinking)
+        seed_src = prev.opts.seed
+    else:
+        seed_src = opts.seed
+    if isinstance(seed_src, int):
+        opts.seed = seed_src
+    else:
+        opts.seed = seed_from_string(str(seed_src or ''))
     session = SessionContext.from_args(console, opts)
     new_chat = Chat(session, opts)
     _sync_chat_object(new_chat)
