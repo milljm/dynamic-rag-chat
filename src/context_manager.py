@@ -49,7 +49,7 @@ class ContextManager(PromptManager):
         # still sees MiniMax / gpt-oss reasoning tokens. use_responses_api=False
         # keeps LM Studio / Ollama on Chat Completions.
         self.pre_llm = ChatOpenAI(base_url=args.pre_host,
-                                  model=args.preconditioner,
+                                  model=args.preconditioner or args.model,
                                   temperature=args.pre_temp,
                                   streaming=False,
                                   max_tokens=8096,
@@ -60,7 +60,7 @@ class ContextManager(PromptManager):
                                   use_responses_api=False)
 
         self.entity_llm = ChatOpenAI(base_url=args.entity_host,
-                                  model=args.entity_llm,
+                                  model=args.entity_llm or 'None',
                                   temperature=args.entity_temp,
                                   streaming=False,
                                   max_tokens=4096,

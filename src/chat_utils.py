@@ -330,6 +330,13 @@ class ChatOptions:
         if not key or key.lower() in {'none', 'null', 'not_set'}:
             object.__setattr__(self, 'api_key', 'none')
 
+        # Vision/agent/polisher/entity are opt-in. ChatOpenAI rejects model=None;
+        # the rest of the code treats the string 'None' as "not configured".
+        for field_name in ('polisher_llm', 'entity_llm', 'agent_llm', 'vision_llm'):
+            value = getattr(self, field_name)
+            if value is None or str(value).strip() == '':
+                object.__setattr__(self, field_name, 'None')
+
         # If the specialized host wasn't explicitly supplied,
         # inherit the main model server.
         host_fields = (

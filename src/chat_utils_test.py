@@ -59,6 +59,16 @@ class ChatOptionsYamlTest(unittest.TestCase):
         })
         self.assertEqual(opts.api_key, 'none')
 
+    def test_empty_vision_stays_sentinel(self):
+        opts = ChatOptions._build('.', {  # pylint: disable=protected-access
+            'vision_llm': None,
+            'agent_llm': '',
+            'model': 'minimax-m3',
+        })
+        self.assertEqual(opts.vision_llm, 'None')
+        self.assertEqual(opts.agent_llm, 'None')
+        self.assertEqual(opts.model, 'minimax-m3')
+
 
 if __name__ == '__main__':
     unittest.main()
