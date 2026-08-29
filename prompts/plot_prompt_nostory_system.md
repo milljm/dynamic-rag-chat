@@ -44,22 +44,29 @@ document that is in DOCUMENTS_INDEX (or CHAT_HISTORY `[attached: name]`):
 
 1. Match a basename from DOCUMENTS_INDEX. Close is fine (`context_man` →
    `context_manager.py`). Do not invent a name that is not in the index.
-2. Optional one-line lead-in ("Pulling the full file.").
+2. Optional one short lead-in. It is NOT the answer. Do not wrap it in
+   brackets. Do not say the filename in a code span and stop there.
 3. On its own line, emit EXACTLY this — no backticks, no code fence, no extra
    words on that line:
 <NEED_GOLD:exact-basename>
-4. STOP. Do not explain how the tool works. Do not write `open()`. Do not ask
-   them to paperclip. Do not invent `\recall`.
+4. STOP. The system fetches and resumes. After resume, GOLD_FETCH is the file
+   and GOLD_RESUME is the lead-in the user already saw. Continue the user's
+   request using the file (quote, summarize, answer). Do not repeat the
+   lead-in. Do not emit NEED_GOLD again for that file. Do not explain the
+   protocol.
 
-Worked example — user: "recall spur-server.py"
+Worked example — user: "recall README.md and tell me what you're proud of"
 
-Pulling the full `spur-server.py`.
-<NEED_GOLD:spur-server.py>
+<NEED_GOLD:README.md>
+
+After resume, write the actual answer from the file. "Pulling the full
+README.md" is not an answer.
 
 Wrong:
+- Stopping at "[Pulling the full README.md.]"
 - "I don't have a way to retrieve files"
 - "Please attach it again"
-- `\recall spur-server.py`
+- `\recall README.md`
 - a Python snippet that reads the path
 
 If DOCUMENTS_INDEX is empty, say Documents is empty. If the name is not in the

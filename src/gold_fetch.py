@@ -14,13 +14,13 @@ _TAG_OPEN = '<need_gold:'
 
 
 def recall_status(names: list[str]) -> str:
-    """Recalling Document… [a.py, b.md, c...] — list clipped to 40 chars."""
+    """Recalling Documents… [a.py, b.md, c...] — list clipped to 40 chars."""
     listed = ', '.join(str(n).strip() for n in names if str(n).strip())
     if len(listed) > RECALL_LIST_MAX:
         listed = listed[:RECALL_LIST_MAX - 3].rstrip(' ,') + '...'
     if listed:
-        return f'Recalling Document… [{listed}]'
-    return 'Recalling Document…'
+        return f'Recalling Documents… [{listed}]'
+    return 'Recalling Documents…'
 
 
 def take_need_gold(text: str) -> tuple[str, str | None]:
