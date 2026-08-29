@@ -111,7 +111,7 @@ export const Route = createFileRoute("/api/chat")({
                 if (llm.webSearch) {
                   sendLine(controller, {
                     type: "status",
-                    message: "Agent tool web search…",
+                    message: "Agent Web Search…",
                   });
                   const searched = await runAgentSearch(llm, lastUser);
                   if (searched.error) {

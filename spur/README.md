@@ -39,7 +39,7 @@ Without `VITE_CHAT_API`, the UI is demo mode and never talks to your history. `.
 - **Composer paperclip** — attach files *this turn*. After the turn they become Documents (assistant mode).
 - **Documents** — whole files in `vector_dir/attachments/`. Mention a name to load it; the model can emit `<NEED_GOLD:file>` and Spur shows `Recalling Document…`.
 - **Downloadable Files** — named code fences on assistant messages still in this branch.
-- **Status** — `Working — RAG / agent / prompt…` → `Processing Prompt… [model] [route] [12.4k]` → `Streaming…`.
+- **Status** — `RAG Processing…` → `Agent Web Search…` (when it searches) → `Processing Prompt… [model] [route] [12.4k]` → `Streaming…`.
 
 SSE events from the adapter: `status`, `token`, `reasoning`, `documents`, `usage`, `done`.
 

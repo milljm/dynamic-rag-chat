@@ -40,7 +40,7 @@ streamlit run streamlit_chat.py -- --assistant-mode
 - **Documents** — whole files in `vector_dir/attachments/`. Mention a name, or the model emits `<NEED_GOLD:file>` (even while thinking). Status: `Recalling Document… [README.md, …]`.
 - **Downloadable Files** — named code fences still in this branch’s history.
 - **Branches / History / Slash** — same rules as `chat.py`. `story` and `assistant` are protected.
-- **Status** — `Working — RAG / agent / prompt…` → `Processing Prompt… [model] [route] [12.4k]` → `Streaming…`. DUP / CTX live in the footer.
+- **Status** — `RAG Processing…` → `Agent Web Search…` (when it searches) → `Processing Prompt… [model] [route] [12.4k]` → `Streaming…`. DUP / CTX live in the footer.
 - **Reasoning** — think-block in a disclosure; the answer streams below.
 - **Light / dark / system** — sand paper vs ink. Code fences: per-block Pygments theme dropdown (sticky).
 - **Settings** — gear in the header. Server, the three required models, collapsed routes. Saves `.chat.yaml` and the next turn uses them.

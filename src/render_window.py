@@ -156,6 +156,7 @@ class RenderWindow(PromptManager):
         self.thinking_chunk = ''
         self.ooc_response = ''
         self.llm = None
+        self.status_hook = None
 
         # populate dataclasses, setup
         self._load_states(current_dir, context, args)
@@ -468,6 +469,12 @@ class RenderWindow(PromptManager):
             return None
         return self._parse_agent_followup(self._llm_text(resp))
 
+    def _status(self, message: str) -> None:
+        """Optional UI hook (Spur SSE). Terminal ignores it."""
+        hook = getattr(self, 'status_hook', None)
+        if callable(hook):
+            hook(message)
+
     def _invoke_web_agent(self, documents: dict, polish: bool, meta_data) -> list:
         """Run AgentExecutor once, then recurse so a follow-up search can happen."""
         if int(documents.get('agent_calls', 0)) >= MAX_AGENT_CALLS:
@@ -490,6 +497,7 @@ class RenderWindow(PromptManager):
             or documents['original_user_query']
         )
         label = f'({call_n}/{MAX_AGENT_CALLS})'
+        self._status('Agent Web Search…')
         try:
             self.console.print(
                 f'Agent Tool Web Search {label} (ctl-c to cancel)...',
@@ -498,11 +506,11 @@ class RenderWindow(PromptManager):
             )
             result = agent_executor.invoke({'input': agent_input})
             documents['dynamic_files'] += (
-                f'\n=== AGENT_TOOL_RESULT {label} ===\n{result}\n\n'
+                f'\n=== WEB_SEARCH {label} ===\n{result}\n\n'
             )
         except KeyboardInterrupt:
             documents['dynamic_files'] += (
-                '\n=== AGENT_TOOL_RESULT ===\nUSER CANCELED SEARCH\n\n'
+                '\n=== WEB_SEARCH ===\nUSER CANCELED SEARCH\n\n'
             )
             return self.get_messages(meta_data, documents, polish=polish)
         except Exception:  # pylint: disable=broad-exception-caught
@@ -512,11 +520,11 @@ class RenderWindow(PromptManager):
                 highlight=False,
             )
             documents['dynamic_files'] += (
-                '\n=== AGENT_TOOL_RESULT ===\n'
-                'ERROR: Tool execution failed.\n'
-                'INSTRUCTION: You must inform the user that the web/tool search failed '
-                'and that you cannot answer reliably without it. '
-                'Do NOT fabricate or guess.\n\n'
+                '\n=== WEB_SEARCH ===\n'
+                'ERROR: Lookup failed.\n'
+                'INSTRUCTION: Tell the user you could not fetch current information '
+                'and cannot answer reliably without it. Do NOT fabricate or guess. '
+                'Do not mention tools, agents, or pipelines.\n\n'
             )
             documents['agent_error'] = '<AGENT_ERROR: TRUE>'
             return self.get_messages(meta_data, documents, polish=polish)
@@ -542,6 +550,10 @@ class RenderWindow(PromptManager):
         prompts = self.prompts
         if polish:
             self.llm = self.orchestrator.get_model('polisher')
+        else:
+            # Re-route every pack. After a web search, agent_ran is True and
+            # this is the answerer (coder/general/…), not the tool model.
+            self.llm = self.orchestrator.route(meta_data, documents)
         if self.debug:
             self.console.print(f'Model Chosen: {self.llm.model_name}',
                           style=f'color({self.state.color})',
