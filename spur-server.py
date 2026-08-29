@@ -900,6 +900,7 @@ def _iter_sse_chunks(
         'model': model,
         'promptTokens': documents.get('prompt_tokens', 0),
         'completionTokens': tokens,
+        'tokenSavings': int(documents.get('token_savings') or 0),
         'ttft': ttft,
     }).encode()
 
@@ -964,7 +965,7 @@ async def api_chat(request: Request) -> StreamingResponse:
                         'tokenCount': stats.get('tokens', 0),
                         'generationTime': stats.get('gen', 0.0),
                         'promptTokens': documents.get('prompt_tokens', 0),
-                        'tokenSavings': 0,
+                        'tokenSavings': int(documents.get('token_savings') or 0),
                         'ttft': stats.get('ttft', 0.0),
                     },
                     attachments=body.get('attachments') or None,
