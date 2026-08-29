@@ -95,6 +95,23 @@ def sse(obj: dict[str, Any]) -> str:
     return f'data: {payload}\n\n'
 
 
+def _status_sse(
+    message: str, model: str = '', route: str = '', context: int = 0,
+    recalled: list[str] | None = None,
+) -> bytes:
+    """status event; attach recalled names so Spur can badge the turn."""
+    payload: dict[str, Any] = {
+        'type': 'status',
+        'message': message,
+        'model': model or '',
+        'route': route or '',
+        'context': context or 0,
+    }
+    if recalled:
+        payload['recalled'] = list(recalled)
+    return sse(payload).encode()
+
+
 def _history(chat: Chat) -> dict:
     hist = chat.session.common.load_chat()
     if isinstance(hist, dict):
@@ -799,13 +816,10 @@ def _iter_sse_chunks(
                 if first:
                     ttft = time.time() - started
                     first = False
-                    yield sse({
-                        'type': 'status',
-                        'message': 'Streaming…',
-                        'model': model or '',
-                        'route': route or '',
-                        'context': context or 0,
-                    }).encode()
+                    yield _status_sse(
+                        'Streaming…', model or '', route or '', context or 0,
+                        recalled,
+                    )
                 visible, thought = parser.feed_chunk(chunk)
                 if thought:
                     emit_t, hit_t = gold_feed.feed(thought)
@@ -851,23 +865,17 @@ def _iter_sse_chunks(
         fetches += 1
         recalled.append(fname)
         documents['gold_resume'] = answer
-        yield sse({
-            'type': 'status',
-            'message': recall_status(recalled),
-        }).encode()
+        yield _status_sse(recall_status(recalled), recalled=recalled)
         yield b':\n\n'
         packed = renderer.get_messages(meta, documents)
         model = getattr(renderer.llm, 'model_name', '') or model
         context = renderer.packed_prompt_tokens(packed)
         documents['prompt_tokens'] = context
         first = True
-        yield sse({
-            'type': 'status',
-            'message': 'Processing Prompt…',
-            'model': model or '',
-            'route': route or '',
-            'context': context or 0,
-        }).encode()
+        yield _status_sse(
+            'Processing Prompt…', model or '', route or '', context or 0,
+            recalled,
+        )
         yield b':\n\n'
 
     gen = time.time() - started
