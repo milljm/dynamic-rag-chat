@@ -509,8 +509,7 @@ function GeneratedFiles({
         ))}
       </ul>
       <p className="text-[10px] leading-relaxed text-muted-foreground/70">
-        Only files from the last {ARTIFACT_TTL} turns. The number is turns left
-        before it drops off.
+        Files available for download from the last {ARTIFACT_TTL} turns.
       </p>
     </div>
   );
