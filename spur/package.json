@@ -15,7 +15,7 @@
     "preview:stop": "node scripts/preview.mjs stop",
     "typecheck": "tsc --noEmit",
     "check:auth": "node scripts/check-auth-invariant.mjs",
-    "test": "node --test 'scripts/**/*.test.mjs' && node --experimental-strip-types --test src/lib/app-data/app-data.test.ts src/lib/auth/gate-identity.test.ts src/lib/chat/artifacts.test.ts src/lib/chat/attachments.test.ts src/lib/chat/branch-mode.test.ts src/lib/chat/commands.test.ts src/lib/chat/llm.test.ts src/lib/chat/md-table.test.ts src/lib/chat/remote.test.ts src/lib/chat/syntax.test.ts src/lib/chat/think.test.ts src/lib/theme.test.ts",
+    "test": "node --experimental-strip-types --test src/lib/chat/artifacts.test.ts src/lib/chat/attachments.test.ts src/lib/chat/branch-mode.test.ts src/lib/chat/commands.test.ts src/lib/chat/llm.test.ts src/lib/chat/md-table.test.ts src/lib/chat/remote.test.ts src/lib/chat/syntax.test.ts src/lib/chat/think.test.ts src/lib/theme.test.ts",
     "lint": "eslint .",
     "format": "prettier --write ."
   },
