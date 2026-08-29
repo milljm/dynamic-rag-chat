@@ -76,13 +76,21 @@ class PromptManager():
         return '\n'.join(parts), human
 
     def compose_nostory_tag(self, documents: dict) -> str:
-        """Tagging human prompt. HAS_IMAGE fragment only when pixels exist."""
+        """Tagging human prompt. Attach fragments only when files/pixels exist."""
         human = self.get_prompt(f'{self.tag_prompt_file}_human.md')
         has_images = bool(
             documents.get('has_images') or documents.get('dynamic_images')
         )
+        has_files = bool(
+            documents.get('has_files')
+            or documents.get('attached_files_note')
+            or documents.get('attachment_texts')
+        )
+        extra = ''
         if has_images:
-            piece = f'{self.tag_prompt_file}_images.md'
-            if os.path.exists(piece):
-                human = human.rstrip() + '\n' + self.get_prompt(piece)
+            extra = f'{self.tag_prompt_file}_images.md'
+        elif has_files:
+            extra = f'{self.tag_prompt_file}_files.md'
+        if extra and os.path.exists(extra):
+            human = human.rstrip() + '\n' + self.get_prompt(extra)
         return human

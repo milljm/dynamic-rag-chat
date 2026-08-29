@@ -1,8 +1,17 @@
 """ Model Orchestration """
+import re
 from langchain_openai import ChatOpenAI
 from .chat_utils import ChatOptions, RAGTag # For Type Hinting
 
 MAX_AGENT_CALLS = 2
+# Tagger often scores these 1.0 anyway; force a search when the query is live.
+_LIVE_QUERY = re.compile(
+    r'(?ix)'
+    r'(stock\s+price|share\s+price|ticker\b|price\s+of\b'
+    r'|weather\b|current\s+events?'
+    r'|right\s+now|as\s+of\b|just\s+released'
+    r'|latest\s+(version|release|news|price))'
+)
 
 class Orchestration():
     """ Responsible for instantiating all ChatOpenAI objects """
@@ -121,6 +130,12 @@ class Orchestration():
             return False
         # Explicit: \agent, Spur Agent toggle, or pre-processor search_internet
         if documents.get('use_agent'):
+            return True
+        query = str(documents.get('user_query') or '')
+        if _LIVE_QUERY.search(query) and not (
+                documents.get('has_images') or documents.get('dynamic_images')
+                or documents.get('has_files')
+                or documents.get('attached_files_note')):
             return True
         # Agent requested
         if (answer_confidence <= float(self.args.distrust_confidence)
