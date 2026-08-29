@@ -774,19 +774,19 @@ class ContextManager(PromptManager):
         documents['chat_history'] = '\n'.join(chat_lines)
 
     def ingest_user_attachments(self, documents: dict, meta_tags: list | None) -> None:
-        """Store this turn's files in gold (assistant mode only).
+        """Store this turn's *text* files in gold (assistant mode only).
 
-        Attachments arrive *after* handle_context (Spur fold_uploads / {{path}}),
-        so they are not in the user collection yet. Assistant gold is the
-        permanent copy. Story gold stays import-only. Images store a stub
-        (pixels stay this-turn-only for vision). Agent search dumps in
-        dynamic_files are not ingested.
+        Attachments arrive *after* handle_context (Spur fold_uploads / {{path}}).
+        Images stay this-turn-only for vision — no stub in Documents (clipboard
+        pastes land as image.png and the 139-byte stub is not the picture).
+        Agent search dumps in dynamic_files are not ingested.
         """
         documents.setdefault('attached_files_note', '')
         files = documents.get('attachment_texts') or []
         if not files:
             return
-        names: list[str] = []
+        gold_names: list[str] = []
+        image_names: list[str] = []
         bodies: list[tuple[str, str]] = []
         for rec in files:
             if not isinstance(rec, dict):
@@ -794,19 +794,24 @@ class ContextManager(PromptManager):
             name = str(rec.get('name') or 'file')
             kind = str(rec.get('kind') or 'text')
             text = str(rec.get('text') or '')
-            names.append(name)
             if kind == 'image':
-                bodies.append((name, (
-                    f'ATTACHED IMAGE: {name}\n'
-                    'The user attached this image. Pixel data is not stored in RAG. '
-                    'Do not ask them to re-attach it; they already did.'
-                )))
-            else:
-                clipped = text[:400_000]
-                if clipped.strip():
-                    bodies.append((name, f'ATTACHED FILE: {name}\n\n{clipped}'))
-        if names:
-            documents['attached_files_note'] = self._attachment_note(names)
+                image_names.append(name)
+                continue
+            gold_names.append(name)
+            clipped = text[:400_000]
+            if clipped.strip():
+                bodies.append((name, f'ATTACHED FILE: {name}\n\n{clipped}'))
+        notes = []
+        if image_names:
+            notes.append(
+                'THIS TURN the user attached image(s): '
+                + ', '.join(image_names)
+                + '. Pixels are for vision this turn only. Not saved to Documents.'
+            )
+        if gold_names:
+            notes.append(self._attachment_note(gold_names))
+        if notes:
+            documents['attached_files_note'] = ' '.join(notes)
         if not bodies or self.opts.no_rags or not self.opts.assistant_mode:
             return
         history = documents.get('history') or self.common.load_chat()
