@@ -325,6 +325,11 @@ class ChatOptions:
         # derive colour from light/dark mode
         object.__setattr__(self, 'color', 245 if self.light_mode else 236)
 
+        # LM Studio / Ollama want *some* string. Empty is a langchain error.
+        key = (self.api_key or '').strip()
+        if not key or key.lower() in {'none', 'null', 'not_set'}:
+            object.__setattr__(self, 'api_key', 'none')
+
         # If the specialized host wasn't explicitly supplied,
         # inherit the main model server.
         host_fields = (

@@ -53,6 +53,12 @@ class ChatOptionsYamlTest(unittest.TestCase):
         })
         self.assertEqual(opts.model, 'x')
 
+    def test_empty_api_key_becomes_none(self):
+        opts = ChatOptions._build('.', {  # pylint: disable=protected-access
+            'api_key': '',
+        })
+        self.assertEqual(opts.api_key, 'none')
+
 
 if __name__ == '__main__':
     unittest.main()

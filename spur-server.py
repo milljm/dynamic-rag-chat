@@ -1135,6 +1135,7 @@ async def api_settings_save(request: Request) -> JSONResponse:
     body = await request.json()
     incoming = body.get('values') if isinstance(body.get('values'), dict) else body
     values = {key: blank(incoming.get(key)) for key in ALL_KEYS if key != 'model_server'}
+    values['api_key'] = values.get('api_key') or 'none'
     if incoming.get('llm_server') is None and incoming.get('model_server'):
         values['llm_server'] = blank(incoming.get('model_server'))
     missing = [
