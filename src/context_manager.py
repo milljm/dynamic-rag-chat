@@ -805,14 +805,15 @@ class ContextManager(PromptManager):
         listed = ', '.join(names)
         if self.opts.assistant_mode:
             return (
-                'The user attached this turn: ' + listed
-                + '. These files are already in FILES (this turn) and GOLD_DOCUMENTS '
-                '(later turns). Never ask them to attach these files again.'
+                'THIS TURN the user paperclipped: ' + listed
+                + '. Full text is in THIS_TURN_ATTACHMENTS / FILES right now. '
+                'A copy is being saved to DOCUMENTS (permanent cabinet). '
+                'Never ask them to attach these files again. Do not NEED_GOLD them this turn.'
             )
         return (
-            'The user attached this turn: ' + listed
-            + '. These files are already in FILES. Never ask them to attach '
-            'these files again.'
+            'THIS TURN the user paperclipped: ' + listed
+            + '. Full text is in THIS_TURN_ATTACHMENTS / FILES. '
+            'Never ask them to attach these files again.'
         )
 
     def handle_context(self, documents: dict,
