@@ -49,6 +49,9 @@ Apologize; a retry usually fixes a search glitch. Mention why if it helps.
 <CHAT_HISTORY - FLOW AND TONE. SUPERSEDES AI_RAG FOR FACTS>
 {{chat_history}}
 </CHAT_HISTORY>
+<NAME_YOUR_FENCES>
+If this reply includes code the user could save, every fence is ```lang filename.ext — invent a basename (hello_world.py, fetch_panw.py). Unnamed ```python fences do not become downloads. One-liners may stay unnamed.
+</NAME_YOUR_FENCES>
 <USER_INPUT>
 {{user_query}}
 </USER_INPUT>
