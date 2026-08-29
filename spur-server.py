@@ -18,11 +18,13 @@ Split-dev (optional): python spur-server.py   then
 """
 from __future__ import annotations
 
+import asyncio
 import base64
 import glob
 import json
 import mimetypes
 import os
+import queue
 import shutil
 import sys
 import threading
@@ -30,7 +32,7 @@ import time
 import uuid
 from copy import deepcopy
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, AsyncIterator, Iterator
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -1012,11 +1014,13 @@ async def api_chat(request: Request) -> StreamingResponse:
     chat = get_chat()
     renderer = chat.session.renderer
 
-    def generate() -> Iterator[bytes]:
+    async def generate() -> AsyncIterator[bytes]:
         """Yield SSE frames for this request body."""
         global _streams
         with _stream_lock:
             _streams += 1
+        notes: queue.Queue[str] = queue.Queue()
+        renderer.status_hook = notes.put
         try:
             _sync_chat_object(chat)
             if body.get('regenerate'):
@@ -1025,19 +1029,36 @@ async def api_chat(request: Request) -> StreamingResponse:
                 'type': 'status',
                 'message': 'Working — RAG / agent / prompt…',
             }).encode()
-            documents, meta = _prepare_chat_documents(chat, body)
+            documents, meta = await asyncio.to_thread(
+                _prepare_chat_documents, chat, body,
+            )
             yield sse({
                 'type': 'documents',
                 'documents': list_attachments(_vector_dir()),
             }).encode()
-            if renderer.orchestrator.requires_agent(meta, documents):
-                yield sse({
-                    'type': 'status',
-                    'message': 'Agent tool web search…',
-                }).encode()
-            renderer.set_llm(meta, documents)
-            packed = renderer.get_messages(meta, documents)
-            renderer.set_llm(meta, documents)
+
+            def _pack():
+                renderer.set_llm(meta, documents)
+                packed_local = renderer.get_messages(meta, documents)
+                renderer.set_llm(meta, documents)
+                return packed_local
+
+            pack_task = asyncio.create_task(asyncio.to_thread(_pack))
+            while not pack_task.done():
+                try:
+                    msg = notes.get_nowait()
+                except queue.Empty:
+                    await asyncio.sleep(0.05)
+                    continue
+                yield sse({'type': 'status', 'message': msg}).encode()
+            packed = await pack_task
+            while True:
+                try:
+                    msg = notes.get_nowait()
+                except queue.Empty:
+                    break
+                yield sse({'type': 'status', 'message': msg}).encode()
+
             model = getattr(renderer.llm, 'model_name', '') or ''
             route = (renderer.orchestrator.name_of(renderer.llm)
                      or renderer.orchestrator.get_route_name(meta, documents))
@@ -1053,10 +1074,11 @@ async def api_chat(request: Request) -> StreamingResponse:
                 'context': context,
             }).encode()
             stats: dict = {}
-            yield from _iter_sse_chunks(
+            for frame in _iter_sse_chunks(
                 renderer, packed, documents, stats,
                 route=route, context=context, meta=meta,
-            )
+            ):
+                yield frame
             if ((stats.get('answer') or stats.get('reasoning'))
                     and not documents.get('no_context')):
                 persist_turn(
@@ -1078,9 +1100,9 @@ async def api_chat(request: Request) -> StreamingResponse:
         except Exception as exc:  # pylint: disable=broad-exception-caught
             yield sse({'type': 'error', 'error': str(exc)}).encode()
         finally:
+            renderer.status_hook = None
             with _stream_lock:
                 _streams -= 1
-
     return StreamingResponse(
         generate(),
         media_type='text/event-stream',

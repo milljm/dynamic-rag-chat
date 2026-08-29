@@ -156,6 +156,7 @@ class RenderWindow(PromptManager):
         self.thinking_chunk = ''
         self.ooc_response = ''
         self.llm = None
+        self.status_hook = None
 
         # populate dataclasses, setup
         self._load_states(current_dir, context, args)
@@ -468,6 +469,12 @@ class RenderWindow(PromptManager):
             return None
         return self._parse_agent_followup(self._llm_text(resp))
 
+    def _status(self, message: str) -> None:
+        """Optional UI hook (Spur SSE). Terminal ignores it."""
+        hook = getattr(self, 'status_hook', None)
+        if callable(hook):
+            hook(message)
+
     def _invoke_web_agent(self, documents: dict, polish: bool, meta_data) -> list:
         """Run AgentExecutor once, then recurse so a follow-up search can happen."""
         if int(documents.get('agent_calls', 0)) >= MAX_AGENT_CALLS:
@@ -490,6 +497,7 @@ class RenderWindow(PromptManager):
             or documents['original_user_query']
         )
         label = f'({call_n}/{MAX_AGENT_CALLS})'
+        self._status('Agent tool web search…')
         try:
             self.console.print(
                 f'Agent Tool Web Search {label} (ctl-c to cancel)...',
