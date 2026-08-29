@@ -42,22 +42,24 @@ That is the whole product: targeted context, not a bigger window.
 - **Terminal UI** — `prompt_toolkit` + `rich` (Markdown in the terminal, optional `--light-mode`)
 - **Streamlit UI** — branch cards, mode toggle, attachments, slash commands, reasoning panel (same `Chat` / `RenderWindow` stack)
 - **Spur UI** — React front-end ([milljm/spur](https://github.com/milljm/spur)). Same stack via `spur-server.py`; just nicer to look at.
-- **Streaming** — token-level generation
-- **Persistent history** — JSON on disk, role/content messages per branch
+- **Streaming** — token-level generation; Spur shows `Processing Prompt…` / `Streaming…` with `[model] [route] [12.4k]`
+- **Persistent history** — JSON on disk (`vector_dir/chat_history.json`, atomic write + `.bak`). Role/content per branch, including reasoning blocks.
 - **Branches** — fork / switch / delete; RAG collections clone with the fork (`\branch`, `\dbranch`, or the Streamlit / Spur cards)
 - **Two flavors**
   - **Story** — role-play prompts, scene grounding, optional NPC sheets + polisher
   - **Assistant** — tool-style prompts, optional vision + web-search agent, RAG on (pass `--no-rags` to disable)
 - **Pre-processor** — lightweight LLM for tags *and* model routing (casual → general → coder → analysis)
 - **Optional post-process** — threaded RAG write-back; story mode can mint entity files
-- **Gold / canon import** — pre-load a read-oriented collection from `.md`, `.html`, `.txt`, `.pdf`, `.template`
+- **Gold / canon import** — pre-load a read-oriented collection from `.md`, `.html`, `.txt`, `.pdf`, `.template` (`--import-dir`)
+- **Documents cabinet** — assistant paperclips land as whole files in `vector_dir/attachments/` *and* as gold chunks. Mention the filename, or the model emits `<NEED_GOLD:file>` (even while thinking). Spur status: `Recalling Document… [README.md, …]`
 - **Inline context** — files, images, and URLs in the message:
   ```text
   Compare {{/home/user/a.txt}} and {{/home/user/b.txt}}
   What is this? {{/Users/me/Pictures/tree.png}}
   Summarize {{https://example.com/article}}
   ```
-- **Agents** — pre-processor can request a web search (threshold via `--distrust-confidence`), or force it with `\agent …`
+- **Agents** — pre-processor can request a web search (threshold via `--distrust-confidence`), or force it with `\agent …`. The agent may re-search once more (cap 2) if the first dump looks thin.
+- **Think tags** — MiniMax `<mm:think>`, `<think>`, and null-token reasoners are split out of the visible stream. Spur has a Reasoning disclosure.
 - **Debug** — `--debug` / `--prompts-debug` dumps prompts, tags, and RAG payloads
 
 ### In-line commands
@@ -117,7 +119,19 @@ https://github.com/user-attachments/assets/07976c98-3935-4b24-a1c0-e09dcd8bf07b
 
 ### RAG layout (what the code actually does)
 
-Each **branch** owns collections named `{branch}_user_documents` and `{branch}_ai_documents`. Story mode can also read an un-prefixed **gold** collection (import-only; not cloned on fork). Assistant gold is `assistant_gold_documents`. In assistant mode, text attachments are **chunked into gold** (semantic search) and also stored whole under `vector_dir/attachments/` (filename lookup, NEED_GOLD, Spur Documents widget). Mentioning a filename in the query (e.g. `spur-server.py`) retrieves that file in full. In assistant mode the model can also emit `<NEED_GOLD:filename>` mid-reply; the stream pauses, the file is fetched, and the same turn resumes (at most twice). `--import-dir` stays gold-chunks only — it does not fill the attachments cabinet.
+Each **branch** owns collections named `{branch}_user_documents` and `{branch}_ai_documents`. Story mode can also read an un-prefixed **gold** collection (import-only; not cloned on fork). Assistant gold is `assistant_gold_documents`.
+
+Two jobs, two stores:
+
+| | Gold RAG (chunks) | `vector_dir/attachments/` (whole files) |
+|---|---|---|
+| `--import-dir` | yes | no |
+| Paperclip / `{{path}}` in assistant mode | yes (search) | yes (the file itself) |
+| Spur **Documents** widget | — | list + delete |
+| Filename in the query (`look at spur-server.py`) | — | inject the whole file |
+| `<NEED_GOLD:filename>` mid-reply | — | fetch, resume same turn (cap 2) |
+
+Story gold stays import-only. Paperclips this turn are `THIS_TURN_ATTACHMENTS` / `FILES` in the prompt (full text); after the turn they become Documents.
 
 Chunking is parent/child, not a single 100/50 split:
 
@@ -153,7 +167,9 @@ The terminal is the source of truth. Two optional fronts wrap it.
 
 **Streamlit** (`streamlit_chat.py`) is the original GUI. Same flags as `chat.py` after `--`. Fine if you already live in Python.
 
-**Spur** is a React UI that never imports LangChain. `spur-server.py` sits next to `chat.py` and exposes the same session: branches, JSON history (`chat_history.json`, migrated from pickle on first load), RAG, agent tools, SSE tokens. The UI is only a view — that is why the adapter lives in *this* repo, not in [milljm/spur](https://github.com/milljm/spur). Point Spur at it with `VITE_CHAT_API=http://127.0.0.1:8765`. OpenAPI is at `http://127.0.0.1:8765/docs`.
+**Spur** is a React UI that never imports LangChain. `spur-server.py` sits next to `chat.py` and exposes the same session: branches, JSON history (`chat_history.json`, migrated from pickle on first load), RAG, Documents cabinet, agent tools, SSE tokens (including reasoning vs visible, and `Recalling Document…` when the model asks for a file). The UI is only a view — that is why the adapter lives in *this* repo, not in [milljm/spur](https://github.com/milljm/spur). Point Spur at it with `VITE_CHAT_API=http://127.0.0.1:8765`. OpenAPI is at `http://127.0.0.1:8765/docs`.
+
+Spur’s sidebar is **Documents** (permanent cabinet) and **Downloadable Files** (named code fences still in history). Paperclip lives on the composer. Status line: `Processing Prompt…` / `Streaming…` with `[model] [route] [12.4k]`.
 
 Streamlit still works. Spur is just prettier.
 
