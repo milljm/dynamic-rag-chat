@@ -19,7 +19,7 @@ const fieldClass =
   "flex h-10 w-full rounded-sm bg-secondary px-3 text-sm text-foreground shadow-[var(--shadow-border)] transition-[box-shadow] duration-150 placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70 disabled:cursor-not-allowed disabled:opacity-50";
 
 const modelLabelClass =
-  "text-sm font-medium uppercase tracking-[0.22em] text-foreground";
+  "text-xs font-medium uppercase tracking-[0.22em] text-turn";
 
 function Field({
   label,
