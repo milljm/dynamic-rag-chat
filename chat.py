@@ -274,7 +274,7 @@ class Chat():
         if _args.assistant_mode:
             self.chat_branch = 'assistant'
         else:
-            self.chat_branch = self.session.common.load_chat()['current']
+            self.chat_branch = self.session.common.active_branch()
         self._initialize_startup_tasks()
 
     def _initialize_startup_tasks(self):
@@ -1090,15 +1090,17 @@ def _add_context_args(parser, D):
     )
 
 
-def _add_runtime_args(parser, D):
+def _add_runtime_args(parser, D, use_defaults: bool):
     """Interface, behavior, generation, display, agent, and debug flags."""
     ui_args = parser.add_argument_group('Interface Options')
     ui_args.add_argument('--light-mode', action='store_true',
                          default=D('light_mode'),
                          help='Use a color scheme suitable for light-background terminals.')
-    ui_args.add_argument('--spur', action='store_true', default=False,
+    ui_args.add_argument('--spur', action='store_true',
+                         default=False if use_defaults else argparse.SUPPRESS,
                          help='Open the Spur browser UI (one process: adapter + built UI).')
-    ui_args.add_argument('--spur-rebuild', action='store_true', default=False,
+    ui_args.add_argument('--spur-rebuild', action='store_true',
+                         default=False if use_defaults else argparse.SUPPRESS,
                          help='Force a rebuild of the Spur UI before serving.')
     ui_args.add_argument('-v', '--verbose', action='store_true',
                          default=D('verbose'),
@@ -1188,7 +1190,7 @@ def _add_arguments(parser: argparse.ArgumentParser, defaults, *, use_defaults: b
     _add_optional_model_args(parser, lookup)
     _add_user_and_api_args(parser, lookup)
     _add_context_args(parser, lookup)
-    _add_runtime_args(parser, lookup)
+    _add_runtime_args(parser, lookup, use_defaults)
 
 def parse_args(argv, yaml_opts):
     """Two-stage parse so help shows effective defaults: CLI > YAML > dataclass."""
@@ -1225,7 +1227,7 @@ arguments. See `.chat.yaml.example` for details.
 """
 
     # -------- Stage 1: pre-parse (suppress defaults, ignore -h) --------
-    pre = argparse.ArgumentParser(add_help=False)
+    pre = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
     _add_arguments(pre, yaml_opts, use_defaults=False)   # no defaults => only capture user-supplied
     partial, _ = pre.parse_known_args(argv)
     merged = asdict(yaml_opts)
@@ -1238,7 +1240,8 @@ arguments. See `.chat.yaml.example` for details.
     parser = argparse.ArgumentParser(
         description=about,
         epilog=epilog,
-        formatter_class=CustomWidthFormatter
+        formatter_class=CustomWidthFormatter,
+        allow_abbrev=False,
     )
     # give it a proper -h/--help
     # _add_arguments(parser, argparse.Namespace(**merged), use_defaults=True)

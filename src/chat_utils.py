@@ -50,6 +50,25 @@ HISTORY_META_KEYS = frozenset({
 })
 
 
+def active_branch(assistant_mode: bool, history: dict | None) -> str:
+    """Branch for this process.
+
+    ``--assistant-mode`` (or Spur after a mode sync) stays on assistant.
+    Bare ``./chat.py`` is story — do not resume Spur's last assistant current.
+    """
+    hist = history if isinstance(history, dict) else {}
+    if assistant_mode:
+        return 'assistant'
+    current = hist.get('current') or 'story'
+    if current == 'assistant':
+        return 'story'
+    if current in HISTORY_META_KEYS:
+        return 'story'
+    if hist and not isinstance(hist.get(current), list):
+        return 'story'
+    return current
+
+
 def _json_default(obj: Any):
     """Best-effort conversion for leftover pickle types."""
     as_dict = getattr(obj, '_asdict', None)
@@ -744,6 +763,11 @@ class CommonUtils():
             'assistant_mode': assistant,
             'version': HISTORY_VERSION,
         }
+
+    def active_branch(self, history: dict | None = None) -> str:
+        """See module-level ``active_branch``."""
+        hist = history if isinstance(history, dict) else self.load_chat()
+        return active_branch(bool(self.opts.assistant_mode), hist)
 
     def save_chat(self, history)->None:
         """Persist chat history as JSON. Atomic replace + .bak."""

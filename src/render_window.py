@@ -907,9 +907,7 @@ class RenderWindow(PromptManager):
         self.llm = self.orchestrator.route(meta_data, documents)
         pre_process_time += time.time() - start_time
         token_total = documents.get('prompt_tokens') or self.packed_prompt_tokens(messages)
-        branch = 'assistant' if self.opts.assistant_mode else history.get(
-            'current', 'story',
-        )
+        branch = self.common.active_branch(history)
         footer_meta = {
             'token_savings': documents['token_savings'],
             'prompt_tokens': token_total,
@@ -975,7 +973,8 @@ class RenderWindow(PromptManager):
         history = self.common.load_chat()
 
         # ── Resolve active branch (now branches work in both modes) ─────
-        branch = history.get('current', 'story')
+        branch = self.common.active_branch(history)
+        history['current'] = branch
         if not isinstance(history.get(branch), list):
             history[branch] = []
 
