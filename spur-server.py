@@ -1109,7 +1109,8 @@ async def api_chat(request: Request) -> StreamingResponse:
                 renderer, packed, documents, stats,
                 route=route, context=context, meta=meta,
             )):
-                yield frame            if ((stats.get('answer') or stats.get('reasoning'))
+                yield frame
+            if ((stats.get('answer') or stats.get('reasoning'))
                     and not documents.get('no_context')):
                 persist_turn(
                     renderer,
