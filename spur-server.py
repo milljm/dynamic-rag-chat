@@ -846,17 +846,20 @@ def _iter_sse_chunks(
             'type': 'status',
             'message': recall_status(recalled),
         }).encode()
+        yield b':\n\n'
         packed = renderer.get_messages(meta, documents)
         model = getattr(renderer.llm, 'model_name', '') or model
         context = renderer.packed_prompt_tokens(packed)
         documents['prompt_tokens'] = context
+        first = True
         yield sse({
             'type': 'status',
-            'message': 'Streaming…',
+            'message': 'Processing Prompt…',
             'model': model or '',
             'route': route or '',
             'context': context or 0,
         }).encode()
+        yield b':\n\n'
 
     gen = time.time() - started
     stats.update({

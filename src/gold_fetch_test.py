@@ -55,13 +55,21 @@ class GoldNeedFeedTest(unittest.TestCase):
         self.assertEqual((a + b).strip(), 'need the assembler')
 
 
+    def test_false_angle(self):
+        feed = GoldNeedFeed()
+        a, hit = feed.feed('x < 3 and y > 4')
+        self.assertFalse(hit)
+        rest = a + feed.flush()
+        self.assertEqual(rest, 'x < 3 and y > 4')
+
+
 class RecallStatusTest(unittest.TestCase):
-    """Status line for Recalling Document."""
+    """Status line for Recalling Documents."""
 
     def test_one_name(self):
         self.assertEqual(
             recall_status(['README.md']),
-            'Recalling Document… [README.md]',
+            'Recalling Documents… [README.md]',
         )
 
     def test_clips_at_40(self):
@@ -72,11 +80,6 @@ class RecallStatusTest(unittest.TestCase):
         self.assertLessEqual(len(inner), 40)
         self.assertTrue(inner.endswith('...'))
         self.assertIn('README.md', inner)
-        feed = GoldNeedFeed()
-        a, hit = feed.feed('x < 3 and y > 4')
-        self.assertFalse(hit)
-        rest = a + feed.flush()
-        self.assertEqual(rest, 'x < 3 and y > 4')
 
 
 if __name__ == '__main__':
