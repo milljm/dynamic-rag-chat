@@ -9,6 +9,7 @@ from __future__ import annotations
 import importlib.util
 import os
 import shutil
+import socket
 import subprocess
 import sys
 import time
@@ -22,13 +23,35 @@ DEFAULT_URL = 'http://127.0.0.1:8765'
 
 
 def strip_spur_flags(argv: list[str]) -> list[str]:
-    """Drop ``--spur`` / ``--spur-rebuild`` so spur-server argparse is clean."""
-    skip = {'--spur', '--spur-rebuild'}
+    """Drop Spur-only flags so spur-server argparse is clean."""
+    skip = {'--spur', '--spur-rebuild', '--serve'}
     return [a for a in argv if a not in skip]
 
 
 # Back-compat alias for tests written against the first launcher.
 strip_spur_flag = strip_spur_flags
+
+
+def lan_ips() -> list[str]:
+    """IPv4 addresses on this machine that are not loopback."""
+    found: list[str] = []
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.connect(('1.1.1.1', 80))
+        primary = sock.getsockname()[0]
+        sock.close()
+        if primary and not primary.startswith('127.'):
+            found.append(primary)
+    except OSError:
+        pass
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            ip = info[4][0]
+            if ip and not ip.startswith('127.') and ip not in found:
+                found.append(ip)
+    except OSError:
+        pass
+    return found
 
 
 def find_ui_root(spur_dir: Path = SPUR_DIR) -> Path | None:
@@ -117,6 +140,7 @@ def launch(argv: list[str] | None = None) -> int:
     if argv is None:
         argv = sys.argv[1:]
     force = '--spur-rebuild' in argv or os.environ.get('SPUR_REBUILD') == '1'
+    serve = '--serve' in argv or os.environ.get('SPUR_SERVE') == '1'
     forwarded = strip_spur_flags(argv)
 
     if not SERVER_SCRIPT.is_file():
@@ -138,16 +162,26 @@ def launch(argv: list[str] | None = None) -> int:
         mod.mount_ui(str(ui_root))
 
     url = os.environ.get('SPUR_URL', DEFAULT_URL)
-    host = os.environ.get('SPUR_HOST', '127.0.0.1')
+    host = os.environ.get('SPUR_HOST', '0.0.0.0' if serve else '127.0.0.1')
     port = int(os.environ.get('SPUR_PORT', '8765'))
-    print(f'Spur: {url}  ·  API docs: {url}/docs')
+    local = f'http://127.0.0.1:{port}'
+    print(f'Spur: {local}  ·  API docs: {local}/docs')
+    if host in {'0.0.0.0', '::'}:
+        extras = lan_ips()
+        if extras:
+            print('On the LAN (same Wi-Fi, iPad / phone):')
+            for ip in extras:
+                print(f'  http://{ip}:{port}')
+        else:
+            print('LAN bind is on, but no non-loopback IPv4 turned up.')
+        print('No login. Do not port-forward this off your network.')
     print('Ctrl-C stops the server.')
     if os.environ.get('SPUR_NO_BROWSER') != '1':
-        # Give uvicorn a tick to bind, then open.
+        # Give uvicorn a tick to bind, then open this Mac's browser.
         def _open() -> None:
             time.sleep(0.6)
             try:
-                webbrowser.open(url)
+                webbrowser.open(local)
             except Exception:  # pylint: disable=broad-exception-caught
                 pass
 

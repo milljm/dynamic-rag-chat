@@ -7,6 +7,7 @@ The face of it is **Spur**. One command:
 ```bash
 ./chat.py --spur
 ./chat.py --spur --assistant-mode
+./chat.py --spur --serve          # LAN: iPad / phone on the same Wi-Fi
 ```
 
 ![Spur — dark](spur/docs/screenshot.jpg)
@@ -17,6 +18,8 @@ Light mode (washed dust / sand — turn badges still pop). Each code fence has a
 
 
 That starts `spur-server.py` on **one port** (`http://127.0.0.1:8765`) and serves the built UI from the same process. First run builds the UI (needs Node; conda recipe already has `nodejs`). Rebuild with `./chat.py --spur --spur-rebuild`. `Ctrl-C` stops it.
+
+`--serve` binds `0.0.0.0` and prints the LAN URL (same Wi-Fi). There is no login — do not port-forward it.
 
 
 Same flags as the terminal (`--model`, `--assistant-mode`, hosts, …). Put the boring ones in `.chat.yaml`.
