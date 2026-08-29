@@ -737,9 +737,16 @@ def _prepare_chat_documents(chat, body: dict) -> tuple[dict, list]:
         documents['in_line_commands'] = 'Meta: [no-context]'
         meta: list = []
     else:
+        atts = body.get('attachments') or []
+        has_text = any(
+            isinstance(a, dict) and a.get('kind') == 'text' for a in atts
+        )
         documents, meta = chat.prepare_turn(
             parsed.args or parsed.clean_text or prompt,
-            extras={'has_images': bool(body.get('images'))},
+            extras={
+                'has_images': bool(body.get('images')),
+                'has_files': bool(body.get('files') or has_text),
+            },
         )
         documents = apply_includes(chat, documents, prompt)
     documents = fold_uploads(
