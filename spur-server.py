@@ -169,6 +169,36 @@ def sse(obj: dict[str, Any]) -> str:
     return f'data: {payload}\n\n'
 
 
+async def _aiter_sync(factory) -> AsyncIterator[bytes]:
+    """Run a sync iterator in a thread so each item can flush over SSE."""
+    boxed: queue.Queue[tuple[str, Any]] = queue.Queue()
+
+    def run() -> None:
+        try:
+            for item in factory():
+                boxed.put(('item', item))
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            boxed.put(('err', exc))
+        else:
+            boxed.put(('done', None))
+
+    task = asyncio.create_task(asyncio.to_thread(run))
+    try:
+        while True:
+            try:
+                kind, payload = boxed.get_nowait()
+            except queue.Empty:
+                await asyncio.sleep(0.02)
+                continue
+            if kind == 'done':
+                break
+            if kind == 'err':
+                raise payload
+            yield payload
+    finally:
+        await task
+
+
 def _status_sse(
     message: str, model: str = '', route: str = '', context: int = 0,
     recalled: list[str] | None = None,
@@ -890,7 +920,7 @@ def _reset_renderer_think(renderer) -> None:
         stream_state.think_ns = ''
 
 
-def _iter_sse_chunks(
+def _status_sse(
     renderer, packed, documents: dict, stats: dict,
     route: str = '', context: int = 0, meta=None,
 ) -> Iterator[bytes]:
@@ -1073,13 +1103,13 @@ async def api_chat(request: Request) -> StreamingResponse:
                 'route': route,
                 'context': context,
             }).encode()
+            await asyncio.sleep(0.05)
             stats: dict = {}
-            for frame in _iter_sse_chunks(
+            async for frame in _aiter_sync(lambda: _iter_sse_chunks(
                 renderer, packed, documents, stats,
                 route=route, context=context, meta=meta,
-            ):
-                yield frame
-            if ((stats.get('answer') or stats.get('reasoning'))
+            )):
+                yield frame            if ((stats.get('answer') or stats.get('reasoning'))
                     and not documents.get('no_context')):
                 persist_turn(
                     renderer,
