@@ -1,29 +1,55 @@
 # 🧠 dynamic-rag-chat
 
-**A terminal-first, orchestrated, context-aware chat system powered by LLMs, RAG, and a tagging pre-processor.**
-Built for long-running story work and a capable local assistant — with memory that actually persists.
+Local chat with **memory that is not a sliding window**. Tagged RAG, gold documents the model can recall mid-turn, branches, and model routing — on your machine.
 
-Also ships two GUIs for the same backend: **Streamlit** (`streamlit_chat.py`) and **Spur** (`./chat.py --spur`). Spur is the prettier one — a React view in `spur/` talking to `spur-server.py`.
+The face of it is **Spur**. One command:
 
 ```bash
-# Terminal
-./chat.py --assistant-mode
-./chat.py                       # story mode
-
-# Spur (browser) — one command, same flags
 ./chat.py --spur
 ./chat.py --spur --assistant-mode
+```
 
-# Streamlit (same flags after --)
+![Spur](spur/docs/screenshot.png)
+
+That starts `spur-server.py` (the same `Chat` stack as the terminal) and the React UI in `spur/`. Browser opens on `:8080`. Adapter / OpenAPI on `:8765`. `Ctrl-C` stops both.
+
+Same flags as the terminal (`--model`, `--assistant-mode`, hosts, …). Put the boring ones in `.chat.yaml`.
+
+Still here if you want them:
+
+```bash
+./chat.py                       # story, terminal
+./chat.py --assistant-mode      # assistant, terminal
 streamlit run streamlit_chat.py -- --assistant-mode
-streamlit run streamlit_chat.py
+```
+
+---
+
+## What you are looking at (Spur)
+
+- **Composer** — paperclip for this-turn files. After the turn they land in **Documents** (assistant mode).
+- **Documents** — whole files in `vector_dir/attachments/`. Mention a name, or the model emits `<NEED_GOLD:file>` (even while thinking). Status: `Recalling Document… [README.md, …]`.
+- **Downloadable Files** — named code fences still in this branch’s history.
+- **Branches / History / Slash** — same rules as `chat.py`. `story` and `assistant` are protected.
+- **Status** — `Working — RAG / agent / prompt…` → `Processing Prompt… [model] [route] [12.4k]` → `Streaming…`. DUP / CTX live in the footer.
+- **Reasoning** — think-block in a disclosure; the answer streams below.
+- **Light / dark / system** — sand paper vs ink. Code fences pick a Pygments theme.
+
+Spur never imports LangChain. The adapter owns history, RAG, Documents, agent tools, and SSE (`status`, `token`, `reasoning`, `documents`, `usage`, `done`).
+
+Split-dev, if you are hacking the UI:
+
+```bash
+python spur-server.py
+# other terminal
+cd spur && VITE_CHAT_API=http://127.0.0.1:8765 npm run dev
 ```
 
 ---
 
 ## What it is
 
-Most chat UIs are a sliding token window. When the window fills, facts fall out or get invented.
+Most chat UIs are a sliding token window. When the window fills, facts fall out or get invented. AnythingLLM-style RAG is “here is a pile of PDFs.” This is the other chair: **enterprise-shaped local chat**.
 
 `dynamic-rag-chat` keeps a tagged memory store next to the conversation:
 
@@ -39,19 +65,19 @@ That is the whole product: targeted context, not a bigger window.
 
 ## Features
 
-- **Terminal UI** — `prompt_toolkit` + `rich` (Markdown in the terminal, optional `--light-mode`)
-- **Streamlit UI** — branch cards, mode toggle, attachments, slash commands, reasoning panel (same `Chat` / `RenderWindow` stack)
-- **Spur UI** — React front-end in `spur/`. `./chat.py --spur` starts the adapter and Vite; just nicer to look at.
-- **Streaming** — token-level generation; Spur shows `Processing Prompt…` / `Streaming…` with `[model] [route] [12.4k]`
+- **Spur UI** — `./chat.py --spur`. React in `spur/`. This is the default way to use the tool.
+- **Terminal UI** — `prompt_toolkit` + `rich` (Markdown, optional `--light-mode`)
+- **Streamlit UI** — the original GUI if you already live in Python
+- **Streaming** — token-level; Spur shows `Processing Prompt…` / `Streaming…` with `[model] [route] [12.4k]`
 - **Persistent history** — JSON on disk (`vector_dir/chat_history.json`, atomic write + `.bak`). Role/content per branch, including reasoning blocks.
-- **Branches** — fork / switch / delete; RAG collections clone with the fork (`\branch`, `\dbranch`, or the Streamlit / Spur cards)
+- **Branches** — fork / switch / delete; RAG collections clone with the fork (`\branch`, `\dbranch`, or the Spur cards)
 - **Two flavors**
   - **Story** — role-play prompts, scene grounding, optional NPC sheets + polisher
   - **Assistant** — tool-style prompts, optional vision + web-search agent, RAG on (pass `--no-rags` to disable)
 - **Pre-processor** — lightweight LLM for tags *and* model routing (casual → general → coder → analysis)
 - **Optional post-process** — threaded RAG write-back; story mode can mint entity files
 - **Gold / canon import** — pre-load a read-oriented collection from `.md`, `.html`, `.txt`, `.pdf`, `.template` (`--import-dir`)
-- **Documents cabinet** — assistant paperclips land as whole files in `vector_dir/attachments/` *and* as gold chunks. Mention the filename, or the model emits `<NEED_GOLD:file>` (even while thinking). Spur status: `Recalling Document… [README.md, …]`
+- **Documents cabinet** — assistant paperclips land as whole files in `vector_dir/attachments/` *and* as gold chunks. Mention the filename, or the model emits `<NEED_GOLD:file>` (even while thinking).
 - **Inline context** — files, images, and URLs in the message:
   ```text
   Compare {{/home/user/a.txt}} and {{/home/user/b.txt}}
@@ -63,6 +89,8 @@ That is the whole product: targeted context, not a bigger window.
 - **Debug** — `--debug` / `--prompts-debug` dumps prompts, tags, and RAG payloads
 
 ### In-line commands
+
+Same slash commands in Spur, Streamlit, and the terminal.
 
 ```text
 \?                          help
@@ -84,6 +112,8 @@ That is the whole product: targeted context, not a bigger window.
 Protected branch names: `story`, `assistant`. Metadata keys (`current`, `assistant_mode`, `branch_modes`) are not branches.
 
 Terminal shortcuts: Ctrl-W / U / K / A / E / L.
+
+The old terminal look, if you care:
 
 <img width="764" alt="light_mode" src="https://github.com/user-attachments/assets/df7bd018-0354-45e7-8451-903d2834fcfd" />
 
@@ -161,26 +191,11 @@ You do not need seven models running. Three is enough; the rest are sockets you 
 
 ---
 
-## GUIs
-
-The terminal is the source of truth. Two optional fronts wrap it.
-
-**Spur** (`./chat.py --spur`) is the React UI in `spur/`. That flag starts `spur-server.py` on `:8765` and Vite on `:8080`, then opens a browser. Same CLI flags as the terminal (`--assistant-mode`, model hosts, …). The UI never imports LangChain; the adapter owns session, JSON history, RAG, Documents, agent tools, and SSE (reasoning vs visible, `Recalling Document…`). OpenAPI: `http://127.0.0.1:8765/docs`.
-
-Split-dev (optional): `python spur-server.py` in one terminal, `VITE_CHAT_API=http://127.0.0.1:8765 npm run dev` in `spur/`.
-
-**Streamlit** (`streamlit_chat.py`) is the original GUI. Same flags as `chat.py` after `--`. Fine if you already live in Python.
-
-Spur’s sidebar is **Documents** (permanent cabinet) and **Downloadable Files** (named code fences still in history). Paperclip lives on the composer. Status line: `Processing Prompt…` / `Streaming…` with `[model] [route] [12.4k]`.
-
-Streamlit still works. Spur is just prettier.
-
-
 ## Getting started
 
 ### Install
 
-Conda + `uv` is the intended path. System Python will fight you.
+Conda + `uv` is the intended path. System Python will fight you. Node is required for Spur (`nodejs` in the conda line).
 
 ```bash
 conda create -n dynamic-rag python=3.13 uv pip nodejs
@@ -188,10 +203,9 @@ conda activate dynamic-rag
 git clone https://github.com/milljm/dynamic-rag-chat.git
 cd dynamic-rag-chat
 uv pip install -r requirements.txt
-# first Spur run also needs Node (conda recipe already has nodejs)
-# cd spur && npm install   # ./chat.py --spur does this if missing
-
 ```
+
+First `./chat.py --spur` will `npm install` in `spur/` if `node_modules` is missing.
 
 Python 3.10+ (3.13 is what the conda line above uses). This tree now tracks **LangChain 1.x** ([issue #23](https://github.com/milljm/dynamic-rag-chat/issues/23)). Retrievers / `AgentExecutor` live in `langchain-classic`; prompts, messages, and tools in `langchain-core`.
 
@@ -203,7 +217,7 @@ Chroma jumped with it (`chromadb` 0.6 → 1.x). Existing `vector_data/` written 
 python test_harness.py
 ```
 
-That runs every `src/*_test.py` as a top-level module (so `src/__init__.py` is not imported). You can still run one file with `python src/think_tags_test.py`.
+That runs every `src/*_test.py` as a top-level module (so `src/__init__.py` is not imported). You can still run one file with `python src/think_tags_test.py`. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ### Ollama (local models)
 
@@ -228,14 +242,14 @@ ollama pull gemma3:12b               # generator that fits most boxes
 Then:
 
 ```bash
-./chat.py \
+./chat.py --spur \
   --model gemma3:12b \
   --pre-llm gemma3:1b \
   --embedding-llm nomic-embed-text \
   --model-server http://localhost:11434/v1
 ```
 
-Add `--assistant-mode` for the utility flavor. `./chat.py --help` lists every flag. Defaults can live in `.chat.yaml` (see `.chat.yaml.example`).
+Drop `--spur` for the terminal. Add `--assistant-mode` for the utility flavor. `./chat.py --help` lists every flag. Defaults can live in `.chat.yaml` (see `.chat.yaml.example`).
 
 LM Studio works the same way — point `--model-server` at its OpenAI-compatible URL. Handy if you want Hugging Face weights Ollama does not ship.
 
@@ -259,11 +273,13 @@ chat:
 
 ```bash
 conda activate dynamic-rag
-./chat.py
+./chat.py --spur
 ```
 
 ---
 
 ## Why this exists
 
-Sliding-window chats forget or hallucinate once the window is full. This tool keeps **user** and **AI** memory in separate, tagged collections, prunes duplicates, and only pulls what the pre-processor tagged as relevant — so a 12B local model can stay coherent across a long story or a working assistant session on one machine.
+Sliding-window chats forget or hallucinate once the window is full. Document-Q&A RAG does not remember a conversation. This tool keeps **user** and **AI** memory in separate, tagged collections, prunes duplicates, and only pulls what the pre-processor tagged as relevant — so a local model can stay coherent across a long story or a working assistant session on one machine.
+
+Spur is the UI. The engine is still `chat.py`.
