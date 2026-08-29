@@ -9,7 +9,12 @@ The face of it is **Spur**. One command:
 ./chat.py --spur --assistant-mode
 ```
 
-![Spur](spur/docs/screenshot.png)
+![Spur — dark](spur/docs/screenshot.png)
+
+Light mode (washed dust / sand — turn badges still pop). Each code fence has a **theme dropdown** (the Pygments styles). Default is auto: fruity in dark, stata-light in light. Pick one and it sticks until you change it.
+
+![Spur — light](spur/docs/screenshot-light.jpg)
+
 
 That starts `spur-server.py` (the same `Chat` stack as the terminal) and the React UI in `spur/`. Browser opens on `:8080`. Adapter / OpenAPI on `:8765`. `Ctrl-C` stops both.
 
@@ -33,7 +38,7 @@ streamlit run streamlit_chat.py -- --assistant-mode
 - **Branches / History / Slash** — same rules as `chat.py`. `story` and `assistant` are protected.
 - **Status** — `Working — RAG / agent / prompt…` → `Processing Prompt… [model] [route] [12.4k]` → `Streaming…`. DUP / CTX live in the footer.
 - **Reasoning** — think-block in a disclosure; the answer streams below.
-- **Light / dark / system** — sand paper vs ink. Code fences pick a Pygments theme.
+- **Light / dark / system** — sand paper vs ink. Code fences: per-block Pygments theme dropdown (sticky).
 
 Spur never imports LangChain. The adapter owns history, RAG, Documents, agent tools, and SSE (`status`, `token`, `reasoning`, `documents`, `usage`, `done`).
 
