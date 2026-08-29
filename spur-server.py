@@ -1027,7 +1027,7 @@ async def api_chat(request: Request) -> StreamingResponse:
                 pop_last_assistant(chat)
             yield sse({
                 'type': 'status',
-                'message': 'Working — RAG / agent / prompt…',
+                'message': 'RAG Processing…',
             }).encode()
             documents, meta = await asyncio.to_thread(
                 _prepare_chat_documents, chat, body,

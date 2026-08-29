@@ -120,7 +120,7 @@ export function useSend() {
         id: assistantId,
         role: "assistant",
         content: "",
-        status: agent ? "Agent tool web search…" : "Processing Prompt…",
+        status: agent ? "Agent Web Search…" : "Processing Prompt…",
         createdAt: Date.now(),
       };
       store.appendMessage(assistantMsg, [], originId);
@@ -506,7 +506,7 @@ async function generateViaChatPy(
       id: assistantId,
       role: "assistant",
       content: "",
-      status: "Working — RAG / agent / prompt…",
+      status: "RAG Processing…",
       createdAt: Date.now(),
     },
     [],

@@ -497,7 +497,7 @@ class RenderWindow(PromptManager):
             or documents['original_user_query']
         )
         label = f'({call_n}/{MAX_AGENT_CALLS})'
-        self._status('Agent tool web search…')
+        self._status('Agent Web Search…')
         try:
             self.console.print(
                 f'Agent Tool Web Search {label} (ctl-c to cancel)...',
