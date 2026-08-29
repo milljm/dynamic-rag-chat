@@ -6,7 +6,7 @@ import sys
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from chat_utils import active_branch  # noqa: E402
+from chat_utils import ChatOptions, active_branch  # noqa: E402
 
 
 class ActiveBranchTest(unittest.TestCase):
@@ -33,6 +33,41 @@ class ActiveBranchTest(unittest.TestCase):
             'alt-ending': [{'role': 'user', 'content': 'once'}],
         }
         self.assertEqual(active_branch(False, hist), 'alt-ending')
+
+
+class ChatOptionsYamlTest(unittest.TestCase):
+    """Settings page writes llm_server; unknown keys must not crash."""
+
+    def test_llm_server_alias(self):
+        opts = ChatOptions._build('.', {  # pylint: disable=protected-access
+            'llm_server': 'http://127.0.0.1:1234/v1',
+            'model': 'minimax-m3',
+        })
+        self.assertEqual(opts.host, 'http://127.0.0.1:1234/v1')
+        self.assertEqual(opts.model, 'minimax-m3')
+
+    def test_unknown_yaml_key_ignored(self):
+        opts = ChatOptions._build('.', {  # pylint: disable=protected-access
+            'nope': 'whatever',
+            'model': 'x',
+        })
+        self.assertEqual(opts.model, 'x')
+
+    def test_empty_api_key_becomes_none(self):
+        opts = ChatOptions._build('.', {  # pylint: disable=protected-access
+            'api_key': '',
+        })
+        self.assertEqual(opts.api_key, 'none')
+
+    def test_empty_vision_stays_sentinel(self):
+        opts = ChatOptions._build('.', {  # pylint: disable=protected-access
+            'vision_llm': None,
+            'agent_llm': '',
+            'model': 'minimax-m3',
+        })
+        self.assertEqual(opts.vision_llm, 'None')
+        self.assertEqual(opts.agent_llm, 'None')
+        self.assertEqual(opts.model, 'minimax-m3')
 
 
 if __name__ == '__main__':

@@ -325,6 +325,18 @@ class ChatOptions:
         # derive colour from light/dark mode
         object.__setattr__(self, 'color', 245 if self.light_mode else 236)
 
+        # LM Studio / Ollama want *some* string. Empty is a langchain error.
+        key = (self.api_key or '').strip()
+        if not key or key.lower() in {'none', 'null', 'not_set'}:
+            object.__setattr__(self, 'api_key', 'none')
+
+        # Vision/agent/polisher/entity are opt-in. ChatOpenAI rejects model=None;
+        # the rest of the code treats the string 'None' as "not configured".
+        for field_name in ('polisher_llm', 'entity_llm', 'agent_llm', 'vision_llm'):
+            value = getattr(self, field_name)
+            if value is None or str(value).strip() == '':
+                object.__setattr__(self, field_name, 'None')
+
         # If the specialized host wasn't explicitly supplied,
         # inherit the main model server.
         host_fields = (
@@ -362,6 +374,7 @@ class ChatOptions:
     _ALIASES = {
         # YAML/config wording        # ChatOptions field
         'model_server':              'host',
+        'llm_server':                'host',
         'polisher_server':           'polisher_host',
         'agent_server':              'agent_host',
         'vision_server':             'vision_host',
@@ -401,6 +414,8 @@ class ChatOptions:
             if key in cls._IGNORED_FIELDS:
                 continue
             field_name = cls._ALIASES.get(key, key)
+            if field_name not in data:
+                continue
             if field_name in cls._INT_FIELDS:
                 value = int(value)
             data[field_name] = value

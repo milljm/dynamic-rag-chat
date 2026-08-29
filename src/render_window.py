@@ -748,8 +748,9 @@ class RenderWindow(PromptManager):
 
     def _skip_polisher(self, documents: dict) -> bool:
         """True when the raw stream should be shown (no polish pass)."""
+        raw = (self.opts.polisher_llm or '').strip().lower()
         return (
-            self.opts.polisher_llm == 'None'
+            raw in {'', 'none', 'not_set'}
             or documents['user_query'].find('OOC:') != -1
             or self.opts.assistant_mode
         )

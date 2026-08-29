@@ -40,6 +40,7 @@ streamlit run streamlit_chat.py -- --assistant-mode
 - **Status** — `Working — RAG / agent / prompt…` → `Processing Prompt… [model] [route] [12.4k]` → `Streaming…`. DUP / CTX live in the footer.
 - **Reasoning** — think-block in a disclosure; the answer streams below.
 - **Light / dark / system** — sand paper vs ink. Code fences: per-block Pygments theme dropdown (sticky).
+- **Settings** — gear in the header. Server, the three required models, collapsed routes. Saves `.chat.yaml` and the next turn uses them.
 
 Spur never imports LangChain. The adapter owns history, RAG, Documents, agent tools, and SSE (`status`, `token`, `reasoning`, `documents`, `usage`, `done`).
 

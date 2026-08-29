@@ -19,6 +19,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { ThemeToggle } from "./theme-toggle";
+import { SettingsButton } from "./settings-panel";
 import { Markdown } from "./markdown";
 
 const NEAR_BOTTOM = 96;
@@ -97,6 +98,7 @@ export function Thread({
             </span>
           </p>
         </div>
+        <SettingsButton streaming={streaming} />
         <ThemeToggle />
       </header>
 

@@ -43,43 +43,59 @@ class Orchestration():
             )
 
     @staticmethod
+    def _role_model(value) -> str:
+        """ChatOpenAI requires a string; unset optional roles use 'None'."""
+        text = '' if value is None else str(value).strip()
+        return text or 'None'
+
+    @staticmethod
     def _model_specs(args: ChatOptions) -> dict:
         """Per-role base_url / model / temperature / top_p."""
+        model = Orchestration._role_model(args.model)
         return {
             'story': {
-                'base_url': args.host, 'model': args.model,
+                'base_url': args.host, 'model': model,
                 'temperature': args.model_temp, 'top_p': args.model_topp,
             },
             'polisher': {
-                'base_url': args.polisher_host, 'model': args.polisher_llm,
+                'base_url': args.polisher_host,
+                'model': Orchestration._role_model(args.polisher_llm),
                 'temperature': args.polisher_temp, 'top_p': args.polisher_topp,
             },
             'vision': {
-                'base_url': args.vision_host, 'model': args.vision_llm,
+                'base_url': args.vision_host,
+                'model': Orchestration._role_model(args.vision_llm),
                 'temperature': args.vision_temp, 'top_p': args.vision_topp,
             },
             'agent': {
-                'base_url': args.agent_host, 'model': args.agent_llm,
+                'base_url': args.agent_host,
+                'model': Orchestration._role_model(args.agent_llm),
                 'temperature': args.agent_temp, 'top_p': args.agent_topp,
             },
             'nsfw': {
-                'base_url': args.nsfw_host, 'model': args.nsfw_llm,
+                'base_url': args.nsfw_host,
+                'model': Orchestration._role_model(args.nsfw_llm) if args.nsfw_llm else model,
                 'temperature': args.nsfw_temp, 'top_p': args.nsfw_topp,
             },
             'casual': {
-                'base_url': args.casual_host, 'model': args.casual_llm,
+                'base_url': args.casual_host,
+                'model': Orchestration._role_model(args.casual_llm) if args.casual_llm else model,
                 'temperature': args.casual_temp, 'top_p': args.casual_topp,
             },
             'coding': {
-                'base_url': args.coder_host, 'model': args.coder_llm,
+                'base_url': args.coder_host,
+                'model': Orchestration._role_model(args.coder_llm) if args.coder_llm else model,
                 'temperature': args.coder_temp, 'top_p': args.coder_topp,
             },
             'structured': {
-                'base_url': args.structured_host, 'model': args.structured_llm,
+                'base_url': args.structured_host,
+                'model': (Orchestration._role_model(args.structured_llm)
+                          if args.structured_llm else model),
                 'temperature': args.structured_temp, 'top_p': args.structured_topp,
             },
             'general': {
-                'base_url': args.general_host, 'model': args.general_llm,
+                'base_url': args.general_host,
+                'model': Orchestration._role_model(args.general_llm) if args.general_llm else model,
                 'temperature': args.general_temp, 'top_p': args.general_topp,
             },
         }

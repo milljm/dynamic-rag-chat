@@ -25,9 +25,11 @@ import mimetypes
 import os
 import shutil
 import sys
+import threading
 import time
 import uuid
 from copy import deepcopy
+from pathlib import Path
 from typing import Any, Iterator
 
 from fastapi import FastAPI, Request
@@ -57,6 +59,13 @@ from src.chat_utils import (  # noqa: E402
     CommonUtils,
     load_history_from_dir,
 )
+from src.settings_yaml import (  # noqa: E402
+    ALL_KEYS,
+    blank,
+    list_models,
+    load_file as load_settings_file,
+    save_file as save_settings_file,
+)
 
 LOCKED_BRANCHES = frozenset({'assistant', 'story'})
 # Metadata keys in the history file — not message lists.
@@ -74,6 +83,9 @@ app.add_middleware(
 
 console = Console(highlight=True)
 _chat: Chat | None = None
+_stream_lock = threading.Lock()
+_streams = 0
+YAML_PATH = Path(ROOT) / '.chat.yaml'
 
 
 def get_chat() -> Chat:
@@ -87,6 +99,64 @@ def get_chat() -> Chat:
         _chat = Chat(session, built)
         _sync_chat_object(_chat)
     return _chat
+
+
+def _opts_snapshot(opts: ChatOptions) -> dict[str, str]:
+    """Effective running values (after inherit)."""
+    return {
+        'llm_server': blank(opts.host),
+        'api_key': blank(opts.api_key) or 'none',
+        'model': blank(opts.model),
+        'pre_llm': blank(opts.preconditioner),
+        'embedding_llm': blank(opts.embeddings),
+        'pre_server': blank(opts.pre_host),
+        'embedding_server': blank(opts.emb_host),
+        'vision_llm': blank(opts.vision_llm),
+        'vision_server': blank(opts.vision_host),
+        'agent_llm': blank(opts.agent_llm),
+        'agent_server': blank(opts.agent_host),
+        'coder_llm': blank(opts.coder_llm),
+        'coder_server': blank(opts.coder_host),
+        'casual_llm': blank(opts.casual_llm),
+        'casual_server': blank(opts.casual_host),
+        'general_llm': blank(opts.general_llm),
+        'general_server': blank(opts.general_host),
+        'structured_llm': blank(opts.structured_llm),
+        'structured_server': blank(opts.structured_host),
+        'nsfw_llm': blank(opts.nsfw_llm),
+        'nsfw_server': blank(opts.nsfw_host),
+        'polisher_llm': blank(opts.polisher_llm),
+        'polisher_server': blank(opts.polisher_host),
+        'entity_llm': blank(opts.entity_llm),
+        'entity_server': blank(opts.entity_host),
+        'tavily_key': blank(opts.tavily_key),
+    }
+
+
+def _rebuild_chat_from_yaml() -> None:
+    """Replace the live Chat after ``.chat.yaml`` changes. Next turn uses new models."""
+    global _chat
+    prev = _chat
+    opts = ChatOptions.from_yaml(ROOT)
+    if prev is not None:
+        opts.assistant_mode = bool(prev.opts.assistant_mode)
+        opts.vector_dir = prev.opts.vector_dir
+        opts.verbose = bool(prev.opts.verbose)
+        opts.debug = bool(prev.opts.debug)
+        opts.no_rags = bool(prev.opts.no_rags)
+        opts.light_mode = bool(prev.opts.light_mode)
+        opts.disable_thinking = bool(prev.opts.disable_thinking)
+        seed_src = prev.opts.seed
+    else:
+        seed_src = opts.seed
+    if isinstance(seed_src, int):
+        opts.seed = seed_src
+    else:
+        opts.seed = seed_from_string(str(seed_src or ''))
+    session = SessionContext.from_args(console, opts)
+    new_chat = Chat(session, opts)
+    _sync_chat_object(new_chat)
+    _chat = new_chat
 
 
 def sse(obj: dict[str, Any]) -> str:
@@ -944,6 +1014,9 @@ async def api_chat(request: Request) -> StreamingResponse:
 
     def generate() -> Iterator[bytes]:
         """Yield SSE frames for this request body."""
+        global _streams
+        with _stream_lock:
+            _streams += 1
         try:
             _sync_chat_object(chat)
             if body.get('regenerate'):
@@ -1003,6 +1076,9 @@ async def api_chat(request: Request) -> StreamingResponse:
             yield sse({'type': 'done'}).encode()
         except Exception as exc:  # pylint: disable=broad-exception-caught
             yield sse({'type': 'error', 'error': str(exc)}).encode()
+        finally:
+            with _stream_lock:
+                _streams -= 1
 
     return StreamingResponse(
         generate(),
@@ -1021,6 +1097,84 @@ async def api_chat(request: Request) -> StreamingResponse:
 def health() -> JSONResponse:
     """Liveness probe for Spur."""
     return JSONResponse({'ok': True, 'backend': 'chat.py'})
+
+
+@app.get('/api/settings')
+def api_settings_get() -> dict[str, Any]:
+    """Current ``.chat.yaml`` values plus what Chat is actually running."""
+    file_values, _text = load_settings_file(YAML_PATH)
+    try:
+        opts = _chat.opts if _chat is not None else ChatOptions.from_yaml(ROOT)
+        effective = _opts_snapshot(opts)
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        effective = dict(file_values)
+        return {
+            'ok': False,
+            'error': str(exc),
+            'path': str(YAML_PATH),
+            'values': file_values,
+            'effective': effective,
+            'busy': _streams > 0,
+        }
+    return {
+        'ok': True,
+        'path': str(YAML_PATH),
+        'values': file_values,
+        'effective': effective,
+        'busy': _streams > 0,
+    }
+
+
+@app.post('/api/settings')
+async def api_settings_save(request: Request) -> JSONResponse:
+    """Write ``.chat.yaml`` and rebuild Chat so the next turn uses the new models."""
+    if _streams > 0:
+        return JSONResponse(
+            {'ok': False, 'error': 'Wait for the current turn to finish.'},
+            status_code=409,
+        )
+    body = await request.json()
+    incoming = body.get('values') if isinstance(body.get('values'), dict) else body
+    values = {key: blank(incoming.get(key)) for key in ALL_KEYS if key != 'model_server'}
+    values['api_key'] = values.get('api_key') or 'none'
+    if incoming.get('llm_server') is None and incoming.get('model_server'):
+        values['llm_server'] = blank(incoming.get('model_server'))
+    missing = [
+        key for key in ('llm_server', 'model', 'pre_llm', 'embedding_llm')
+        if not values.get(key)
+    ]
+    if missing:
+        return JSONResponse(
+            {
+                'ok': False,
+                'error': 'Need server + generator + pre-conditioner + embeddings.',
+                'missing': missing,
+            },
+            status_code=400,
+        )
+    try:
+        save_settings_file(YAML_PATH, values)
+        _rebuild_chat_from_yaml()
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        return JSONResponse({'ok': False, 'error': str(exc)}, status_code=400)
+    opts = _chat.opts if _chat is not None else ChatOptions.from_yaml(ROOT)
+    return JSONResponse({
+        'ok': True,
+        'path': str(YAML_PATH),
+        'values': load_settings_file(YAML_PATH)[0],
+        'effective': _opts_snapshot(opts),
+        'message': 'Saved. Next turn uses these models.',
+    })
+
+
+@app.post('/api/settings/ping')
+async def api_settings_ping(request: Request) -> JSONResponse:
+    """List models on an OpenAI-compatible server (LM Studio / Ollama)."""
+    body = await request.json()
+    host = blank(body.get('host') or body.get('llm_server'))
+    api_key = blank(body.get('api_key')) or 'none'
+    result = list_models(host, api_key)
+    return JSONResponse(result, status_code=200 if result.get('ok') else 502)
 
 
 STATIC = os.environ.get('SPUR_STATIC') or ''
