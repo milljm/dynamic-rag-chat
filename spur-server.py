@@ -920,7 +920,7 @@ def _reset_renderer_think(renderer) -> None:
         stream_state.think_ns = ''
 
 
-def _status_sse(
+def _iter_sse_chunks(
     renderer, packed, documents: dict, stats: dict,
     route: str = '', context: int = 0, meta=None,
 ) -> Iterator[bytes]:
