@@ -27,7 +27,7 @@ class TakeNeedGoldTest(unittest.TestCase):
         self.assertIsNone(name)
         self.assertEqual(vis, 'just an answer')
 
-    def test_backticks(self):
+    def test_backticks_around_name_on_own_line(self):
         _, name = take_need_gold('<NEED_GOLD:`spur-server.py`>')
         self.assertEqual(name, 'spur-server.py')
 
@@ -50,15 +50,24 @@ class TakeNeedGoldTest(unittest.TestCase):
         self.assertIn('<NEED_GOLD:filename>', vis)
         self.assertNotIn('README.md>', vis)
 
+    def test_inline_readme_is_talk_not_fetch(self):
+        text = (
+            'gold-fetch tags like `<NEED_GOLD:README.md>` and then keep talking'
+        )
+        vis, name = take_need_gold(text)
+        self.assertIsNone(name)
+        self.assertEqual(vis, text)
+
+
 class GoldNeedFeedTest(unittest.TestCase):
     """Hold back the tag across chunks."""
 
     def test_split_tag(self):
         feed = GoldNeedFeed()
-        a, hit = feed.feed('Lead in. <NEED_')
+        a, hit = feed.feed('Lead in.\n<NEED_')
         self.assertFalse(hit)
-        self.assertEqual(a, 'Lead in. ')
-        b, hit = feed.feed('GOLD:prompt_manager.py>')
+        self.assertEqual(a, 'Lead in.\n')
+        b, hit = feed.feed('GOLD:prompt_manager.py>\n')
         self.assertTrue(hit)
         self.assertEqual(b, '')
         self.assertEqual(feed.filename, 'prompt_manager.py')
@@ -68,10 +77,11 @@ class GoldNeedFeedTest(unittest.TestCase):
         a, hit = feed.feed('need the assembler\n')
         self.assertFalse(hit)
         b, hit = feed.feed('<NEED_GOLD:prompt_manager.py>')
-        self.assertTrue(hit)
+        self.assertFalse(hit)
+        c = feed.flush()
+        self.assertTrue(feed.filename)
         self.assertEqual(feed.filename, 'prompt_manager.py')
-        self.assertEqual((a + b).strip(), 'need the assembler')
-
+        self.assertEqual((a + b + c).strip(), 'need the assembler')
 
     def test_false_angle(self):
         feed = GoldNeedFeed()
@@ -89,10 +99,31 @@ class GoldNeedFeedTest(unittest.TestCase):
 
     def test_real_tag_after_placeholder_in_stream(self):
         feed = GoldNeedFeed()
-        a, hit = feed.feed('<NEED_GOLD:filename> then <NEED_GOLD:README.md>')
+        a, hit = feed.feed('<NEED_GOLD:filename>\n<NEED_GOLD:README.md>\n')
         self.assertTrue(hit)
         self.assertEqual(feed.filename, 'README.md')
-        self.assertEqual(a, '<NEED_GOLD:filename> then ')
+        self.assertEqual(a, '<NEED_GOLD:filename>\n')
+
+    def test_inline_cookbook_example_does_not_fetch(self):
+        feed = GoldNeedFeed()
+        text = 'gold-fetch tags like `<NEED_GOLD:README.md>`'
+        a, hit = feed.feed(text)
+        self.assertFalse(hit)
+        self.assertIsNone(feed.filename)
+        self.assertEqual(a + feed.flush(), text)
+
+    def test_inline_then_more_tokens_stay_visible(self):
+        feed = GoldNeedFeed()
+        a, hit = feed.feed('tags like <NEED_GOLD:README.md>')
+        self.assertFalse(hit)
+        b, hit = feed.feed(' and keep going')
+        self.assertFalse(hit)
+        self.assertIsNone(feed.filename)
+        self.assertEqual(
+            a + b + feed.flush(),
+            'tags like <NEED_GOLD:README.md> and keep going',
+        )
+
 
 class RecallStatusTest(unittest.TestCase):
     """Status line for Recalling Documents."""
