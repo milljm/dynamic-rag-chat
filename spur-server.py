@@ -48,7 +48,7 @@ from chat import (  # noqa: E402
     seed_from_string,
 )
 from src.think_tags import ThinkFeed  # noqa: E402
-from src.gold_fetch import GoldNeedFeed, MAX_GOLD_FETCHES  # noqa: E402
+from src.gold_fetch import GoldNeedFeed, MAX_GOLD_FETCHES, recall_status  # noqa: E402
 from src.attachment_store import list_attachments  # noqa: E402
 from src.chat_utils import (  # noqa: E402
     HISTORY_META_KEYS,
@@ -781,6 +781,7 @@ def _iter_sse_chunks(
     reasoning = ''
     model = getattr(renderer.llm, 'model_name', '')
     fetches = 0
+    recalled: list[str] = []
     assistant = bool(getattr(renderer.opts, 'assistant_mode', False))
 
     def bump(count: int = 1) -> None:
@@ -790,6 +791,7 @@ def _iter_sse_chunks(
     while True:
         parser = ThinkFeed()
         gold_feed = GoldNeedFeed()
+        last_gold_channel = 'visible'
         _reset_renderer_think(renderer)
         for chunk in renderer.stream_response(packed):
             if first:
@@ -804,23 +806,33 @@ def _iter_sse_chunks(
                 }).encode()
             visible, thought = parser.feed_chunk(chunk)
             if thought:
-                bump(len(thought.split()))
-                reasoning += thought
-                yield sse({'type': 'reasoning', 'content': thought}).encode()
-            if not visible:
-                continue
-            emit, hit = gold_feed.feed(visible)
-            if emit:
-                bump(renderer.response_count(emit))
-                answer += emit
-                yield sse({'type': 'token', 'content': emit}).encode()
-            if hit:
-                break
+                emit_t, hit_t = gold_feed.feed(thought)
+                if emit_t:
+                    bump(len(emit_t.split()))
+                    reasoning += emit_t
+                    yield sse({'type': 'reasoning', 'content': emit_t}).encode()
+                if hit_t:
+                    last_gold_channel = 'thought'
+                    break
+            if visible:
+                emit_v, hit_v = gold_feed.feed(visible)
+                if emit_v:
+                    bump(renderer.response_count(emit_v))
+                    answer += emit_v
+                    yield sse({'type': 'token', 'content': emit_v}).encode()
+                if hit_v:
+                    last_gold_channel = 'visible'
+                    break
         leftover = gold_feed.flush()
         if leftover and not gold_feed.filename:
-            bump(renderer.response_count(leftover))
-            answer += leftover
-            yield sse({'type': 'token', 'content': leftover}).encode()
+            if last_gold_channel == 'thought':
+                bump(len(leftover.split()))
+                reasoning += leftover
+                yield sse({'type': 'reasoning', 'content': leftover}).encode()
+            else:
+                bump(renderer.response_count(leftover))
+                answer += leftover
+                yield sse({'type': 'token', 'content': leftover}).encode()
         fname = gold_feed.filename
         if (not fname or not assistant or fetches >= MAX_GOLD_FETCHES
                 or meta is None):
@@ -828,10 +840,11 @@ def _iter_sse_chunks(
         if not renderer.state.context.fetch_gold_file(documents, fname):
             break
         fetches += 1
+        recalled.append(fname)
         documents['gold_resume'] = answer
         yield sse({
             'type': 'status',
-            'message': f'Fetching gold: {fname}…',
+            'message': recall_status(recalled),
         }).encode()
         packed = renderer.get_messages(meta, documents)
         model = getattr(renderer.llm, 'model_name', '') or model

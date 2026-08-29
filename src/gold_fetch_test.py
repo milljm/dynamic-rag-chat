@@ -6,10 +6,10 @@ import sys
 import unittest
 
 try:
-    from .gold_fetch import GoldNeedFeed, take_need_gold
+    from .gold_fetch import GoldNeedFeed, take_need_gold, recall_status
 except ImportError:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-    from gold_fetch import GoldNeedFeed, take_need_gold
+    from gold_fetch import GoldNeedFeed, take_need_gold, recall_status
 
 
 class TakeNeedGoldTest(unittest.TestCase):
@@ -45,7 +45,33 @@ class GoldNeedFeedTest(unittest.TestCase):
         self.assertEqual(b, '')
         self.assertEqual(feed.filename, 'prompt_manager.py')
 
-    def test_false_angle(self):
+    def test_tag_inside_reasoning_text(self):
+        feed = GoldNeedFeed()
+        a, hit = feed.feed('need the assembler\n')
+        self.assertFalse(hit)
+        b, hit = feed.feed('<NEED_GOLD:prompt_manager.py>')
+        self.assertTrue(hit)
+        self.assertEqual(feed.filename, 'prompt_manager.py')
+        self.assertEqual((a + b).strip(), 'need the assembler')
+
+
+class RecallStatusTest(unittest.TestCase):
+    """Status line for Recalling Document."""
+
+    def test_one_name(self):
+        self.assertEqual(
+            recall_status(['README.md']),
+            'Recalling Document… [README.md]',
+        )
+
+    def test_clips_at_40(self):
+        label = recall_status([
+            'README.md', 'render_window.py', 'context_manager.py',
+        ])
+        inner = label.split('[', 1)[1].rstrip(']')
+        self.assertLessEqual(len(inner), 40)
+        self.assertTrue(inner.endswith('...'))
+        self.assertIn('README.md', inner)
         feed = GoldNeedFeed()
         a, hit = feed.feed('x < 3 and y > 4')
         self.assertFalse(hit)

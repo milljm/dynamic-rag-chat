@@ -29,7 +29,7 @@ from .chat_utils import CommonUtils, ChatOptions, RAGTag # For Type Hinting
 from .model_orchestrator import Orchestration, MAX_AGENT_CALLS
 from .agent_tools import DuckDuckGoSearchTool
 from .think_tags import ThinkFeed, chunk_text, split_think
-from .gold_fetch import MAX_GOLD_FETCHES, take_need_gold
+from .gold_fetch import MAX_GOLD_FETCHES, take_need_gold, recall_status
 
 
 # pylint: disable=too-many-instance-attributes  # this is what a dataclass is for
@@ -761,6 +761,7 @@ class RenderWindow(PromptManager):
             visible, _ = take_need_gold(assembled)
             return visible
         fetches = 0
+        recalled: list[str] = []
         while fetches < MAX_GOLD_FETCHES:
             visible, fname = take_need_gold(assembled)
             assembled = visible
@@ -769,9 +770,10 @@ class RenderWindow(PromptManager):
             if not self.state.context.fetch_gold_file(documents, fname):
                 break
             fetches += 1
+            recalled.append(fname)
             documents['gold_resume'] = visible
             self.renderable.response = Text(
-                f'Fetching gold: {fname}...', style=f'color({color}',
+                recall_status(recalled), style=f'color({color}',
             )
             self.render_chat(live)
             packed = self.get_messages(meta_data, documents)

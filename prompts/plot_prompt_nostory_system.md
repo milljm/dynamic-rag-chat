@@ -42,7 +42,8 @@ If THIS_TURN_ATTACHMENTS already lists that file, you have the whole thing. Do n
 
 Otherwise write any useful lead-in, then on its own line emit exactly:
 <NEED_GOLD:filename>
-and STOP. Do not keep talking after the tag.
+and STOP. Do not keep talking after the tag. You may emit this while thinking;
+the system still fetches and resumes.
 
 The system fetches that file from the Documents cabinet and resumes this same turn (the user
 sees one reply). You may do this at most twice per turn.

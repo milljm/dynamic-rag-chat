@@ -8,8 +8,19 @@ from __future__ import annotations
 import re
 
 MAX_GOLD_FETCHES = 2
+RECALL_LIST_MAX = 40
 NEED_GOLD_RE = re.compile(r'<NEED_GOLD:\s*([^>\n]+?)\s*>', re.IGNORECASE)
 _TAG_OPEN = '<need_gold:'
+
+
+def recall_status(names: list[str]) -> str:
+    """Recalling Document… [a.py, b.md, c...] — list clipped to 40 chars."""
+    listed = ', '.join(str(n).strip() for n in names if str(n).strip())
+    if len(listed) > RECALL_LIST_MAX:
+        listed = listed[:RECALL_LIST_MAX - 3].rstrip(' ,') + '...'
+    if listed:
+        return f'Recalling Document… [{listed}]'
+    return 'Recalling Document…'
 
 
 def take_need_gold(text: str) -> tuple[str, str | None]:
