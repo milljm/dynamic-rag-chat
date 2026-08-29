@@ -881,6 +881,10 @@ async def api_chat(request: Request) -> StreamingResponse:
                 'message': 'Working — RAG / agent / prompt…',
             }).encode()
             documents, meta = _prepare_chat_documents(chat, body)
+            yield sse({
+                'type': 'documents',
+                'documents': list_attachments(_vector_dir()),
+            }).encode()
             if renderer.orchestrator.requires_agent(meta, documents):
                 yield sse({
                     'type': 'status',
