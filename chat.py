@@ -28,6 +28,7 @@
 #     "langchain-tavily",
 #     "streamlit",
 #     "nodejs",
+#     "fastapi",
 # ]
 # ///
 import os
