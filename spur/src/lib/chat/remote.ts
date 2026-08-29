@@ -6,7 +6,9 @@ export function chatPyOrigin(): string {
 }
 
 export function usesChatPy(): boolean {
-  return Boolean(chatPyOrigin());
+  // Explicit origin (split-dev) or production build served by spur-server.
+  if (chatPyOrigin()) return true;
+  return import.meta.env.PROD === true;
 }
 
 function url(path: string): string {

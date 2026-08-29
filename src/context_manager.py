@@ -565,9 +565,7 @@ class ContextManager(PromptManager):
 
     def _active_branch(self, history: dict) -> str:
         """Return the history branch name for this turn."""
-        if self.opts.assistant_mode:
-            return 'assistant'
-        return history.get('current', 'story')
+        return self.common.active_branch(history)
 
     def _tag_user_query(self, query: str, documents: dict):
         """Run the pre-processor and print debug output. None on failure."""
