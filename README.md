@@ -16,7 +16,8 @@ Light mode (washed dust / sand — turn badges still pop). Each code fence has a
 ![Spur — light](spur/docs/screenshot-light.jpg)
 
 
-That starts `spur-server.py` (the same `Chat` stack as the terminal) and the React UI in `spur/`. Browser opens on `:8080`. Adapter / OpenAPI on `:8765`. `Ctrl-C` stops both.
+That starts `spur-server.py` on **one port** (`http://127.0.0.1:8765`) and serves the built UI from the same process. First run builds the UI (needs Node; conda recipe already has `nodejs`). Rebuild with `./chat.py --spur --spur-rebuild`. `Ctrl-C` stops it.
+
 
 Same flags as the terminal (`--model`, `--assistant-mode`, hosts, …). Put the boring ones in `.chat.yaml`.
 
@@ -70,7 +71,7 @@ That is the whole product: targeted context, not a bigger window.
 
 ## Features
 
-- **Spur UI** — `./chat.py --spur`. React in `spur/`. This is the default way to use the tool.
+- **Spur UI** — `./chat.py --spur`. One process, one URL. This is the default way to use the tool.
 - **Terminal UI** — `prompt_toolkit` + `rich` (Markdown, optional `--light-mode`)
 - **Streamlit UI** — the original GUI if you already live in Python
 - **Streaming** — token-level; Spur shows `Processing Prompt…` / `Streaming…` with `[model] [route] [12.4k]`
@@ -210,7 +211,7 @@ cd dynamic-rag-chat
 uv pip install -r requirements.txt
 ```
 
-First `./chat.py --spur` will `npm install` in `spur/` if `node_modules` is missing.
+First `./chat.py --spur` will `npm install` and build the UI in `spur/` if needed. After that it is just Python.
 
 Python 3.10+ (3.13 is what the conda line above uses). This tree now tracks **LangChain 1.x** ([issue #23](https://github.com/milljm/dynamic-rag-chat/issues/23)). Retrievers / `AgentExecutor` live in `langchain-classic`; prompts, messages, and tools in `langchain-core`.
 

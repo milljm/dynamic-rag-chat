@@ -1097,7 +1097,9 @@ def _add_runtime_args(parser, D):
                          default=D('light_mode'),
                          help='Use a color scheme suitable for light-background terminals.')
     ui_args.add_argument('--spur', action='store_true', default=False,
-                         help='Open the Spur browser UI (adapter + Vite, one command).')
+                         help='Open the Spur browser UI (one process: adapter + built UI).')
+    ui_args.add_argument('--spur-rebuild', action='store_true', default=False,
+                         help='Force a rebuild of the Spur UI before serving.')
     ui_args.add_argument('-v', '--verbose', action='store_true',
                          default=D('verbose'),
                          help='Do not hide what the model is thinking\n'

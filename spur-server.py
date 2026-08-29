@@ -8,10 +8,13 @@ prepare_turn, stream_response, save_history. LM Studio (or whatever is
 in .chat.yaml) is reached the same way the terminal app already does.
 
   ./chat.py --spur
-  # or: python spur-server.py   then   VITE_CHAT_API=http://127.0.0.1:8765 npm run dev
 
-The UI lives in ./spur/. Built files (if present) are served from
-spur/dist; otherwise ./chat.py --spur starts Vite next to this adapter.
+One process: this adapter on :8765 also serves the built UI from
+spur/dist/client. First run builds the UI (needs Node). Rebuild with
+./chat.py --spur --spur-rebuild.
+
+Split-dev (optional): python spur-server.py   then
+  VITE_CHAT_API=http://127.0.0.1:8765 npm run dev   in spur/
 """
 from __future__ import annotations
 
@@ -1021,16 +1024,40 @@ def health() -> JSONResponse:
 
 
 STATIC = os.environ.get('SPUR_STATIC') or ''
-if not STATIC:
-    for _candidate in (
+_UI_MOUNTED = False
+
+
+def ui_root() -> str:
+    """Folder with index.html (built SPA). Empty string if none."""
+    env = os.environ.get('SPUR_STATIC') or ''
+    if env and os.path.isfile(os.path.join(env, 'index.html')):
+        return env
+    for candidate in (
+        os.path.join(ROOT, 'spur', 'dist', 'client'),
         os.path.join(ROOT, 'spur', 'dist'),
         os.path.join(ROOT, 'spur-ui'),
+        os.path.join(ROOT, 'spur', '.output', 'public'),
     ):
-        if os.path.isdir(_candidate):
-            STATIC = _candidate
-            break
-if STATIC and os.path.isdir(STATIC):
-    app.mount('/', StaticFiles(directory=STATIC, html=True), name='ui')
+        if os.path.isfile(os.path.join(candidate, 'index.html')):
+            return candidate
+    return ''
+
+
+def mount_ui(root: str | None = None) -> None:
+    """Serve the built SPA from the same origin as /api (idempotent)."""
+    global _UI_MOUNTED, STATIC
+    if _UI_MOUNTED:
+        return
+    folder = root or ui_root()
+    if not folder or not os.path.isdir(folder):
+        return
+    STATIC = folder
+    app.mount('/', StaticFiles(directory=folder, html=True), name='ui')
+    _UI_MOUNTED = True
+
+
+if os.environ.get('SPUR_NO_MOUNT') != '1':
+    mount_ui()
 
 
 if __name__ == '__main__':

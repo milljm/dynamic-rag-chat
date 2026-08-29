@@ -18,9 +18,9 @@ From the repo root (not this folder):
 ./chat.py --spur --assistant-mode
 ```
 
-That starts the adapter on `:8765` and Vite on `:8080`. `Ctrl-C` stops both.
+That starts **one process** on `http://127.0.0.1:8765` (adapter + built UI). First run builds the UI. `Ctrl-C` stops it. Force a rebuild: `./chat.py --spur --spur-rebuild`.
 
-Split-dev:
+Split-dev (UI hot reload):
 
 ```bash
 python spur-server.py

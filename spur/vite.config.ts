@@ -166,14 +166,18 @@ export default defineConfig(({ command, isPreview }) => ({
     // PWA head + ?install=1 tutorial page; runs before Start/Nitro.
     grokPwaPlugin(),
     tailwindcss(),
-    tanstackStart(),
-    ...(command === "build" || isPreview
+    tanstackStart({
+      spa: {
+        enabled: true,
+        prerender: { outputPath: "/index.html" },
+      },
+    }),
+    // FastAPI serves dist/client. Nitro is opt-in (SPUR_NITRO=1) for the old
+    // Grok/Vercel path. Keep serverDir in this file for the tripwire test.
+    ...(command === "build" && process.env.SPUR_NITRO === "1"
       ? [
           nitro({
             preset: "vercel",
-            // Auto-registers server/middleware/* (the PWA install page +
-            // manifest + head-tag middleware). Nitro v3 defaults serverDir to
-            // false, so removing this silently unwires /?install=1 on deploys.
             serverDir: "./server",
           }),
         ]
