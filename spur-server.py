@@ -793,36 +793,45 @@ def _iter_sse_chunks(
         gold_feed = GoldNeedFeed()
         last_gold_channel = 'visible'
         _reset_renderer_think(renderer)
-        for chunk in renderer.stream_response(packed):
-            if first:
-                ttft = time.time() - started
-                first = False
-                yield sse({
-                    'type': 'status',
-                    'message': 'Streaming…',
-                    'model': model or '',
-                    'route': route or '',
-                    'context': context or 0,
-                }).encode()
-            visible, thought = parser.feed_chunk(chunk)
-            if thought:
-                emit_t, hit_t = gold_feed.feed(thought)
-                if emit_t:
-                    bump(len(emit_t.split()))
-                    reasoning += emit_t
-                    yield sse({'type': 'reasoning', 'content': emit_t}).encode()
-                if hit_t:
-                    last_gold_channel = 'thought'
-                    break
-            if visible:
-                emit_v, hit_v = gold_feed.feed(visible)
-                if emit_v:
-                    bump(renderer.response_count(emit_v))
-                    answer += emit_v
-                    yield sse({'type': 'token', 'content': emit_v}).encode()
-                if hit_v:
-                    last_gold_channel = 'visible'
-                    break
+        chunks = renderer.stream_response(packed)
+        try:
+            for chunk in chunks:
+                if first:
+                    ttft = time.time() - started
+                    first = False
+                    yield sse({
+                        'type': 'status',
+                        'message': 'Streaming…',
+                        'model': model or '',
+                        'route': route or '',
+                        'context': context or 0,
+                    }).encode()
+                visible, thought = parser.feed_chunk(chunk)
+                if thought:
+                    emit_t, hit_t = gold_feed.feed(thought)
+                    if emit_t:
+                        bump(len(emit_t.split()))
+                        reasoning += emit_t
+                        yield sse({'type': 'reasoning', 'content': emit_t}).encode()
+                    if hit_t:
+                        last_gold_channel = 'thought'
+                        break
+                if visible:
+                    emit_v, hit_v = gold_feed.feed(visible)
+                    if emit_v:
+                        bump(renderer.response_count(emit_v))
+                        answer += emit_v
+                        yield sse({'type': 'token', 'content': emit_v}).encode()
+                    if hit_v:
+                        last_gold_channel = 'visible'
+                        break
+        finally:
+            closer = getattr(chunks, 'close', None)
+            if callable(closer):
+                try:
+                    closer()
+                except Exception:  # pylint: disable=broad-exception-caught
+                    pass
         leftover = gold_feed.flush()
         if leftover and not gold_feed.filename:
             if last_gold_channel == 'thought':
