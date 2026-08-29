@@ -63,10 +63,16 @@ export type SettingsPayload = {
   busy?: boolean;
 };
 
+export type ModelInfo = { id: string; loaded?: boolean | null };
+
 export type PingResult = {
   ok: boolean;
   error?: string | null;
   models: string[];
+  details?: ModelInfo[];
+  loaded?: string[];
+  knows_loaded?: boolean;
+  source?: string;
   url?: string;
 };
 
@@ -123,10 +129,19 @@ export async function pingSettings(host: string, apiKey: string): Promise<PingRe
     body: JSON.stringify({ host, api_key: apiKey }),
   });
   const json = (await res.json()) as PingResult;
+  const details = Array.isArray(json.details)
+    ? json.details
+        .filter((row) => row && typeof row.id === "string")
+        .map((row) => ({ id: row.id, loaded: row.loaded ?? null }))
+    : [];
   return {
     ok: Boolean(json.ok),
     error: json.error,
     models: Array.isArray(json.models) ? json.models.map(String) : [],
+    details,
+    loaded: Array.isArray(json.loaded) ? json.loaded.map(String) : [],
+    knows_loaded: Boolean(json.knows_loaded),
+    source: json.source,
     url: json.url,
   };
 }

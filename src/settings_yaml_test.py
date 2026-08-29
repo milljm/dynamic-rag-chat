@@ -9,9 +9,11 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from settings_yaml import (  # noqa: E402
+    list_model_urls,
     list_models,
     load_file,
     models_urls,
+    parse_models_payload,
     read_values,
     save_file,
     upsert_key,
@@ -80,6 +82,48 @@ class SettingsYamlTest(unittest.TestCase):
             models_urls('http://localhost:1234/v1'),
             ['http://localhost:1234/v1/models'],
         )
+
+    def test_list_model_urls_prefers_lmstudio_native(self):
+        urls = list_model_urls('http://127.0.0.1:1234/v1')
+        self.assertEqual(urls[0], 'http://127.0.0.1:1234/api/v1/models')
+        self.assertEqual(urls[1], 'http://127.0.0.1:1234/api/v0/models')
+        self.assertIn('http://127.0.0.1:1234/v1/models', urls)
+
+    def test_openai_cloud_skips_native(self):
+        urls = list_model_urls('https://api.openai.com/v1')
+        self.assertFalse(any(u.endswith('/api/v0/models') for u in urls))
+        self.assertTrue(any(u.endswith('/v1/models') for u in urls))
+
+
+    def test_parse_lmstudio_v0_state(self):
+        parsed = parse_models_payload({
+            'data': [
+                {'id': 'hot-model', 'state': 'loaded'},
+                {'id': 'cold-model', 'state': 'not-loaded'},
+            ],
+        })
+        self.assertEqual(parsed['source'], 'lmstudio-v0')
+        self.assertEqual(parsed['loaded'], ['hot-model'])
+        self.assertTrue(parsed['knows_loaded'])
+
+    def test_parse_lmstudio_v1_instances(self):
+        parsed = parse_models_payload({
+            'models': [
+                {'key': 'google/gemma', 'loaded_instances': [{'id': 'x'}]},
+                {'key': 'other', 'loaded_instances': []},
+            ],
+        })
+        self.assertEqual(parsed['source'], 'lmstudio-v1')
+        self.assertEqual(parsed['loaded'], ['google/gemma'])
+
+    def test_parse_openai_has_no_loaded(self):
+        parsed = parse_models_payload({
+            'data': [{'id': 'gpt-4o'}, {'id': 'gpt-4.1'}],
+        })
+        self.assertEqual(parsed['source'], 'openai')
+        self.assertFalse(parsed['knows_loaded'])
+        self.assertEqual(parsed['models'], ['gpt-4o', 'gpt-4.1'])
+
 
     def test_list_models_empty_host(self):
         result = list_models('')

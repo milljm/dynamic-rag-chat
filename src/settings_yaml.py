@@ -151,6 +151,20 @@ def save_file(path: Path, values: dict[str, str]) -> None:
     path.write_text(upsert_keys(existing, values), encoding='utf-8')
 
 
+def origin_of(host: str) -> str:
+    """Scheme + host + port, stripping /v1 and /models suffixes."""
+    base = (host or '').strip().rstrip('/')
+    if not base:
+        return ''
+    for suffix in (
+        '/api/v1/models', '/api/v0/models', '/v1/models', '/models', '/v1',
+    ):
+        if base.endswith(suffix):
+            base = base[: -len(suffix)]
+            break
+    return base.rstrip('/')
+
+
 def models_urls(host: str) -> list[str]:
     """Candidate OpenAI-compatible ``/models`` URLs for a typed host."""
     base = (host or '').strip().rstrip('/')
@@ -164,11 +178,80 @@ def models_urls(host: str) -> list[str]:
     return urls
 
 
+def list_model_urls(host: str) -> list[str]:
+    """LM Studio native first (loaded vs downloaded), then OpenAI ``/models``."""
+    origin = origin_of(host)
+    urls: list[str] = []
+    if origin and 'api.openai.com' not in origin.lower():
+        urls.extend((f'{origin}/api/v1/models', f'{origin}/api/v0/models'))
+    urls.extend(models_urls(host))
+    seen: list[str] = []
+    for address in urls:
+        if address not in seen:
+            seen.append(address)
+    return seen
+
+
+def parse_models_payload(payload: Any, url: str = '') -> dict[str, Any]:
+    """Normalize LM Studio v1/v0 and OpenAI ``/models`` payloads."""
+    details: list[dict[str, Any]] = []
+    source = 'openai'
+    if isinstance(payload, dict) and isinstance(payload.get('models'), list):
+        source = 'lmstudio-v1'
+        for item in payload['models']:
+            if not isinstance(item, dict):
+                continue
+            ident = item.get('key') or item.get('id') or item.get('display_name')
+            if not ident:
+                continue
+            instances = item.get('loaded_instances')
+            loaded = bool(instances) if isinstance(instances, list) else None
+            details.append({'id': str(ident), 'loaded': loaded})
+    elif isinstance(payload, dict) and isinstance(payload.get('data'), list):
+        has_state = False
+        for item in payload['data']:
+            if isinstance(item, str) and item:
+                details.append({'id': item, 'loaded': None})
+                continue
+            if not isinstance(item, dict):
+                continue
+            ident = item.get('id') or item.get('name') or ''
+            if not ident:
+                continue
+            state = item.get('state')
+            loaded = None
+            if state is not None:
+                has_state = True
+                loaded = str(state).strip().lower() == 'loaded'
+            details.append({'id': str(ident), 'loaded': loaded})
+        if has_state:
+            source = 'lmstudio-v0'
+    elif isinstance(payload, list):
+        for item in payload:
+            if isinstance(item, str) and item:
+                details.append({'id': item, 'loaded': None})
+    names = [row['id'] for row in details]
+    loaded_ids = [row['id'] for row in details if row.get('loaded')]
+    return {
+        'ok': True,
+        'error': None,
+        'models': names,
+        'details': details,
+        'loaded': loaded_ids,
+        'knows_loaded': any(row.get('loaded') is not None for row in details),
+        'source': source,
+        'url': url,
+    }
+
+
 def list_models(host: str, api_key: str = 'none', timeout: float = 3.0) -> dict[str, Any]:
-    """GET ``/models`` on an OpenAI-compatible server."""
-    urls = models_urls(host)
+    """List models; prefer LM Studio native so we can mark what is loaded."""
+    urls = list_model_urls(host)
     if not urls:
-        return {'ok': False, 'error': 'Server URL is empty.', 'models': [], 'latency_ms': 0}
+        return {
+            'ok': False, 'error': 'Server URL is empty.', 'models': [],
+            'details': [], 'loaded': [], 'knows_loaded': False,
+        }
     headers = {'Authorization': f'Bearer {blank(api_key) or "none"}'}
     last_error = 'No response'
     for address in urls:
@@ -177,26 +260,17 @@ def list_models(host: str, api_key: str = 'none', timeout: float = 3.0) -> dict[
             with urllib.request.urlopen(req, timeout=timeout) as resp:
                 body = resp.read().decode('utf-8', errors='replace')
             payload = json.loads(body)
-            names: list[str] = []
-            data = payload.get('data') if isinstance(payload, dict) else payload
-            if isinstance(data, list):
-                for item in data:
-                    if isinstance(item, str) and item:
-                        names.append(item)
-                    elif isinstance(item, dict):
-                        ident = item.get('id') or item.get('name') or ''
-                        if ident:
-                            names.append(str(ident))
-            return {
-                'ok': True,
-                'error': None,
-                'models': names,
-                'url': address,
-            }
+            parsed = parse_models_payload(payload, address)
+            if parsed['models']:
+                return parsed
+            last_error = f'{address} returned no models'
         except urllib.error.HTTPError as exc:
             last_error = f'{exc.code} {exc.reason}'
         except urllib.error.URLError as exc:
             last_error = str(getattr(exc, 'reason', exc))
         except (TimeoutError, json.JSONDecodeError, OSError) as exc:
             last_error = str(exc)
-    return {'ok': False, 'error': last_error, 'models': []}
+    return {
+        'ok': False, 'error': last_error, 'models': [],
+        'details': [], 'loaded': [], 'knows_loaded': False,
+    }

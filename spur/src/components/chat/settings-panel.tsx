@@ -6,6 +6,7 @@ import {
   pingSettings,
   saveSettings,
   ROUTE_ROWS,
+  type ModelInfo,
   type SettingsKey,
   type SettingsValues,
 } from "@/lib/chat/settings";
@@ -43,16 +44,25 @@ function ModelSelect({
   value,
   onChange,
   models,
+  details,
   emptyLabel,
   required,
 }: {
   value: string;
   onChange: (next: string) => void;
   models: string[];
+  details: ModelInfo[];
   emptyLabel?: string;
   required?: boolean;
 }) {
-  if (models.length === 0) {
+  const info: ModelInfo[] = details.length
+    ? details
+    : models.map((id) => ({ id, loaded: null }));
+  const ids = info.map((row) => row.id);
+  if (value && !ids.includes(value)) {
+    info.unshift({ id: value, loaded: null });
+  }
+  if (info.length === 0) {
     return (
       <Input
         value={value}
@@ -62,8 +72,14 @@ function ModelSelect({
       />
     );
   }
-  const options = [...models];
-  if (value && !options.includes(value)) options.unshift(value);
+  const knows = info.some((row) => row.loaded === true || row.loaded === false);
+  const hot = info.filter((row) => row.loaded);
+  const rest = info.filter((row) => !row.loaded);
+  const renderOption = (row: ModelInfo) => (
+    <option key={row.id} value={row.id}>
+      {row.loaded ? `● ${row.id}` : row.id}
+    </option>
+  );
   return (
     <select
       className={cn(fieldClass, "appearance-auto")}
@@ -76,11 +92,18 @@ function ModelSelect({
           Select a model…
         </option>
       ) : null}
-      {options.map((name) => (
-        <option key={name} value={name}>
-          {name}
-        </option>
-      ))}
+      {knows ? (
+        <>
+          {hot.length ? (
+            <optgroup label="Loaded">{hot.map(renderOption)}</optgroup>
+          ) : null}
+          {rest.length ? (
+            <optgroup label="Downloaded">{rest.map(renderOption)}</optgroup>
+          ) : null}
+        </>
+      ) : (
+        info.map(renderOption)
+      )}
     </select>
   );
 }
@@ -117,12 +140,39 @@ function SettingsPanel({
   const [values, setValues] = useState<SettingsValues | null>(null);
   const [effective, setEffective] = useState<SettingsValues | null>(null);
   const [models, setModels] = useState<string[]>([]);
+  const [details, setDetails] = useState<ModelInfo[]>([]);
   const [pingNote, setPingNote] = useState("");
   const [saving, setSaving] = useState(false);
   const [pinging, setPinging] = useState(false);
 
   function patch(key: SettingsKey, value: string) {
     setValues((prev) => (prev ? { ...prev, [key]: value } : prev));
+  }
+
+  function applyPing(ping: {
+    models: string[];
+    details?: ModelInfo[];
+    loaded?: string[];
+    knows_loaded?: boolean;
+  }) {
+    const rows = (
+      ping.details?.length
+        ? ping.details
+        : ping.models.map((id) => ({ id, loaded: null as boolean | null }))
+    )
+      .slice()
+      .sort((a, b) => {
+        if (Boolean(a.loaded) !== Boolean(b.loaded)) return a.loaded ? -1 : 1;
+        return a.id.localeCompare(b.id);
+      });
+    setDetails(rows);
+    setModels(rows.map((row) => row.id));
+    const hot = rows.filter((row) => row.loaded).length;
+    if (ping.knows_loaded) {
+      setPingNote(`${hot} loaded · ${rows.length} downloaded`);
+    } else {
+      setPingNote(`${rows.length} models`);
+    }
   }
 
   useEffect(() => {
@@ -150,12 +200,8 @@ function SettingsPanel({
         setEffective(payload.effective);
         if (merged.llm_server) {
           const ping = await pingSettings(merged.llm_server, merged.api_key);
-          if (!cancelled && ping.ok) {
-            setModels([...new Set(ping.models)].sort((a, b) => a.localeCompare(b)));
-            setPingNote(`${ping.models.length} models`);
-          } else if (!cancelled) {
-            setPingNote(ping.error || "unreachable");
-          }
+          if (!cancelled && ping.ok) applyPing(ping);
+          else if (!cancelled) setPingNote(ping.error || "unreachable");
         }
       } catch (err) {
         if (!cancelled) toast.error(String(err));
@@ -176,9 +222,15 @@ function SettingsPanel({
     try {
       const ping = await pingSettings(host, key || "none");
       if (ping.ok) {
-        setModels([...new Set(ping.models)].sort((a, b) => a.localeCompare(b)));
-        setPingNote(`${ping.models.length} models`);
-        if (noisy) toast.success(`Reachable — ${ping.models.length} models`);
+        applyPing(ping);
+        if (noisy) {
+          const hot = (ping.loaded || []).length;
+          toast.success(
+            ping.knows_loaded
+              ? `Reachable — ${hot} loaded · ${ping.models.length} downloaded`
+              : `Reachable — ${ping.models.length} models`,
+          );
+        }
       } else {
         setPingNote(ping.error || "unreachable");
         if (noisy) toast.error(ping.error || "Server did not answer");
@@ -295,6 +347,7 @@ function SettingsPanel({
                     value={values.model}
                     onChange={(v) => patch("model", v)}
                     models={models}
+                    details={details}
                   />
                 </Field>
                 <Field label="Pre-conditioner">
@@ -303,6 +356,7 @@ function SettingsPanel({
                     value={values.pre_llm}
                     onChange={(v) => patch("pre_llm", v)}
                     models={models}
+                    details={details}
                   />
                 </Field>
                 <Field label="Embeddings">
@@ -311,6 +365,7 @@ function SettingsPanel({
                     value={values.embedding_llm}
                     onChange={(v) => patch("embedding_llm", v)}
                     models={models}
+                    details={details}
                   />
                 </Field>
               </section>
@@ -334,6 +389,7 @@ function SettingsPanel({
                         value={values[row.llm]}
                         onChange={(v) => patch(row.llm, v)}
                         models={models}
+                        details={details}
                         emptyLabel={
                           row.id === "vision" ||
                           row.id === "agent" ||
