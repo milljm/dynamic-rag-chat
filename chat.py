@@ -1102,6 +1102,9 @@ def _add_runtime_args(parser, D, use_defaults: bool):
     ui_args.add_argument('--spur-rebuild', action='store_true',
                          default=False if use_defaults else argparse.SUPPRESS,
                          help='Force a rebuild of the Spur UI before serving.')
+    ui_args.add_argument('--serve', action='store_true',
+                         default=False if use_defaults else argparse.SUPPRESS,
+                         help='With --spur: bind 0.0.0.0 so an iPad on the LAN can open Spur.')
     ui_args.add_argument('-v', '--verbose', action='store_true',
                          default=D('verbose'),
                          help='Do not hide what the model is thinking\n'
@@ -1218,6 +1221,7 @@ Assistant Mode:
 Spur (browser UI, same flags):
   ./{os.path.basename(__file__)} --spur
   ./{os.path.basename(__file__)} --spur --assistant-mode
+  ./{os.path.basename(__file__)} --spur --serve
 
 That's a lot of available options! The only required options are --model,
 --pre-llm, and --embedding-llm. Everything else is optional.
@@ -1252,7 +1256,7 @@ arguments. See `.chat.yaml.example` for details.
 if __name__ == '__main__':
     opts = ChatOptions.from_yaml(current_dir)
     args = parse_args(sys.argv[1:], opts)
-    if getattr(args, 'spur', False):
+    if getattr(args, 'spur', False) or getattr(args, 'serve', False):
         from spur_launch import launch as _launch_spur
         sys.exit(_launch_spur(sys.argv[1:]))
     _opts = ChatOptions.from_args(current_dir, args, opts)

@@ -395,7 +395,7 @@ class ChatOptions:
     }
 
     _INT_FIELDS = {'matches', 'completion_tokens', 'chat_history', 'history_sessions'}
-    _IGNORED_FIELDS = {'color', 'use_rags', 'spur', 'spur_rebuild'}
+    _IGNORED_FIELDS = {'color', 'use_rags', 'spur', 'spur_rebuild', 'serve'}
     @classmethod
     def _build(cls,
                current_dir: str | Path,

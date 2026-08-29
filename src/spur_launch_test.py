@@ -14,6 +14,7 @@ from spur_launch import (  # noqa: E402
     SERVER_SCRIPT,
     SPUR_DIR,
     find_ui_root,
+    lan_ips,
     strip_spur_flag,
     strip_spur_flags,
 )
@@ -35,7 +36,16 @@ class SpurLaunchTest(unittest.TestCase):
             strip_spur_flags(['--spur-rebuild', '--spur', '--assistant-mode']),
             ['--assistant-mode'],
         )
+        self.assertEqual(
+            strip_spur_flags(['--spur', '--serve', '--assistant-mode']),
+            ['--assistant-mode'],
+        )
         self.assertEqual(strip_spur_flag(['--assistant-mode']), ['--assistant-mode'])
+
+    def test_lan_ips_are_not_loopback(self):
+        for ip in lan_ips():
+            self.assertFalse(ip.startswith('127.'), ip)
+            self.assertNotIn(':', ip)
 
     def test_ui_and_adapter_live_in_this_repo(self):
         self.assertTrue((SPUR_DIR / 'package.json').is_file(), SPUR_DIR)
