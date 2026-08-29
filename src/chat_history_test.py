@@ -10,6 +10,7 @@ import pickle
 import sys
 import tempfile
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 
 try:
     from .chat_utils import (
@@ -115,6 +116,26 @@ class ChatHistoryJsonTest(unittest.TestCase):
             asst = loaded['story'][-1]
             self.assertEqual(asst['reasoning'], 'The user said hi; greet them.')
             self.assertEqual(asst['content'], 'Hello.')
+
+    def test_concurrent_writes_leave_valid_json(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, HISTORY_JSON)
+            _atomic_write_json(path, _hist(story=[]))
+
+            def write(i):
+                _atomic_write_json(path, _hist(
+                    story=[{'role': 'user', 'content': f'turn-{i}'}],
+                ))
+
+            with ThreadPoolExecutor(max_workers=8) as pool:
+                list(pool.map(write, range(24)))
+            loaded = load_history_from_dir(tmp, migrate=False)
+            self.assertIsInstance(loaded, dict)
+            self.assertTrue(loaded['story'][0]['content'].startswith('turn-'))
+            self.assertFalse(any(
+                name.endswith('.tmp') for name in os.listdir(tmp)
+                if not name.endswith('.lock')
+            ))
 
 
 class AttachmentHelpersTest(unittest.TestCase):

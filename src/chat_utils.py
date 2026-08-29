@@ -8,6 +8,10 @@ import pickle
 import json
 import datetime
 import secrets
+import tempfile
+import shutil
+import fcntl
+from contextlib import contextmanager
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Any, Mapping, Optional
@@ -96,21 +100,53 @@ def _read_pickle_dict(path: str) -> dict | None:
 
 
 def _atomic_write_json(path: str, data: dict) -> None:
-    """Write JSON via tmp + fsync + replace. Keeps path.bak on success."""
-    tmp = path + '.tmp'
+    """Write JSON via unique tmp + fsync + replace. Keeps path.bak as a copy.
+
+    Concurrent saves (Spur persist + session GET) must not share chat_history.json.tmp
+    or replace() the live file away before the tmp exists.
+    """
+    directory = os.path.dirname(path) or '.'
+    os.makedirs(directory, exist_ok=True)
     bak = path + '.bak'
-    os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
-    with open(tmp, 'w', encoding='utf-8') as handle:
-        json.dump(data, handle, ensure_ascii=False, indent=2, default=_json_default)
-        handle.write('\n')
-        handle.flush()
-        os.fsync(handle.fileno())
-    if os.path.exists(path):
+    with _history_lock(path):
+        fd, tmp = tempfile.mkstemp(prefix='.chat_history.', suffix='.tmp', dir=directory)
         try:
-            os.replace(path, bak)
+            with os.fdopen(fd, 'w', encoding='utf-8') as handle:
+                json.dump(
+                    data, handle, ensure_ascii=False, indent=2, default=_json_default,
+                )
+                handle.write('\n')
+                handle.flush()
+                os.fsync(handle.fileno())
+            if os.path.isfile(path):
+                try:
+                    shutil.copy2(path, bak)
+                except OSError:
+                    pass
+            os.replace(tmp, path)
+            tmp = ''
+        finally:
+            if tmp:
+                try:
+                    os.remove(tmp)
+                except OSError:
+                    pass
+
+
+@contextmanager
+def _history_lock(path: str):
+    """Exclusive lock so two threads cannot interleave save/load-migrate."""
+    lock_path = path + '.lock'
+    handle = open(lock_path, 'a+', encoding='utf-8')
+    try:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        yield
+    finally:
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
         except OSError:
             pass
-    os.replace(tmp, path)
+        handle.close()
 
 
 def load_history_from_dir(vector_dir: str, *, migrate: bool = True) -> dict | None:
@@ -128,6 +164,10 @@ def load_history_from_dir(vector_dir: str, *, migrate: bool = True) -> dict | No
         if loaded is not None:
             print(f'Warning: restored chat history from {json_path}.bak')
             source = 'json'
+            try:
+                _atomic_write_json(json_path, loaded)
+            except OSError:
+                pass
     if loaded is None:
         loaded = _read_pickle_dict(pkl_path)
         if loaded is None:
@@ -717,7 +757,6 @@ class CommonUtils():
             return
         history.setdefault('version', HISTORY_VERSION)
         history_file = os.path.join(self.opts.vector_dir, HISTORY_JSON)
-        tmp = history_file + '.tmp'
         try:
             _atomic_write_json(history_file, history)
             self.chat_history_session = history
@@ -725,10 +764,6 @@ class CommonUtils():
             print(f'Error saving chat. Check --history-dir\n{e}')
         except Exception as exc:  # pylint: disable=broad-exception-caught
             print(f'Error saving chat: {exc}')
-            try:
-                os.remove(tmp)
-            except OSError:
-                pass
 
     def load_chat(self)->dict:
         """Load JSON history, migrating pickle if that is all we have."""
