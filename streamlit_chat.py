@@ -990,6 +990,7 @@ def call_llm_stream(
     if renderer.orchestrator.requires_agent(meta, documents):
         status.markdown('Agent tool web search…')
     messages = renderer.get_messages(meta, documents)
+    renderer.set_llm(meta, documents)
     status.markdown(f'Streaming `{renderer.llm.model_name}`')
     metrics.model = renderer.llm.model_name
     metrics.prompt_tokens = documents.get('prompt_tokens', 0)

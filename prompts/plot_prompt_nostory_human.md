@@ -1,8 +1,7 @@
 {% if has_agent_error %}
-<AGENT_ERROR: TRUE>
-The agent failed. You must say so and you may not answer the user's question.
-Apologize; a retry usually fixes a search glitch. Mention why if it helps.
-</AGENT_ERROR: TRUE>
+<LOOKUP_FAILED>
+A live lookup failed. Tell the user you could not fetch current information. Do not guess. Do not mention tools, agents, or pipelines.
+</LOOKUP_FAILED>
 {% endif %}
 <SYSTEM_TIME: {{date_time}}>
 <TURN_NUMBER: {{turn_num}}>

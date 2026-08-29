@@ -1037,6 +1037,7 @@ async def api_chat(request: Request) -> StreamingResponse:
                 }).encode()
             renderer.set_llm(meta, documents)
             packed = renderer.get_messages(meta, documents)
+            renderer.set_llm(meta, documents)
             model = getattr(renderer.llm, 'model_name', '') or ''
             route = (renderer.orchestrator.name_of(renderer.llm)
                      or renderer.orchestrator.get_route_name(meta, documents))

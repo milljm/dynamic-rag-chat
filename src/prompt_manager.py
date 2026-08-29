@@ -80,6 +80,15 @@ class PromptManager():
                 parts.append(self.get_prompt(extra))
         if has_index and not resume:
             parts.append(self.get_prompt(f'{self.plot_prompt_file}_need_gold.md'))
+        searched = (
+            int(documents.get('agent_calls') or 0) > 0
+            or 'WEB_SEARCH' in str(documents.get('dynamic_files') or '')
+            or 'AGENT_TOOL_RESULT' in str(documents.get('dynamic_files') or '')
+        )
+        if searched:
+            extra = f'{self.plot_prompt_file}_search.md'
+            if os.path.exists(extra):
+                parts.append(self.get_prompt(extra))
         return '\n'.join(parts), human
 
     def compose_nostory_tag(self, documents: dict) -> str:

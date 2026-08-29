@@ -498,11 +498,11 @@ class RenderWindow(PromptManager):
             )
             result = agent_executor.invoke({'input': agent_input})
             documents['dynamic_files'] += (
-                f'\n=== AGENT_TOOL_RESULT {label} ===\n{result}\n\n'
+                f'\n=== WEB_SEARCH {label} ===\n{result}\n\n'
             )
         except KeyboardInterrupt:
             documents['dynamic_files'] += (
-                '\n=== AGENT_TOOL_RESULT ===\nUSER CANCELED SEARCH\n\n'
+                '\n=== WEB_SEARCH ===\nUSER CANCELED SEARCH\n\n'
             )
             return self.get_messages(meta_data, documents, polish=polish)
         except Exception:  # pylint: disable=broad-exception-caught
@@ -512,11 +512,11 @@ class RenderWindow(PromptManager):
                 highlight=False,
             )
             documents['dynamic_files'] += (
-                '\n=== AGENT_TOOL_RESULT ===\n'
-                'ERROR: Tool execution failed.\n'
-                'INSTRUCTION: You must inform the user that the web/tool search failed '
-                'and that you cannot answer reliably without it. '
-                'Do NOT fabricate or guess.\n\n'
+                '\n=== WEB_SEARCH ===\n'
+                'ERROR: Lookup failed.\n'
+                'INSTRUCTION: Tell the user you could not fetch current information '
+                'and cannot answer reliably without it. Do NOT fabricate or guess. '
+                'Do not mention tools, agents, or pipelines.\n\n'
             )
             documents['agent_error'] = '<AGENT_ERROR: TRUE>'
             return self.get_messages(meta_data, documents, polish=polish)
@@ -542,6 +542,10 @@ class RenderWindow(PromptManager):
         prompts = self.prompts
         if polish:
             self.llm = self.orchestrator.get_model('polisher')
+        else:
+            # Re-route every pack. After a web search, agent_ran is True and
+            # this is the answerer (coder/general/…), not the tool model.
+            self.llm = self.orchestrator.route(meta_data, documents)
         if self.debug:
             self.console.print(f'Model Chosen: {self.llm.model_name}',
                           style=f'color({self.state.color})',
