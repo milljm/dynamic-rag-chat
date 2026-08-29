@@ -740,7 +740,8 @@ def _reset_renderer_think(renderer) -> None:
 
 
 def _iter_sse_chunks(
-    renderer, packed, documents: dict, stats: dict, route: str = '',
+    renderer, packed, documents: dict, stats: dict,
+    route: str = '', context: int = 0,
 ) -> Iterator[bytes]:
     """Yield token/reasoning/status/usage SSE frames for one LLM stream."""
     _reset_renderer_think(renderer)
@@ -766,6 +767,7 @@ def _iter_sse_chunks(
                 'message': 'Streaming…',
                 'model': model or '',
                 'route': route or '',
+                'context': context or 0,
             }).encode()
         visible, thought = parser.feed_chunk(chunk)
         if thought:
@@ -822,15 +824,20 @@ async def api_chat(request: Request) -> StreamingResponse:
             model = getattr(renderer.llm, 'model_name', '') or ''
             route = (renderer.orchestrator.name_of(renderer.llm)
                      or renderer.orchestrator.get_route_name(meta, documents))
+            context = int(documents.get('prompt_tokens') or 0)
+            if not context:
+                context = renderer.packed_prompt_tokens(packed)
+                documents['prompt_tokens'] = context
             yield sse({
                 'type': 'status',
                 'message': 'Processing Prompt…',
                 'model': model,
                 'route': route,
+                'context': context,
             }).encode()
             stats: dict = {}
             yield from _iter_sse_chunks(
-                renderer, packed, documents, stats, route=route,
+                renderer, packed, documents, stats, route=route, context=context,
             )
             if ((stats.get('answer') or stats.get('reasoning'))
                     and not documents.get('no_context')):
