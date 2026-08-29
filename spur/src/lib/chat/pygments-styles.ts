@@ -77,7 +77,7 @@ export function paletteFor(
 ): PygmentsPalette {
   const found = findPalette(id);
   if (found) return found;
-  const fallback = resolved === "light" ? "stata-light" : "fruity";
+  const fallback = resolved === "light" ? "stata-light" : "coffee";
   return findPalette(fallback) ?? PYGMENTS_STYLES[0];
 }
 
