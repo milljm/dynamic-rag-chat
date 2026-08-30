@@ -7,6 +7,7 @@ import tempfile
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 from sd_session import (  # noqa: E402
     apply_quality,
     checkpoint_flavor,

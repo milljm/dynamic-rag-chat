@@ -8,6 +8,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 from settings_yaml import (  # noqa: E402
     list_model_urls,
     list_models,

@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# pylint: disable=line-too-long,too-many-lines  # Wrapper file containing all GUI adaptation code
+
 """Boot Spur as one process: FastAPI adapter + built static UI.
 
 Used by ``./chat.py --spur``. Remaining CLI flags (``--assistant-mode``,
@@ -12,9 +14,12 @@ import shutil
 import socket
 import subprocess
 import sys
+import threading
 import time
 import webbrowser
 from pathlib import Path
+
+import uvicorn
 
 ROOT = Path(__file__).resolve().parent
 SPUR_DIR = ROOT / 'spur'
@@ -160,11 +165,6 @@ def launch(argv: list[str] | None = None) -> int:
     # spur-server.py reads sys.argv for ChatOptions.
     sys.argv = [str(SERVER_SCRIPT), *forwarded]
 
-    try:
-        import uvicorn
-    except ImportError:
-        sys.exit('uvicorn is required. `uv pip install -r requirements.txt`')
-
     mod = _load_server()
     if hasattr(mod, 'mount_ui'):
         mod.mount_ui(str(ui_root))
@@ -193,7 +193,6 @@ def launch(argv: list[str] | None = None) -> int:
             except Exception:  # pylint: disable=broad-exception-caught
                 pass
 
-        import threading
         threading.Thread(target=_open, daemon=True).start()
     elif _is_wsl():
         print('WSL: open the URL above in your Windows browser.')

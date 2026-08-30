@@ -6,6 +6,7 @@ import sys
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 from sd_client import (  # noqa: E402
     is_generated_picture,
     is_new_scene,

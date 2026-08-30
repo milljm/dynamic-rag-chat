@@ -6,7 +6,8 @@ import sys
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from chat_utils import ChatOptions, active_branch  # noqa: E402
+
+from chat_utils import ChatOptions, active_branch  # noqa: C0413
 
 
 class ActiveBranchTest(unittest.TestCase):

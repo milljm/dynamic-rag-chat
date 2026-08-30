@@ -8,12 +8,12 @@ from typing import Any, Callable
 
 from langchain_core.tools import StructuredTool
 
+import base64
 from .sd_client import img2img, is_generated_picture, run_magick, txt2img
 from .sd_session import apply_quality, merge_prompt
 
 
 def _data_url(blob: bytes, mime: str = 'image/png') -> str:
-    import base64
     return f'data:{mime};base64,{base64.b64encode(blob).decode("ascii")}'
 
 
