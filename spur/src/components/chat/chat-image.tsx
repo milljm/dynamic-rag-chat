@@ -79,35 +79,35 @@ export function ChatImage({
           />
         </button>
         {prompt ? (
-          <div className="mt-2 max-w-prose rounded-sm bg-muted/40 px-2 py-1.5">
-            <div className="mb-1 flex items-center justify-between gap-2">
-              <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                Prompt
-              </span>
-              <button
-                type="button"
-                onClick={copyPrompt}
-                className="inline-flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground"
-                title="Copy prompt"
-              >
-                <Copy className="size-3" />
-                {copied ? "Copied" : "Copy"}
-              </button>
+          <details className="mt-2 max-w-prose text-xs text-muted-foreground">
+            <summary className="cursor-pointer select-none">Prompt</summary>
+            <div className="mt-2 rounded-sm bg-muted/40 px-2 py-1.5">
+              <div className="mb-1 flex items-center justify-end">
+                <button
+                  type="button"
+                  onClick={copyPrompt}
+                  className="inline-flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground"
+                  title="Copy prompt"
+                >
+                  <Copy className="size-3" />
+                  {copied ? "Copied" : "Copy"}
+                </button>
+              </div>
+              <pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-snug">
+                {prompt}
+              </pre>
+              {negative ? (
+                <>
+                  <p className="mt-1.5 text-[10px] font-medium uppercase tracking-wide">
+                    Negative
+                  </p>
+                  <pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-snug">
+                    {negative}
+                  </pre>
+                </>
+              ) : null}
             </div>
-            <pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-snug text-muted-foreground">
-              {prompt}
-            </pre>
-            {negative ? (
-              <>
-                <p className="mt-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                  Negative
-                </p>
-                <pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-snug text-muted-foreground">
-                  {negative}
-                </pre>
-              </>
-            ) : null}
-          </div>
+          </details>
         ) : null}
       </div>
       {open

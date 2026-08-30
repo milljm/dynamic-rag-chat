@@ -1165,6 +1165,16 @@ async def api_chat(request: Request) -> StreamingResponse:
                     break
                 yield _hook_sse(kind, payload)
 
+            if documents.get('sd_ran') and not packed:
+                persist_turn(
+                    renderer,
+                    documents,
+                    '',
+                    attachments=body.get('attachments') or None,
+                )
+                yield sse({'type': 'done'}).encode()
+                return
+
             model = getattr(renderer.llm, 'model_name', '') or ''
             route = (renderer.orchestrator.name_of(renderer.llm)
                      or renderer.orchestrator.get_route_name(meta, documents))
@@ -1186,7 +1196,8 @@ async def api_chat(request: Request) -> StreamingResponse:
                 route=route, context=context, meta=meta,
             )):
                 yield frame
-            if ((stats.get('answer') or stats.get('reasoning'))
+            if ((stats.get('answer') or stats.get('reasoning')
+                    or documents.get('generated_images'))
                     and not documents.get('no_context')):
                 persist_turn(
                     renderer,

@@ -625,7 +625,7 @@ class RenderWindow(PromptManager):
                 'Image mode builds ONE prompt across turns.\n'
                 '- First picture → txt2img with that full prompt (quality tags + scene).\n'
                 '- Later → img2img. Pass ONLY what to add. The system prepends the stack. '
-                'denoising 0.28.\n'
+                'denoising 0.42. A new seed every pass.\n'
                 'You do not see the pixels. Do not critique the picture.\n'
                 f'{magick_hint}\n'
                 'Never generate a second time to "improve" it.\n'
@@ -685,7 +685,8 @@ class RenderWindow(PromptManager):
                 f"\nSD_PROMPT:\n{stacked['prompt']}\n"
                 f"SD_NEGATIVE:\n{stacked.get('negative') or ''}\n"
             )
-        return self.get_messages(meta_data, documents, polish=polish)
+        documents['sd_silent'] = True
+        return []
 
     def _note_last_image(self, documents: dict) -> None:
         """Flag that a generated picture is on screen. Do not send pixels to the LLM."""
@@ -1073,6 +1074,9 @@ class RenderWindow(PromptManager):
         self.llm = self.orchestrator.route(meta_data, documents)
         messages = self.get_messages(meta_data, documents)
         self.llm = self.orchestrator.route(meta_data, documents)
+        if documents.get('sd_ran') and not messages:
+            self.save_history(documents, '')
+            return None
         pre_process_time += time.time() - start_time
         token_total = documents.get('prompt_tokens') or self.packed_prompt_tokens(messages)
         branch = self.common.active_branch(history)

@@ -991,6 +991,9 @@ def call_llm_stream(
         status.markdown('Agent Web Search…')
     messages = renderer.get_messages(meta, documents)
     renderer.set_llm(meta, documents)
+    if documents.get('sd_ran') and not messages:
+        status.empty()
+        return
     status.markdown(f'Streaming `{renderer.llm.model_name}`')
     metrics.model = renderer.llm.model_name
     metrics.prompt_tokens = documents.get('prompt_tokens', 0)

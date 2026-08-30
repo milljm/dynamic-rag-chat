@@ -177,9 +177,9 @@ def make_sd_tools(
     def do_img2img(
         prompt: str,
         image_name: str = 'last',
-        denoising: float = 0.28,
+        denoising: float = 0.42,
         negative_prompt: str = '',
-        steps: int = 20,
+        steps: int = 28,
     ) -> str:
         """Re-draw the last picture, keeping the accumulated prompt."""
         if sd_calls['n'] >= 1:
@@ -189,8 +189,8 @@ def make_sd_tools(
         full = merge_prompt(str(stack.get('prompt') or ''), prompt)
         negative = negative_prompt or str(stack.get('negative') or '')
         full, negative = apply_quality(full, negative, flavor)
-        denoise = min(0.4, max(0.2, float(denoising or 0.28)))
-        seed = int(stack.get('seed') or -1)
+        denoise = min(0.55, max(0.3, float(denoising or 0.42)))
+        seed = -1
         with open(rec['path'], 'rb') as handle:
             src = handle.read()
         _status('Stable Diffusion…')
@@ -236,7 +236,6 @@ def make_sd_tools(
         return f'{operation} on {rec["name"]} → {out["name"]}.'
 
     tools: list = []
-    iterating = building or (bool(store) and not fresh)
     if not iterating:
         tools.append(
             StructuredTool.from_function(
@@ -256,8 +255,8 @@ def make_sd_tools(
                 description=(
                     'Add to the last picture. Pass ONLY the new ask '
                     '(e.g. "a large soap bubble with rainbow shimmer"). '
-                    'The previous scene prompt is prepended. denoising 0.25-0.35 '
-                    'keeps the scene; never go above 0.4. Default 0.28.'
+                    'The previous scene prompt is prepended. denoising 0.35-0.5 '
+                    'keeps the scene; default 0.42. A new seed is used each pass.'
                 ),
             ),
         )
