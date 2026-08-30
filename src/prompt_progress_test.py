@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import json
 import os
+import socket
+import struct
 import sys
 import threading
 import time
@@ -10,18 +12,24 @@ import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from prompt_progress import (  # noqa: E402  # pylint: disable=wrong-import-position
+from prompt_progress import (  # noqa: E402  # pylint: disable=wrong-import-position,protected-access
     PromptProgress,
     TokenChunk,
+    _API_CACHE,
     _is_cloud,
     _line_json,
     _origin,
     _payload_for,
     delta_text,
+    find_api_host,
     format_prompt_status,
+    is_lmstudio_catchall,
+    looks_like_slots,
     parse_progress,
     parse_progress_text,
     parse_slots_progress,
+    progress_from_obj,
+    reset_progress_caches,
     stream_chat,
 )
 
@@ -90,6 +98,35 @@ class ParseProgressTest(unittest.TestCase):
         ])
         self.assertEqual(frac, 0.4)
 
+    def test_lmstudio_catchall_is_not_slots(self):
+        payload = {
+            'error': 'Unexpected endpoint or method. (GET /slots). Returning 200 anyway',
+        }
+        self.assertTrue(is_lmstudio_catchall(payload))
+        self.assertFalse(looks_like_slots(payload))
+        self.assertIsNone(parse_slots_progress(payload))
+        self.assertFalse(looks_like_slots({}))
+        self.assertFalse(looks_like_slots([]))
+        self.assertFalse(looks_like_slots({'slots': []}))
+
+    def test_diagnostics_envelope(self):
+        blob = {
+            'type': 'channelMessage',
+            'channelId': 0,
+            'message': {
+                'type': 'log',
+                'log': {
+                    'timestamp': 1,
+                    'data': {
+                        'type': 'server.log',
+                        'content': '[minimax-m2.7] Prompt processing progress: 60.9%',
+                    },
+                },
+            },
+        }
+        self.assertAlmostEqual(progress_from_obj(blob), 0.609, places=4)
+
+
     def test_status_hides_zero(self):
         self.assertEqual(format_prompt_status(0), 'Processing Prompt…')
         self.assertEqual(PromptProgress(0.994).pct, 99)
@@ -127,6 +164,9 @@ class StreamChatTest(unittest.TestCase):
 
     # Nested BaseHTTPRequestHandler verbs must be do_GET / do_POST.
     # pylint: disable=invalid-name,missing-class-docstring,missing-function-docstring
+
+    def setUp(self):
+        reset_progress_caches()
 
     def _serve(self, handler):
         httpd = ThreadingHTTPServer(('127.0.0.1', 0), handler)
@@ -243,6 +283,188 @@ class StreamChatTest(unittest.TestCase):
         items = list(stream_chat(llm, [_Msg('human', 'hi')]))
         self.assertEqual(llm.streamed, 1)
         self.assertEqual(items[0].content, 'fallback')
+
+    def test_catchall_200_does_not_keep_polling(self):
+        """LM Studio 200-anyway on GET /slots is not llama.cpp — poll once."""
+        gets = []
+
+        class Handler(_Quiet):
+            def do_POST(self):
+                self.rfile.read(int(self.headers.get('Content-Length', '0')))
+                self.send_response(200)
+                self.send_header('Content-Type', 'text/event-stream')
+                self.end_headers()
+                time.sleep(0.7)
+                self.wfile.write(
+                    b'data: {"choices":[{"delta":{"content":"ok"}}]}\n\n'
+                    b'data: [DONE]\n\n'
+                )
+
+            def do_GET(self):
+                gets.append(self.path)
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                body = (
+                    '{"error":"Unexpected endpoint or method. '
+                    '(GET /slots). Returning 200 anyway"}'
+                )
+                self.wfile.write(body.encode())
+
+        port = self._serve(Handler)
+        llm = _LLM(f'http://127.0.0.1:{port}/v1')
+        items = list(stream_chat(llm, [_Msg('human', 'hi')]))
+        self.assertEqual(
+            ''.join(x.content for x in items if isinstance(x, TokenChunk)),
+            'ok',
+        )
+        slot_hits = [p for p in gets if p.endswith('/slots')]
+        self.assertEqual(len(slot_hits), 1, gets)
+        # Second turn must not touch /slots again (cached miss).
+        gets.clear()
+        list(stream_chat(llm, [_Msg('human', 'hi')]))
+        self.assertFalse([p for p in gets if p.endswith('/slots')], gets)
+
+    def test_greeting_is_not_catchall(self):
+        class Handler(_Quiet):
+            def do_GET(self):
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                if self.path.endswith('/lmstudio-greeting'):
+                    self.wfile.write(b'{"lmstudio":true}')
+                    return
+                self.wfile.write(b'{"error":"Unexpected endpoint"}')
+
+            def do_POST(self):
+                self.send_response(404)
+                self.end_headers()
+
+        port = self._serve(Handler)
+        origin = f'http://127.0.0.1:{port}'
+        self.assertEqual(find_api_host(origin, {}), f'127.0.0.1:{port}')
+        self.assertFalse(is_lmstudio_catchall({'lmstudio': True}))
+
+    def test_diagnostics_websocket_progress(self):
+        """LM Studio diagnostics.streamLogs carries the Developer-log %."""
+        ws_port = _start_diagnostics_stub()
+
+        class Handler(_Quiet):
+            def do_POST(self):
+                self.rfile.read(int(self.headers.get('Content-Length', '0')))
+                self.send_response(200)
+                self.send_header('Content-Type', 'text/event-stream')
+                self.end_headers()
+                time.sleep(0.8)
+                self.wfile.write(
+                    b'data: {"choices":[{"delta":{"content":"Hi"}}]}\n\n'
+                    b'data: [DONE]\n\n'
+                )
+
+            def do_GET(self):
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(
+                    b'{"error":"Unexpected endpoint or method. Returning 200 anyway"}'
+                )
+
+        http_port = self._serve(Handler)
+        origin = f'http://127.0.0.1:{http_port}'
+        _API_CACHE[origin] = f'127.0.0.1:{ws_port}'
+        llm = _LLM(f'http://127.0.0.1:{http_port}/v1')
+        items = list(stream_chat(llm, [_Msg('human', 'hi')]))
+        progress = [x for x in items if isinstance(x, PromptProgress)]
+        self.assertTrue(progress, items)
+        self.assertAlmostEqual(progress[0].fraction, 0.609, places=3)
+        tokens = [x for x in items if isinstance(x, TokenChunk)]
+        self.assertEqual(''.join(x.content for x in tokens), 'Hi')
+
+
+def _start_diagnostics_stub() -> int:
+    """One-shot websocket that speaks LM Studio diagnostics.streamLogs."""
+    ready = threading.Event()
+    port_box: list[int] = []
+
+    def server() -> None:
+        listener = socket.socket()
+        listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        listener.bind(('127.0.0.1', 0))
+        listener.listen(1)
+        listener.settimeout(3)
+        port_box.append(listener.getsockname()[1])
+        ready.set()
+        try:
+            conn, _ = listener.accept()
+        except socket.timeout:
+            listener.close()
+            return
+        conn.settimeout(3)
+        buf = b''
+        while b'\r\n\r\n' not in buf:
+            buf += conn.recv(1024)
+        conn.sendall(
+            b'HTTP/1.1 101 Switching Protocols\r\n'
+            b'Upgrade: websocket\r\n'
+            b'Connection: Upgrade\r\n'
+            b'\r\n'
+        )
+        _recv_ws_frame(conn)
+        _send_ws_text(conn, '{"success":true}')
+        _recv_ws_frame(conn)
+        event = json.dumps({
+            'type': 'channelMessage',
+            'channelId': 0,
+            'message': {
+                'type': 'log',
+                'log': {
+                    'data': {
+                        'type': 'server.log',
+                        'content': (
+                            '[minimax-m2.7] Prompt processing progress: 60.9%'
+                        ),
+                    },
+                },
+            },
+        })
+        _send_ws_text(conn, event)
+        time.sleep(0.4)
+        try:
+            conn.close()
+        except OSError:
+            pass
+        listener.close()
+
+    threading.Thread(target=server, daemon=True).start()
+    if not ready.wait(2):
+        raise RuntimeError('diagnostics stub did not bind')
+    return port_box[0]
+
+
+def _send_ws_text(conn, text: str) -> None:
+    payload = text.encode('utf-8')
+    header = bytearray([0x81])
+    length = len(payload)
+    if length < 126:
+        header.append(length)
+    else:
+        header.append(126)
+        header.extend(struct.pack('!H', length))
+    conn.sendall(bytes(header) + payload)
+
+
+def _recv_ws_frame(conn) -> bytes:
+    hdr = conn.recv(2)
+    length = hdr[1] & 0x7F
+    masked = bool(hdr[1] & 0x80)
+    if length == 126:
+        length = struct.unpack('!H', conn.recv(2))[0]
+    mask = conn.recv(4) if masked else b''
+    payload = conn.recv(length) if length else b''
+    if masked and payload:
+        payload = bytes(b ^ mask[i % 4] for i, b in enumerate(payload))
+    return payload
+
 
 
 if __name__ == '__main__':

@@ -11,24 +11,38 @@ would send) and:
 1. Stream it ourselves so we can see llama.cpp ``prompt_progress`` / LM
    Studio ``prompt_processing.progress`` / the log line if they leak
    (``return_progress: true``, never on cloud OpenAI).
-2. Poll ``GET /slots`` on the configured origin (``http://llm:1234`` counts)
-   while the body is silent.
-3. Fall back to LangChain ``llm.stream()`` if the raw POST fails.
+2. Poll ``GET /slots`` only when the body is real llama.cpp slots. LM Studio
+   answers unknown paths with HTTP 200 + an error JSON — that is not slots,
+   and hammering it just spams the Developer log.
+3. If slots is absent, subscribe to LM Studio's diagnostics websocket
+   (``/lmstudio-greeting`` on the REST port or the SDK API ports) and parse
+   the same Developer-log line ``lms log stream --source server`` would show.
+4. Fall back to LangChain ``llm.stream()`` if the raw POST fails.
 """
 from __future__ import annotations
 
+import base64
 import json
+import os
 import queue
 import re
+import socket
+import struct
 import threading
 import urllib.error
 import urllib.request
+import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterator
+from urllib.parse import urlparse
 
 
 _PROGRESS_LOG = re.compile(
     r'Prompt processing progress:\s*([0-9]*\.?[0-9]+)\s*%',
+    re.I,
+)
+_CATCHALL = re.compile(
+    r'unexpected endpoint|returning 200 anyway',
     re.I,
 )
 _CLOUD = (
@@ -41,6 +55,19 @@ _CLOUD = (
     'api.mistral.ai',
     'openrouter.ai',
 )
+# llama.cpp slot objects carry at least one of these; LM Studio's fake 200 does not.
+_SLOT_MARKERS = frozenset({
+    'n_ctx', 'n_predict', 'id_task', 'is_processing',
+    'prompt_progress', 'next_token', 'slot_id', 'task_id',
+})
+# LM Studio SDK / daemon API (not the OpenAI REST port).
+_API_PORTS = (41343, 52993, 16141, 39414, 22931)
+
+# origin -> True (llama.cpp slots), False (definitely not). Missing = unknown.
+_SLOTS_CACHE: dict[str, bool] = {}
+# origin -> "host:port" of a real LM Studio API server, or None after a miss.
+_API_CACHE: dict[str, str | None] = {}
+_CACHE_LOCK = threading.Lock()
 
 
 @dataclass
@@ -63,6 +90,13 @@ class TokenChunk:
     content: str = ''
     reasoning_content: str = ''
     additional_kwargs: dict = field(default_factory=dict)
+
+
+def reset_progress_caches() -> None:
+    """Test helper: forget /slots and API-host probes."""
+    with _CACHE_LOCK:
+        _SLOTS_CACHE.clear()
+        _API_CACHE.clear()
 
 
 def format_prompt_status(fraction: float) -> str:
@@ -117,15 +151,66 @@ def parse_progress(obj: Any) -> float | None:
     return None
 
 
+def progress_from_obj(obj: Any) -> float | None:
+    """Walk nested JSON (diagnostics envelopes) for a progress fraction."""
+    direct = parse_progress(obj)
+    if direct is not None:
+        return direct
+    if isinstance(obj, dict):
+        for value in obj.values():
+            frac = progress_from_obj(value)
+            if frac is not None:
+                return frac
+    elif isinstance(obj, list):
+        for value in obj:
+            frac = progress_from_obj(value)
+            if frac is not None:
+                return frac
+    return None
+
+
+def is_lmstudio_catchall(payload: Any) -> bool:
+    """LM Studio's 'Unexpected endpoint… Returning 200 anyway' body."""
+    if not isinstance(payload, dict):
+        return False
+    err = payload.get('error')
+    parts = [str(payload.get('message') or '')]
+    if isinstance(err, str):
+        parts.append(err)
+    elif isinstance(err, dict):
+        parts.append(str(err.get('message') or err.get('error') or ''))
+    return bool(_CATCHALL.search(' '.join(parts)))
+
+
+def _slot_rows(payload: Any) -> list:
+    if isinstance(payload, list):
+        return payload
+    if isinstance(payload, dict):
+        inner = payload.get('slots') or payload.get('data')
+        if isinstance(inner, list):
+            return inner
+        return [payload]
+    return []
+
+
+def looks_like_slots(payload: Any) -> bool:
+    """True only for llama.cpp GET /slots, never LM Studio's fake 200."""
+    if payload is None or is_lmstudio_catchall(payload):
+        return False
+    for row in _slot_rows(payload):
+        if not isinstance(row, dict):
+            continue
+        if _SLOT_MARKERS & row.keys():
+            return True
+    return False
+
+
 def parse_slots_progress(payload: Any) -> float | None:
     """Best fraction from llama.cpp GET /slots."""
-    rows = payload
-    if isinstance(payload, dict):
-        rows = payload.get('slots') or payload.get('data') or payload
-    if not isinstance(rows, list):
-        rows = [payload] if isinstance(payload, dict) else []
+    if not looks_like_slots(payload):
+        return None
     best: float | None = None
-    for row in rows:
+    for row in _slot_rows(payload):
         if not isinstance(row, dict):
             continue
         frac = parse_progress(row)
@@ -242,11 +327,11 @@ def _headers(llm: Any, accept: str = 'application/json') -> dict[str, str]:
     }
 
 
-def _json_get(url: str, headers: dict) -> Any | None:
+def _json_get(url: str, headers: dict, timeout: float = 0.6) -> Any | None:
     """GET JSON, or None on 404 / network / non-JSON."""
     try:
         req = urllib.request.Request(url, headers=headers, method='GET')
-        with urllib.request.urlopen(req, timeout=0.6) as resp:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
             raw = resp.read().decode('utf-8', errors='replace')
         return json.loads(raw)
     except (urllib.error.URLError, json.JSONDecodeError, TimeoutError, OSError):
@@ -319,29 +404,283 @@ class _Closable:
                 pass
 
 
+def _host_port(origin: str) -> tuple[str, int]:
+    parsed = urlparse(origin if '://' in (origin or '') else f'http://{origin}')
+    host = parsed.hostname or ''
+    port = parsed.port or (443 if parsed.scheme == 'https' else 80)
+    return host, port
+
+
+def _auth_packet() -> dict:
+    return {
+        'authVersion': 1,
+        'clientIdentifier': f'guest:{uuid.uuid4()}',
+        'clientPasskey': str(uuid.uuid4()),
+    }
+
+
+def find_api_host(origin: str, headers: dict) -> str | None:
+    """Return host:port of an LM Studio SDK API, or None.
+
+    REST ``http://llm:1234`` is not this — probe ``/lmstudio-greeting``
+    (must be ``{"lmstudio": true}``, not the catch-all 200).
+    """
+    with _CACHE_LOCK:
+        if origin in _API_CACHE:
+            return _API_CACHE[origin]
+    host, port = _host_port(origin)
+    if not host:
+        with _CACHE_LOCK:
+            _API_CACHE[origin] = None
+        return None
+    seen: list[int] = []
+    for candidate in (port, *_API_PORTS):
+        if candidate not in seen:
+            seen.append(candidate)
+    found: list[str] = []
+    lock = threading.Lock()
+
+    def probe(listen: int) -> None:
+        if found:
+            return
+        url = f'http://{host}:{listen}/lmstudio-greeting'
+        payload = _json_get(url, headers, timeout=0.35)
+        if isinstance(payload, dict) and payload.get('lmstudio') is True:
+            with lock:
+                if not found:
+                    found.append(f'{host}:{listen}')
+
+    workers = [threading.Thread(target=probe, args=(p,), daemon=True) for p in seen]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join(0.5)
+    result = found[0] if found else None
+    with _CACHE_LOCK:
+        _API_CACHE[origin] = result
+    return result
+
+
+def _ws_open(url: str, timeout: float = 1.2) -> socket.socket | None:
+    """HTTP Upgrade to websocket. None if the peer is not a WS server."""
+    parsed = urlparse(url)
+    host = parsed.hostname
+    port = parsed.port or 80
+    path = parsed.path or '/'
+    if not host:
+        return None
+    key = base64.b64encode(os.urandom(16)).decode('ascii')
+    req = (
+        f'GET {path} HTTP/1.1\r\n'
+        f'Host: {host}:{port}\r\n'
+        'Upgrade: websocket\r\n'
+        'Connection: Upgrade\r\n'
+        f'Sec-WebSocket-Key: {key}\r\n'
+        'Sec-WebSocket-Version: 13\r\n'
+        '\r\n'
+    )
+    try:
+        sock = socket.create_connection((host, port), timeout=timeout)
+        sock.sendall(req.encode('ascii'))
+        buf = b''
+        while b'\r\n\r\n' not in buf:
+            chunk = sock.recv(1024)
+            if not chunk:
+                sock.close()
+                return None
+            buf += chunk
+            if len(buf) > 8192:
+                sock.close()
+                return None
+        status = buf.split(b'\r\n', 1)[0]
+        if b'101' not in status:
+            sock.close()
+            return None
+        return sock
+    except (OSError, TimeoutError):
+        return None
+
+
+def _ws_send_text(sock: socket.socket, payload: bytes) -> None:
+    mask = os.urandom(4)
+    masked = bytes(byte ^ mask[i % 4] for i, byte in enumerate(payload))
+    header = bytearray([0x81])
+    length = len(payload)
+    if length < 126:
+        header.append(0x80 | length)
+    elif length < 65536:
+        header.append(0x80 | 126)
+        header.extend(struct.pack('!H', length))
+    else:
+        header.append(0x80 | 127)
+        header.extend(struct.pack('!Q', length))
+    sock.sendall(bytes(header) + mask + masked)
+
+
+def _ws_send_json(sock: socket.socket, obj: dict) -> None:
+    _ws_send_text(sock, json.dumps(obj).encode('utf-8'))
+
+
+def _read_exact(sock: socket.socket, count: int, stop: threading.Event) -> bytes | None:
+    data = b''
+    while len(data) < count:
+        if stop.is_set():
+            return None
+        try:
+            chunk = sock.recv(count - len(data))
+        except socket.timeout:
+            continue
+        except OSError:
+            return None
+        if not chunk:
+            return None
+        data += chunk
+    return data
+
+
+def _ws_recv_frame(sock: socket.socket, stop: threading.Event) -> tuple[int, bytes] | None:
+    hdr = _read_exact(sock, 2, stop)
+    if not hdr:
+        return None
+    opcode = hdr[0] & 0x0F
+    masked = bool(hdr[1] & 0x80)
+    length = hdr[1] & 0x7F
+    if length == 126:
+        ext = _read_exact(sock, 2, stop)
+        if not ext:
+            return None
+        length = struct.unpack('!H', ext)[0]
+    elif length == 127:
+        ext = _read_exact(sock, 8, stop)
+        if not ext:
+            return None
+        length = struct.unpack('!Q', ext)[0]
+    mask = _read_exact(sock, 4, stop) if masked else b''
+    payload = _read_exact(sock, length, stop) if length else b''
+    if payload is None or (masked and mask is None):
+        return None
+    if masked and payload and mask:
+        payload = bytes(byte ^ mask[i % 4] for i, byte in enumerate(payload))
+    return opcode, payload or b''
+
+
+def _ws_recv_json(sock: socket.socket, stop: threading.Event) -> Any | None:
+    """Next text JSON object, or None on close / stop. Replies to ping."""
+    while not stop.is_set():
+        frame = _ws_recv_frame(sock, stop)
+        if frame is None:
+            return None
+        opcode, payload = frame
+        if opcode == 0x8:
+            return None
+        if opcode == 0x9:
+            try:
+                # pong, masked
+                mask = os.urandom(4)
+                masked = bytes(byte ^ mask[i % 4] for i, byte in enumerate(payload))
+                sock.sendall(bytes([0x8A, 0x80 | len(payload)]) + mask + masked)
+            except OSError:
+                return None
+            continue
+        if opcode == 0xA:
+            continue
+        if opcode != 0x1 or not payload:
+            continue
+        text = payload.decode('utf-8', errors='replace')
+        frac = parse_progress_text(text)
+        if frac is not None:
+            return {'type': 'prompt_processing.progress', 'progress': frac}
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            continue
+    return None
+
+
+def _stream_diagnostics(api_host: str, sink: Callable[[float], None],
+                        stop: threading.Event) -> None:
+    """Subscribe to diagnostics.streamLogs and parse Developer-log lines."""
+    sock = _ws_open(f'ws://{api_host}/diagnostics')
+    if sock is None:
+        return
+    try:
+        sock.settimeout(0.3)
+        _ws_send_json(sock, _auth_packet())
+        greeting = _ws_recv_json(sock, stop)
+        if not isinstance(greeting, dict) or not greeting.get('success'):
+            return
+        _ws_send_json(sock, {
+            'type': 'channelCreate',
+            'endpoint': 'streamLogs',
+            'channelId': 0,
+        })
+        while not stop.is_set():
+            obj = _ws_recv_json(sock, stop)
+            if obj is None:
+                return
+            frac = progress_from_obj(obj)
+            if frac is not None:
+                sink(frac)
+    except (OSError, TimeoutError, ValueError):
+        return
+    finally:
+        try:
+            sock.close()
+        except OSError:
+            pass
+
+
 def _poll_slots(origin: str, headers: dict, sink: Callable[[float], None],
-                stop: threading.Event) -> None:
-    """llama.cpp /slots while the completion is in-flight."""
+                stop: threading.Event) -> bool:
+    """llama.cpp /slots while the completion is in-flight. False if not slots."""
+    with _CACHE_LOCK:
+        cached = _SLOTS_CACHE.get(origin)
+    if cached is False:
+        return False
     urls = [f'{origin}/slots', f'{origin}/v1/slots']
+    confirmed = bool(cached)
     misses = 0
     delay = 0.0
     while not stop.wait(delay):
         delay = 0.2
-        hit = False
+        payload = None
         for url in urls:
             payload = _json_get(url, headers)
             if payload is None:
                 continue
-            hit = True
-            misses = 0
-            frac = parse_slots_progress(payload)
-            if frac is not None:
-                sink(frac)
-            break
-        if not hit:
+            if looks_like_slots(payload):
+                with _CACHE_LOCK:
+                    _SLOTS_CACHE[origin] = True
+                confirmed = True
+                frac = parse_slots_progress(payload)
+                if frac is not None:
+                    sink(frac)
+                break
+            with _CACHE_LOCK:
+                _SLOTS_CACHE[origin] = False
+            return False
+        else:
+            if confirmed:
+                continue
             misses += 1
             if misses >= 2:
-                return
+                return False
+    return confirmed
+
+
+def _sideband(origin: str, headers: dict, sink: Callable[[float], None],
+              stop: threading.Event) -> None:
+    """Slots if llama.cpp; else LM Studio diagnostics logs."""
+    if not origin:
+        return
+    if _poll_slots(origin, headers, sink, stop):
+        return
+    if stop.is_set():
+        return
+    api_host = find_api_host(origin, headers)
+    if not api_host:
+        return
+    _stream_diagnostics(api_host, sink, stop)
 
 
 def _post_stream(url: str, payload: dict, headers: dict):
@@ -451,7 +790,7 @@ def _drain(box: queue.Queue, stop: threading.Event) -> Iterator[Any]:
 
 def _merge_stream(response, origin: str, headers: dict, stop: threading.Event,
                   box: queue.Queue) -> None:
-    """SSE reader thread + optional /slots poller."""
+    """SSE reader thread + /slots or LM Studio diagnostics."""
     def sink(frac: float) -> None:
         box.put(('progress', frac))
 
@@ -467,7 +806,7 @@ def _merge_stream(response, origin: str, headers: dict, stop: threading.Event,
     threading.Thread(target=read_sse, daemon=True).start()
     if origin:
         threading.Thread(
-            target=_poll_slots, args=(origin, headers, sink, stop), daemon=True,
+            target=_sideband, args=(origin, headers, sink, stop), daemon=True,
         ).start()
 
 
