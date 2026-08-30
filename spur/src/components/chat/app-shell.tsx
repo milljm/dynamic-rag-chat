@@ -49,7 +49,7 @@ export function AppShell() {
             overflow: "hidden",
           }}
         >
-          <div className="h-full" style={{ width: sidebar.width }}>
+          <div className="h-full min-w-0 overflow-hidden" style={{ width: sidebar.width }}>
             <Sidebar streaming={streaming} onCollapse={() => sidebar.setOpen(false)} />
           </div>
           {sidebar.open && (

@@ -145,7 +145,7 @@ export function Sidebar({
     <aside
       ref={asideRef}
       className={cn(
-        "flex h-full min-h-0 w-full flex-col bg-card paper text-card-foreground",
+        "flex h-full min-h-0 min-w-0 w-full flex-col overflow-hidden bg-card paper text-card-foreground",
         className,
       )}
     >
@@ -174,7 +174,7 @@ export function Sidebar({
 
       <Separator />
 
-      <ScrollArea className="min-h-0 flex-1">
+      <ScrollArea className="min-h-0 min-w-0 flex-1">
         <SidebarSection id="mode" title="Mode" defaultOpen>
           {current && (
             <ModeToggle
@@ -195,7 +195,7 @@ export function Sidebar({
           badge={list.length}
           bodyClassName="px-2"
         >
-          <ul className="space-y-1">
+          <ul className="min-w-0 space-y-1">
             {list.map((branch) => (
               <BranchRow
                 key={branch.id}
@@ -280,7 +280,7 @@ function BranchRow({
   return (
     <li
       className={cn(
-        "flex items-stretch gap-0.5 rounded-md transition-[background-color,box-shadow] duration-150",
+        "flex min-w-0 items-stretch gap-0.5 overflow-hidden rounded-md transition-[background-color,box-shadow] duration-150",
         active ? "bg-accent shadow-[var(--shadow-border)]" : "hover:bg-accent/70",
       )}
     >
@@ -314,7 +314,7 @@ function BranchRow({
             <span className="font-mono tabular-nums">· {turns} turns</span>
           </span>
           {preview && (
-            <span className="mt-1 block truncate text-xs text-muted-foreground/80">
+            <span className="mt-1 block min-w-0 max-w-full truncate text-xs text-muted-foreground/80">
               {preview}
             </span>
           )}
@@ -363,12 +363,13 @@ function CreateBranchForm({
         <GitBranch className="size-3.5" />
         New branch
       </label>
-      <div className="flex gap-2">
+      <div className="flex min-w-0 gap-2">
         <Input
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="alt-ending or testing@5"
           aria-label="Branch name"
+          className="min-w-0"
         />
         <Button type="submit" size="icon" aria-label="Create branch">
           <Plus />
