@@ -961,6 +961,11 @@ def _prepare_chat_documents(chat, body: dict) -> tuple[dict, list]:
         has_last = has_generated_images(str(chat.opts.vector_dir))
         if not wants_sd(query, has_last=has_last):
             clear_session(str(chat.opts.vector_dir))
+    if body.get('illustrateScene') and not chat.opts.assistant_mode:
+        documents['illustrate_scene'] = True
+        documents['use_sd'] = True
+        documents['sd_ran'] = False
+        documents['in_line_commands'] = 'Meta: [image]'
     if body.get('rare'):
         documents['system_addendum'] = (
             'Story controls for this turn: ' + ', '.join(body['rare'])

@@ -133,9 +133,13 @@ class Orchestration():
     def requires_sd(self, documents: dict | None = None) -> bool:
         """True when this turn should run the Automatic1111 image agent."""
         documents = documents or {}
-        if not self.args.assistant_mode or not sd_enabled(getattr(self.args, 'sd_server', '')):
+        if not sd_enabled(getattr(self.args, 'sd_server', '')):
             return False
         if documents.get('sd_ran'):
+            return False
+        if documents.get('illustrate_scene'):
+            return True
+        if not self.args.assistant_mode:
             return False
         if documents.get('use_sd'):
             return True

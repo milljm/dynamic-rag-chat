@@ -30,7 +30,13 @@ from .chat_utils import CommonUtils, ChatOptions, RAGTag # For Type Hinting
 from .model_orchestrator import Orchestration, MAX_AGENT_CALLS
 from .agent_tools import DuckDuckGoSearchTool
 from .sd_client import MAGICK_QUERY, has_generated_images, is_new_scene, ping_sd, vision_thumb_data_url
-from .sd_session import checkpoint_flavor, flavor_brief, load_session, save_session
+from .sd_session import (
+    checkpoint_flavor,
+    clear_session,
+    flavor_brief,
+    load_session,
+    save_session,
+)
 from .think_tags import ThinkFeed, chunk_text, split_think
 from .sd_tools import make_sd_tools, seed_last_generated
 from .gold_fetch import MAX_GOLD_FETCHES, take_need_gold, recall_status
@@ -554,6 +560,65 @@ class RenderWindow(PromptManager):
                 )
         return self.get_messages(meta_data, documents, polish=polish)
 
+    def _story_illustration_pack(self, documents: dict) -> str:
+        """Canon + last beat for a story-mode scene still."""
+        history = self.common.load_chat()
+        branch = self.common.active_branch(history)
+        last_ai = ''
+        last_user = ''
+        for msg in reversed(history.get(branch) or []):
+            if not isinstance(msg, dict):
+                continue
+            role = msg.get('role')
+            text = str(msg.get('content') or '').strip()
+            if not text:
+                continue
+            if role == 'assistant' and not last_ai:
+                last_ai = text[:2500]
+            elif role == 'user' and not last_user:
+                last_user = text[:800]
+            if last_ai and last_user:
+                break
+        scene = {}
+        try:
+            scene = self.state.context.scene.get_scene() or {}
+        except Exception:  # pylint: disable=broad-exception-caught
+            scene = {}
+        loc = str(scene.get('player_location') or '').strip()
+        names = []
+        for key in ('entity', 'audience', 'known_characters'):
+            raw = scene.get(key) or []
+            if isinstance(raw, str):
+                raw = [raw]
+            for name in raw:
+                token = str(name).strip().lower()
+                if token and token not in names:
+                    names.append(token)
+        sheets = []
+        root = os.path.join(str(self.opts.vector_dir), 'entities')
+        for name in names[:8]:
+            safe = self.common.regex.safe_name.sub('_', name).strip('_')
+            path = os.path.join(root, f'{safe}.txt')
+            if not os.path.isfile(path):
+                continue
+            try:
+                with open(path, encoding='utf-8') as handle:
+                    body = handle.read().strip()[:900]
+            except OSError:
+                continue
+            if body:
+                sheets.append(f'[{name}]\n{body}')
+        beat = last_ai or last_user or str(documents.get('user_query') or '')
+        look = '\n\n'.join(sheets) if sheets else '(no character sheets)'
+        return (
+            'Illustrate THIS story beat as a single cinematic still. '
+            'Match character looks from the sheets. Do not invent a new plot.\n\n'
+            f'BEAT:\n{beat}\n\n'
+            f'LOCATION: {loc or "(unspecified)"}\n'
+            f'PRESENT: {", ".join(names) or "(unspecified)"}\n\n'
+            f'CHARACTER LOOKS:\n{look}\n'
+        )
+
     def _invoke_sd_agent(self, documents: dict, polish: bool, meta_data) -> list:
         """Run txt2img / img2img / ImageMagick, then recurse to the answerer."""
         documents['sd_ran'] = True
@@ -565,7 +630,8 @@ class RenderWindow(PromptManager):
         documents['generated_images'] = store
         last_name = prior[-1]['name'] if prior else ''
         query = str(documents.get('original_user_query') or '')
-        allow_magick = bool(MAGICK_QUERY.search(query))
+        illustrate = bool(documents.get('illustrate_scene'))
+        allow_magick = bool(MAGICK_QUERY.search(query)) and not illustrate
         vector_dir = str(self.opts.vector_dir)
         session = load_session(vector_dir)
         ckpt = (getattr(self.opts, 'sd_model', '') or '').strip()
@@ -574,7 +640,7 @@ class RenderWindow(PromptManager):
             if info.get('ok'):
                 ckpt = str(info.get('current') or '')
         flavor = checkpoint_flavor(ckpt)
-        fresh = is_new_scene(query) or bool(re.search(
+        fresh = illustrate or is_new_scene(query) or bool(re.search(
             r'(?ix)\b(start over|from scratch|new (image|picture|scene)|'
             r'forget the (last|previous))\b',
             query,
@@ -614,8 +680,22 @@ class RenderWindow(PromptManager):
             if allow_magick else
             'Do not call imagemagick. Do not add a border.'
         )
-        prompt = ChatPromptTemplate.from_messages([
-            ('system', (
+        if illustrate:
+            last_hint = (
+                'STORY ILLUSTRATION. txt2img once. Cinematic still of the BEAT. '
+                'Use character looks. Ignore any previous PNG.'
+            )
+            system = (
+                'You illustrate one story beat with Stable Diffusion, then stop.\n'
+                f'{flavor_brief(flavor, ckpt)}\n'
+                'Write the BEST prompt for this checkpoint from the beat, location, '
+                'and character sheets. Camera, lighting, clothing, faces from the sheets. '
+                'Do not add plot. Do not caption text. txt2img once.\n'
+                f'{last_hint}\n'
+                'Keep tool chatter short. Do not mention Automatic1111 or pipelines.'
+            )
+        else:
+            system = (
                 'You are a Stable Diffusion prompt engineer. One image this turn, then stop.\n'
                 f'{flavor_brief(flavor, ckpt)}\n'
                 'The user relies on you to write the BEST prompt for this checkpoint — '
@@ -634,7 +714,9 @@ class RenderWindow(PromptManager):
                 f'{last_hint}\n'
                 'Keep tool chatter short. Do not mention Automatic1111 or pipelines. '
                 'Do not explain Photoshop.'
-            )),
+            )
+        prompt = ChatPromptTemplate.from_messages([
+            ('system', system),
             ('user', '{input}'),
             MessagesPlaceholder(variable_name='agent_scratchpad'),
         ])
@@ -643,13 +725,16 @@ class RenderWindow(PromptManager):
             agent=agent, tools=tools, verbose=False, max_iterations=4,
         )
         self._status('Stable Diffusion…')
-        user_input = documents['original_user_query']
-        if stack and not fresh:
-            user_input = (
-                f'SCENE PROMPT SO FAR:\n{stack}\n\n'
-                f'USER ASKED TO ADD/CHANGE:\n{query}\n\n'
-                'Call img2img with ONLY the new details. Keep the scene.'
-            )
+        if illustrate:
+            user_input = self._story_illustration_pack(documents)
+        else:
+            user_input = documents['original_user_query']
+            if stack and not fresh:
+                user_input = (
+                    f'SCENE PROMPT SO FAR:\n{stack}\n\n'
+                    f'USER ASKED TO ADD/CHANGE:\n{query}\n\n'
+                    'Call img2img with ONLY the new details. Keep the scene.'
+                )
         try:
             self.console.print(
                 'Stable Diffusion (ctl-c to cancel)...',
@@ -688,6 +773,8 @@ class RenderWindow(PromptManager):
                 f"SD_NEGATIVE:\n{stacked.get('negative') or ''}\n"
             )
         documents['sd_silent'] = True
+        if illustrate:
+            clear_session(vector_dir)
         return []
 
     def _note_last_image(self, documents: dict) -> None:

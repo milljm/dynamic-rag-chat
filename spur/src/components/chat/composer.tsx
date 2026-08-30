@@ -13,11 +13,13 @@ export function Composer({
   onSend,
   onStop,
   onRegenerate,
+  onIllustrate,
 }: {
   streaming: boolean;
   onSend: (text: string) => void;
   onStop: () => void;
   onRegenerate: () => void;
+  onIllustrate?: () => void;
 }) {
   const [value, setValue] = useState("");
   const [dragDepth, setDragDepth] = useState(0);
@@ -42,6 +44,9 @@ export function Composer({
     !streaming && (value.trim().length > 0 || pending.length > 0);
   const agentOn = mode === "assistant" && forceAgent;
   const imageOn = mode === "assistant" && forceSd;
+  const storyImage = mode === "story";
+  const hasBeat = (branch?.messages ?? [])
+    .some((m) => m.role === "assistant" && Boolean(m.content?.trim()));
   const dragging = dragDepth > 0;
 
   function submit() {
@@ -189,29 +194,40 @@ export function Composer({
               </button>
               <button
                 type="button"
-                aria-pressed={imageOn}
-                disabled={mode !== "assistant" || streaming}
+                aria-pressed={storyImage ? undefined : imageOn}
+                disabled={
+                  streaming ||
+                  (storyImage ? !hasBeat : mode !== "assistant")
+                }
                 title={
-                  mode === "assistant"
-                    ? "Force image generate / edit this turn"
-                    : "Image is locked to assistant mode"
+                  storyImage
+                    ? hasBeat
+                      ? "Illustrate the current scene"
+                      : "Play a beat first"
+                    : mode === "assistant"
+                      ? "Force image generate / edit this turn"
+                      : "Image is locked to assistant mode"
                 }
                 onClick={() => {
+                  if (storyImage) {
+                    onIllustrate?.();
+                    return;
+                  }
                   if (forceSd) void postOp("/api/sd/reset");
                   setForceSd(!forceSd);
                 }}
                 className={cn(
                   "inline-flex h-8 items-center gap-1.5 rounded-sm px-2.5 text-xs font-medium transition-colors",
-                  imageOn
+                  !storyImage && imageOn
                     ? "bg-primary text-primary-foreground"
                     : "text-muted-foreground hover:bg-accent hover:text-foreground",
-                  mode !== "assistant" && "opacity-40",
+                  (storyImage ? !hasBeat : mode !== "assistant") && "opacity-40",
                 )}
               >
                 <Palette className="size-3.5" />
                 Image
               </button>
-              {imageOn ? (
+              {!storyImage && imageOn ? (
                 <button
                   type="button"
                   disabled={streaming}

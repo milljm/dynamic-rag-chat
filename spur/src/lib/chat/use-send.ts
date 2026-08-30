@@ -34,6 +34,7 @@ export function useSend() {
       regenerate?: boolean;
       agent?: boolean;
       image?: boolean;
+      illustrateScene?: boolean;
       noContext?: boolean;
       rare?: string[];
       ooc?: boolean;
@@ -371,7 +372,29 @@ export function useSend() {
     });
   }, [generate]);
 
-  return { send, stop, regenerate, streaming };
+  const illustrate = useCallback(async () => {
+    const store = useChatStore.getState();
+    const branch = store.branches[store.currentId];
+    if (!branch || modeOf(branch) !== "story") {
+      toast.message("Scene illustrate is for story mode.");
+      return;
+    }
+    const hasBeat = [...branch.messages]
+      .reverse()
+      .some((m) => m.role === "assistant" && Boolean(m.content?.trim()));
+    if (!hasBeat) {
+      toast.message("Play a beat first.");
+      return;
+    }
+    await generate({
+      text: "Illustrate the current scene.",
+      image: true,
+      illustrateScene: true,
+      noContext: true,
+    });
+  }, [generate]);
+
+  return { send, stop, regenerate, illustrate, streaming };
 }
 
 function handleLocalCommand(
@@ -464,6 +487,7 @@ type GenerateOpts = {
   regenerate?: boolean;
   agent?: boolean;
   image?: boolean;
+  illustrateScene?: boolean;
   noContext?: boolean;
   rare?: string[];
   ooc?: boolean;
@@ -485,7 +509,9 @@ async function generateViaChatPy(
 
   const mode = modeOf(branch);
   const agent = Boolean(opts.agent) && mode === "assistant";
-  const useSd = Boolean(opts.image) && mode === "assistant";
+  const useSd =
+    Boolean(opts.image) &&
+    (mode === "assistant" || Boolean(opts.illustrateScene));
   const noContext = Boolean(opts.noContext);
   const pending = opts.regenerate
     ? lastUserMessage(useChatStore.getState().branches[originId]?.messages ?? [])
@@ -576,6 +602,7 @@ async function generateViaChatPy(
         regenerate: Boolean(opts.regenerate),
         useAgent: agent,
         useSd,
+        illustrateScene: Boolean(opts.illustrateScene),
         noContext,
         rare: opts.rare,
         includeBranch: opts.includeBranch,

@@ -17,7 +17,7 @@ const SIDEBAR_DEFAULT = 320;
 
 export function AppShell() {
   const ready = useHydrateChat();
-  const { send, stop, regenerate, streaming } = useSend();
+  const { send, stop, regenerate, illustrate, streaming } = useSend();
   const [navOpen, setNavOpen] = useState(false);
   const sidebar = useSidebarLayout();
 
@@ -138,6 +138,7 @@ export function AppShell() {
             onSend={send}
             onStop={stop}
             onRegenerate={regenerate}
+            onIllustrate={illustrate}
           />
         </div>
       </div>
