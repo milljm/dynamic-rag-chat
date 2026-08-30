@@ -397,17 +397,16 @@ class RenderWindow(PromptManager):
     def add_image_block(messages: list[BaseMessage], images: list)->list[BaseMessage]:
         """ add/return image block if images are present """
         if images:
-            image_blocks = [
-                {
+            latest = images[-1]
+            thumb = vision_thumb_data_url(
+                RenderWindow._as_image_data_url(latest),
+            )
+            image_blocks = []
+            if thumb:
+                image_blocks = [{
                     'type': 'image_url',
-                    'image_url': {
-                        'url': vision_thumb_data_url(
-                            RenderWindow._as_image_data_url(img_b64),
-                        ),
-                    }
-                }
-                for img_b64 in images
-            ]
+                    'image_url': {'url': thumb},
+                }]
             for i, msg in enumerate(messages):
                 if isinstance(msg, HumanMessage):
                     if isinstance(msg.content, str):
@@ -601,7 +600,10 @@ class RenderWindow(PromptManager):
             thumb = vision_thumb_data_url(
                 last_url, src_path=str(prior[-1].get('path') or ''),
             )
-            user_content.append({'type': 'image_url', 'image_url': {'url': thumb}})
+            if thumb:
+                user_content.append(
+                    {'type': 'image_url', 'image_url': {'url': thumb}},
+                )
         prompt = ChatPromptTemplate.from_messages([
             ('system', (
                 'You create or edit one image this turn, then stop.\n'
@@ -652,8 +654,10 @@ class RenderWindow(PromptManager):
             if rec.get('dataUrl') and not rec.get('prior')
         ]
         if urls and vision is not None and vision.model_name != 'None':
-            documents.setdefault('dynamic_images', [])
-            documents['dynamic_images'].extend(urls[-3:])
+            documents['dynamic_images'] = [urls[-1]]
+            documents['has_last_image'] = True
+        else:
+            documents['dynamic_images'] = []
         names = [
             rec.get('name', '') for rec in documents.get('generated_images') or []
             if rec.get('name') and not rec.get('prior')
@@ -675,9 +679,15 @@ class RenderWindow(PromptManager):
             return
         folder = os.path.join(str(self.opts.vector_dir), 'generated')
         prior = seed_last_generated(folder, limit=1)
-        if not prior or not prior[-1].get('dataUrl'):
+        if not prior:
             return
-        documents.setdefault('dynamic_images', []).append(prior[-1]['dataUrl'])
+        thumb = vision_thumb_data_url(
+            prior[-1].get('dataUrl') or '',
+            src_path=str(prior[-1].get('path') or ''),
+        )
+        if not thumb:
+            return
+        documents['dynamic_images'] = [thumb]
         documents['has_last_image'] = True
 
     def get_messages(self,

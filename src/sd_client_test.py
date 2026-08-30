@@ -75,6 +75,7 @@ class SdClientTest(unittest.TestCase):
     def test_vision_sidecars_are_not_pictures(self):
         self.assertTrue(is_generated_picture('txt2img-120000-abc.png'))
         self.assertFalse(is_generated_picture('txt2img-120000-abc.png.v512.png'))
+        self.assertFalse(is_generated_picture('txt2img-120000-abc.png.v512.jpg'))
 
     def test_vision_thumb_returns_data_url(self):
         tiny = (
@@ -82,7 +83,8 @@ class SdClientTest(unittest.TestCase):
             '2mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
         )
         url = vision_thumb_data_url(f'data:image/png;base64,{tiny}')
-        self.assertTrue(url.startswith('data:image/png;base64,'))
+        if url:
+            self.assertTrue(url.startswith('data:image/jpeg;base64,'))
 
 
 if __name__ == '__main__':

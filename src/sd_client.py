@@ -92,7 +92,7 @@ def has_generated_images(vector_dir: str) -> bool:
 
 
 VISION_THUMB = 512
-_THUMB_NAME = re.compile(r'\.v\d+\.png$', re.I)
+_THUMB_NAME = re.compile(r'\.v\d+\.(png|jpe?g)$', re.I)
 
 
 def is_generated_picture(name: str) -> bool:
@@ -103,8 +103,8 @@ def is_generated_picture(name: str) -> bool:
     return lower.endswith(('.png', '.jpg', '.jpeg', '.webp'))
 
 
-def _png_data_url(blob: bytes) -> str:
-    return f'data:image/png;base64,{base64.b64encode(blob).decode("ascii")}'
+def _jpeg_data_url(blob: bytes) -> str:
+    return f'data:image/jpeg;base64,{base64.b64encode(blob).decode("ascii")}'
 
 
 def _image_bytes(raw: str | bytes) -> bytes:
@@ -121,14 +121,20 @@ def _image_bytes(raw: str | bytes) -> bytes:
 
 
 def _resize_file(src: str, dest: str, size: int) -> bytes:
-    """ImageMagick fit-inside size×size, no upscale. Empty bytes on miss."""
+    """ImageMagick fit-inside size×size JPEG. Empty bytes on miss."""
     binary = shutil.which('magick') or shutil.which('convert')
     if not binary:
         return b''
     cmd = [binary]
     if os.path.basename(binary) == 'magick':
         cmd.append('convert')
-    cmd.extend([src, '-resize', f'{int(size)}x{int(size)}>', dest])
+    cmd.extend([
+        src,
+        '-resize', f'{int(size)}x{int(size)}>',
+        '-strip',
+        '-quality', '75',
+        dest,
+    ])
     proc = subprocess.run(cmd, check=False, capture_output=True, text=True)
     if proc.returncode != 0 or not os.path.isfile(dest):
         return b''
@@ -141,37 +147,33 @@ def vision_thumb_data_url(
     src_path: str = '',
     size: int = VISION_THUMB,
 ) -> str:
-    """Data URL fit inside size×size for the LLM. Original file is untouched."""
+    """JPEG data URL fit inside size×size for the LLM. Never the original."""
     size = int(size or VISION_THUMB)
     if src_path and os.path.isfile(src_path):
-        cache = f'{src_path}.v{size}.png'
+        cache = f'{src_path}.v{size}.jpg'
         try:
             if (os.path.isfile(cache)
                     and os.path.getmtime(cache) >= os.path.getmtime(src_path)):
                 with open(cache, 'rb') as handle:
-                    return _png_data_url(handle.read())
+                    return _jpeg_data_url(handle.read())
         except OSError:
             pass
         blob = _resize_file(src_path, cache, size)
         if blob:
-            return _png_data_url(blob)
-        with open(src_path, 'rb') as handle:
-            return _png_data_url(handle.read())
+            return _jpeg_data_url(blob)
+        return ''
     incoming = _image_bytes(raw)
-    original = (
-        raw if isinstance(raw, str) and str(raw).startswith('data:') else ''
-    )
     if not incoming:
-        return original
+        return ''
     with tempfile.TemporaryDirectory() as tmp:
-        src = os.path.join(tmp, 'in.png')
-        dest = os.path.join(tmp, 'out.png')
+        src = os.path.join(tmp, 'in.bin')
+        dest = os.path.join(tmp, 'out.jpg')
         with open(src, 'wb') as handle:
             handle.write(incoming)
         blob = _resize_file(src, dest, size)
         if blob:
-            return _png_data_url(blob)
-    return original or _png_data_url(incoming)
+            return _jpeg_data_url(blob)
+    return ''
 
 
 def sd_enabled(host: str | None) -> bool:
