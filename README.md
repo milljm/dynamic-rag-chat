@@ -2,6 +2,8 @@
 
 Local chat that **remembers**. Not a sliding window that forgets. Not “dump a folder of PDFs and hope.” Tagged memory, gold documents the model can pull mid-turn, branches, and a router that picks the right model for the job — on your machine.
 
+Windows is not supported natively, but works perfectly fine through [Windows Subsystem for Linux](https://learn.microsoft.com/en-us/windows/wsl/install) (WSL).
+
 The face of it is **Spur**.
 
 ![Spur — dark](spur/docs/screenshot.jpg)
@@ -47,6 +49,8 @@ Then:
 ./chat.py --spur
 ./chat.py --spur --serve          # same Wi-Fi: iPad / phone. No login — don't port-forward.
 ```
+*Your favorite browser should open, but if not, open it now and visit: [http://localhost:8765](http://localhost:8765)*
+*Note: On WSL you will receive `gio: http://127.0.0.1:8765: Operation not supported - This is normal and can be ignored*
 
 First run builds the UI (needs Node). After that it's just Python. Rebuild with `./chat.py --spur --spur-rebuild`. `Ctrl-C` stops it. Open **Settings** (gear) for the server URL and models — next turn uses them. Defaults can live in `.chat.yaml` (see `.chat.yaml.example`).
 

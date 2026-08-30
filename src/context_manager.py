@@ -173,10 +173,10 @@ class ContextManager(PromptManager):
         if documents.get('chat_history'):
             documents['chat_history'] = self._messages_for_last_n_turns(
                                                         documents['chat_history'], 1)
-        # pylint: disable-next=no-member # dynamic prompts (see self.__build_prompts)
         if self.opts.assistant_mode:
             human_prompt = prompts.compose_nostory_tag(documents)
         else:
+            # pylint: disable-next=no-member # dynamic prompts (see self.__build_prompts)
             human_prompt = prompts.get_prompt(f'{prompts.tag_prompt_file}_human.md')
         human_tmpl = PromptTemplate(template=human_prompt,
                                     template_format='jinja2')

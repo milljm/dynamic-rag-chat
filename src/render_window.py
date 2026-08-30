@@ -485,13 +485,13 @@ class RenderWindow(PromptManager):
         """Optional UI hook (Spur SSE). Terminal ignores it."""
         hook = getattr(self, 'status_hook', None)
         if callable(hook):
-            hook(message)
+            hook(message)  # pylint: disable=not-callable  #checking for callable above
 
     def _emit_image(self, rec: dict) -> None:
         """Push a generated PNG to Spur while the SD agent is still running."""
         hook = getattr(self, 'image_hook', None)
         if callable(hook):
-            hook(rec)
+            hook(rec)  # pylint: disable=not-callable  #checking for callable above
 
     def _invoke_web_agent(self, documents: dict, polish: bool, meta_data) -> list:
         """Run AgentExecutor once, then recurse so a follow-up search can happen."""
@@ -619,7 +619,8 @@ class RenderWindow(PromptManager):
             f'CHARACTER LOOKS:\n{look}\n'
         )
 
-    def _invoke_sd_agent(self, documents: dict, polish: bool, meta_data) -> list:
+    # pylint: disable-next=unused-argument  # future use (polish, meta_data)
+    def _invoke_sd_agent(self, documents: dict, polish: bool, meta_data: RAGTag) -> list:
         """Run txt2img / img2img / ImageMagick, then recurse to the answerer."""
         documents['sd_ran'] = True
         documents.setdefault('original_user_query', documents['user_query'])
