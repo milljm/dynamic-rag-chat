@@ -4,7 +4,6 @@ import os
 import re
 import ast
 import sys
-import pickle
 import json
 import datetime
 import secrets
@@ -43,7 +42,6 @@ class RAGTag(NamedTuple):
 
 
 HISTORY_JSON = 'chat_history.json'
-HISTORY_PKL = 'chat_history.pkl'
 HISTORY_VERSION = 1
 HISTORY_META_KEYS = frozenset({
     'current', 'assistant_mode', 'branch_modes', 'version',
@@ -74,7 +72,7 @@ def active_branch(assistant_mode: bool, history: dict | None) -> str:
 
 
 def _json_default(obj: Any):
-    """Best-effort conversion for leftover pickle types."""
+    """Best-effort conversion for JSON serialization of non-standard types."""
     as_dict = getattr(obj, '_asdict', None)
     if callable(as_dict):
         return as_dict()
@@ -96,25 +94,6 @@ def _read_json_dict(path: str) -> dict | None:
         return None
     except (OSError, UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
         print(f'Warning: could not read {path}: {exc}')
-        return None
-    if isinstance(data, dict):
-        return data
-    print(f'Warning: {path} is a {type(data).__name__}, expected dict')
-    return None
-
-
-def _read_pickle_dict(path: str) -> dict | None:
-    """Load a pickle dict from `path` (legacy chat_history.pkl)."""
-    try:
-        with open(path, 'rb') as handle:
-            data = pickle.load(handle)
-    except FileNotFoundError:
-        return None
-    except (pickle.UnpicklingError, EOFError) as exc:
-        print(f'Warning: could not read {path}: {exc}')
-        return None
-    except Exception as exc:  # pylint: disable=broad-exception-caught
-        print(f'Warning: Error loading chat: {exc}')
         return None
     if isinstance(data, dict):
         return data
@@ -172,43 +151,30 @@ def _history_lock(path: str):
         handle.close()
 
 
-def load_history_from_dir(vector_dir: str, *, migrate: bool = True) -> dict | None:
-    """Load history from JSON, falling back to legacy pickle.
-
-    When a pickle is the only source and `migrate` is true, write JSON so the
-    next boot never needs pickle again. The .pkl file is left in place.
-    """
+def load_history_from_dir(vector_dir: str) -> dict | None:
+    """Load history from JSON, with fallback to .bak."""
     json_path = os.path.join(vector_dir, HISTORY_JSON)
-    pkl_path = os.path.join(vector_dir, HISTORY_PKL)
     loaded = _read_json_dict(json_path)
-    source = 'json' if loaded is not None else ''
-    if loaded is None:
-        loaded = _read_json_dict(json_path + '.bak')
-        if loaded is not None:
-            print(f'Warning: restored chat history from {json_path}.bak')
-            source = 'json'
-            try:
-                _atomic_write_json(json_path, loaded)
-            except OSError:
-                pass
-    if loaded is None:
-        loaded = _read_pickle_dict(pkl_path)
-        if loaded is None:
-            loaded = _read_pickle_dict(pkl_path + '.bak')
-            if loaded is not None:
-                print(f'Warning: restored chat history from {pkl_path}.bak')
-        if loaded is not None:
-            source = 'pickle'
-    if loaded is None:
-        return None
-    loaded.setdefault('version', HISTORY_VERSION)
-    if source == 'pickle' and migrate:
+    if loaded is not None:
+        return _ensure_version(loaded, json_path)
+
+    # Try backup
+    loaded = _read_json_dict(json_path + '.bak')
+    if loaded is not None:
+        print(f'Warning: restored chat history from {json_path}.bak')
         try:
             _atomic_write_json(json_path, loaded)
-            print(f'Migrated chat history pickle → {json_path}')
-        except OSError as exc:
-            print(f'Warning: could not migrate history to JSON: {exc}')
-    return loaded
+        except OSError:
+            pass
+        return _ensure_version(loaded, json_path)
+
+    return None
+
+
+def _ensure_version(data: dict, path: str) -> dict:
+    """Set default version and save if missing."""
+    data.setdefault('version', HISTORY_VERSION)
+    return data
 
 
 @dataclass
@@ -461,7 +427,6 @@ class RegExp:
     """ regular expression in use throughout the project """
     # model_re = re.compile(r'(\w+)\W+')
     model_re = re.compile(r'([a-zA-Z]+\d*[a-zA-Z]*)[-_]?(\w*)?[-_](\d+[a-z]*)', flags=re.IGNORECASE)
-    find_prompt  = re.compile(r'(?<=[<m]eta_prompt: ).*?(?=[>)])', re.DOTALL)
     meta_start_re = re.compile(r'{\W*(metadata)\W+:', re.IGNORECASE)
     json_template = re.compile(r'\{+\s*((?:".+?":.+?)+)\s*\}+', re.DOTALL)
     json_style = re.compile(r'```json.*```', re.DOTALL)
@@ -816,8 +781,8 @@ class CommonUtils():
             print(f'Error saving chat: {exc}')
 
     def load_chat(self)->dict:
-        """Load JSON history, migrating pickle if that is all we have."""
-        loaded = load_history_from_dir(self.opts.vector_dir, migrate=True)
+        """Load JSON history."""
+        loaded = load_history_from_dir(self.opts.vector_dir)
         if loaded is None:
             if isinstance(self.chat_history_session, dict):
                 return self.chat_history_session
@@ -831,47 +796,6 @@ class CommonUtils():
         thinking_file = os.path.join(self.opts.vector_dir, 'thinking_debug.log')
         with open(thinking_file, 'w', encoding='utf-8') as f:
             f.write(thinking_str)
-
-    def save_prompt(self, prompt)->str:
-        """ Save the LLMs prompt, overwriting the previous one """
-        prompt_file = os.path.join(self.opts.vector_dir, 'llm_prompt.pkl')
-        try:
-            with open(prompt_file, 'wb') as f:
-                pickle.dump(prompt, f)
-        except FileNotFoundError as e:
-            print(f'Error saving LLM prompt. Check --history-dir\n{e}')
-        return prompt
-
-    def load_prompt(self)->str:
-        """ Persist LLM dynamic prompt (load) """
-        prompt_file = os.path.join(self.opts.vector_dir, 'llm_prompt.pkl')
-        try:
-            with open(prompt_file, 'rb') as f:
-                prompt_str = pickle.load(f)
-        except FileNotFoundError:
-            return ''
-        except pickle.UnpicklingError as e:
-            print(f'Chat history file {prompt_file} not a pickle file:\n{e}')
-            sys.exit(1)
-        # pylint: disable=broad-exception-caught  # so many ways to fail, catch them all
-        except Exception as e:
-            print(f'Warning: Error loading chat: {e}')
-        return prompt_str
-
-    def check_prompt(self, last_message)->str:
-        """ allow the LLM to add to its own system prompt """
-        prompt = self.regex.find_prompt.findall(last_message)[-1:]
-        if prompt:
-            prompt = self.stringify_lists(prompt)
-            llm_prompt = self.save_prompt(prompt)
-            if self.opts.debug:
-                self.console.print(f'PROMPT CHANGE: {llm_prompt}',
-                                   style=f'color({self.opts.color})', highlight=True)
-            else:
-                with open(os.path.join(self.opts.vector_dir, 'debug.log'),
-                          'w', encoding='utf-8') as f:
-                    f.write(f'PROMPT CHANGE: {llm_prompt}')
-        return self.load_prompt()
 
     def write_debug(self, prefix: str, message: str)->None:
         """ Write to vector_data/{prefix}_debug.log """
