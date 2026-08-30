@@ -665,8 +665,7 @@ class RenderWindow(PromptManager):
             last_hint = (
                 f'PROMPT STACK (keep this scene):\n{stack}\n\n'
                 f'Last picture: {last_name}. img2img once. Pass ONLY the new '
-                'addition. denoising 0.28. Do not txt2img. Do not drop the forest '
-                'for the new object.'
+                'addition. denoising 0.55. Do not txt2img.'
             )
         elif last_name and not fresh:
             last_hint = (
@@ -766,13 +765,6 @@ class RenderWindow(PromptManager):
             documents['dynamic_files'] += (
                 '\nThe picture is on screen as ' + ', '.join(names[-3:]) + '.\n'
             )
-        stacked = load_session(vector_dir)
-        if stacked.get('prompt'):
-            documents['dynamic_files'] += (
-                f"\nSD_PROMPT:\n{stacked['prompt']}\n"
-                f"SD_NEGATIVE:\n{stacked.get('negative') or ''}\n"
-            )
-        documents['sd_silent'] = True
         if illustrate:
             clear_session(vector_dir)
         return []

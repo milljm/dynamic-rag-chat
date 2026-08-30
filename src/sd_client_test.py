@@ -7,7 +7,6 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from sd_client import (  # noqa: E402
-    about_last_image,
     is_generated_picture,
     is_new_scene,
     magick_argv,
@@ -68,10 +67,7 @@ class SdClientTest(unittest.TestCase):
         self.assertTrue(wants_sd('too yellow', has_last=True))
         self.assertTrue(wants_sd('punch up the lighting', has_last=True))
         self.assertFalse(wants_sd('looks great', has_last=True))
-        self.assertTrue(about_last_image('looks great'))
-        self.assertTrue(about_last_image('love the eyes'))
         self.assertFalse(wants_sd('what is a fox'))
-        self.assertFalse(about_last_image('how do I write a for loop'))
 
     def test_new_scene_vs_tweak(self):
         self.assertTrue(is_new_scene(

@@ -47,14 +47,6 @@ IMAGE_EDIT = re.compile(
     r'|\b(change|fix|tweak|adjust)\s+(the\s+)?(background|lighting|sky|eyes|face|color|colour|mood)\b'
     r'|\b(try (again|another|a different)|do it again|once more|another (one|pass|version|go))\b'
 )
-# Commentary about the last picture (attach pixels, do not necessarily regenerate).
-ABOUT_IMAGE = re.compile(
-    r'(?ix)'
-    r'\b(image|picture|photo|drawing|render|png|artwork|illustration)\b'
-    r'|\b(looks?|looking|nice one|love it|like it|hate it|pretty|ugly|weird|off|wrong|better|worse|perfect|cool)\b'
-    r'|\b(color|colour|light(?:ing)?|dark|background|foreground|sky|eyes|face|mood|style|vibe|composition|palette)\b'
-    r'|\b(what do you think|thoughts on (it|that|this))\b'
-)
 MAGICK_QUERY = re.compile(
     r'(?ix)'
     r'\b(border|caption|watermark|label|resize|rotate|flip|'
@@ -87,14 +79,6 @@ def wants_sd(query: str, has_last: bool = False) -> bool:
     if has_last and IMAGE_EDIT.search(text):
         return True
     return False
-
-
-def about_last_image(query: str) -> bool:
-    """True when the user is talking about the picture already on screen."""
-    text = query or ''
-    if IMAGE_QUERY.search(text) or IMAGE_EDIT.search(text):
-        return True
-    return bool(ABOUT_IMAGE.search(text))
 
 
 def has_generated_images(vector_dir: str) -> bool:
