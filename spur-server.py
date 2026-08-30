@@ -852,6 +852,13 @@ def api_pop() -> JSONResponse:
     return _op(pop_last_assistant, get_chat())
 
 
+@app.post('/api/sd/reset')
+def api_sd_reset() -> JSONResponse:
+    """Drop the Image-mode prompt stack so the next generate is txt2img."""
+    clear_session(_vector_dir())
+    return JSONResponse({'ok': True, 'message': 'Image session cleared.'})
+
+
 @app.post('/api/session/mode')
 async def api_mode(request: Request) -> JSONResponse:
     """Switch story vs assistant mode."""

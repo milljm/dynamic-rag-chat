@@ -9,6 +9,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from sd_client import (  # noqa: E402
     about_last_image,
     is_generated_picture,
+    is_new_scene,
     magick_argv,
     normalize_sd_url,
     sd_enabled,
@@ -71,6 +72,16 @@ class SdClientTest(unittest.TestCase):
         self.assertTrue(about_last_image('love the eyes'))
         self.assertFalse(wants_sd('what is a fox'))
         self.assertFalse(about_last_image('how do I write a for loop'))
+
+    def test_new_scene_vs_tweak(self):
+        self.assertTrue(is_new_scene(
+            'Lets create an image of a soap bubble floating in the air',
+        ))
+        self.assertTrue(is_new_scene('draw me a red fox'))
+        self.assertFalse(is_new_scene(
+            'Have one of its legs raised, as if waving to the viewer',
+        ))
+        self.assertFalse(is_new_scene('now make it darker'))
 
     def test_vision_sidecars_are_not_pictures(self):
         self.assertTrue(is_generated_picture('txt2img-120000-abc.png'))

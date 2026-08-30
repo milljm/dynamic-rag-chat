@@ -60,6 +60,23 @@ MAGICK_QUERY = re.compile(
     r'\b(border|caption|watermark|label|resize|rotate|flip|'
     r'grayscale|black\s*and\s*white|blur|sharpen|vignette)\b'
 )
+# Brand-new picture — do not img2img the last PNG.
+NEW_SCENE = re.compile(
+    r'(?ix)'
+    r'\b(lets?|let us)\s+(create|make|draw|generate|paint|do)\b'
+    r'|\b(draw|paint|sketch|illustrate|render)\s+(me\s+)?(a|an|some)\b'
+    r'|\b(generate|create|make)\b.{0,80}\b(image|picture|pic\b|photo|'
+    r'illustration|portrait|logo|icon|wallpaper|artwork|poster)\b'
+    r'|\b(an?\s+)?(image|picture|illustration|portrait)\s+of\b'
+    r'|\b(new|another|different|fresh)\s+(image|picture|scene|one)\b'
+    r'|\bstart over\b|\bfrom scratch\b'
+    r'|\bforget (the|that|this)\s+(last|previous|image|picture)\b'
+)
+
+
+def is_new_scene(query: str) -> bool:
+    """True when the user wants a brand-new picture, not a tweak of the last."""
+    return bool(NEW_SCENE.search(query or ''))
 
 
 def wants_sd(query: str, has_last: bool = False) -> bool:

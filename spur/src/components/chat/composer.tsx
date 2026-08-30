@@ -1,7 +1,8 @@
 import { useRef, useState } from "react";
-import { ArrowUp, Palette, Paperclip, RefreshCw, Square, X } from "lucide-react";
+import { ArrowUp, Palette, Paperclip, RefreshCw, RotateCcw, Square, X } from "lucide-react";
 import { toast } from "sonner";
 import { lastUserMessage, modeOf, turnCount } from "@/lib/chat/branch-mode";
+import { postOp } from "@/lib/chat/remote";
 import { useChatStore } from "@/lib/chat/store";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -195,7 +196,10 @@ export function Composer({
                     ? "Force image generate / edit this turn"
                     : "Image is locked to assistant mode"
                 }
-                onClick={() => setForceSd(!forceSd)}
+                onClick={() => {
+                  if (forceSd) void postOp("/api/sd/reset");
+                  setForceSd(!forceSd);
+                }}
                 className={cn(
                   "inline-flex h-8 items-center gap-1.5 rounded-sm px-2.5 text-xs font-medium transition-colors",
                   imageOn
@@ -207,6 +211,22 @@ export function Composer({
                 <Palette className="size-3.5" />
                 Image
               </button>
+              {imageOn ? (
+                <button
+                  type="button"
+                  disabled={streaming}
+                  title="New picture — forget the last generate"
+                  onClick={() => {
+                    void postOp("/api/sd/reset").then((r) => {
+                      if (r.ok) toast.message("Next generate is a new picture.");
+                    });
+                  }}
+                  className="inline-flex h-8 items-center gap-1 rounded-sm px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                >
+                  <RotateCcw className="size-3.5" />
+                  New
+                </button>
+              ) : null}
             </div>
             <div className="flex items-center gap-1">
               {streaming ? (

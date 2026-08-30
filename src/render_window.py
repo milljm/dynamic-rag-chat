@@ -29,7 +29,7 @@ from .context_manager import ContextManager # For Type Hinting
 from .chat_utils import CommonUtils, ChatOptions, RAGTag # For Type Hinting
 from .model_orchestrator import Orchestration, MAX_AGENT_CALLS
 from .agent_tools import DuckDuckGoSearchTool
-from .sd_client import MAGICK_QUERY, has_generated_images, ping_sd, vision_thumb_data_url
+from .sd_client import MAGICK_QUERY, has_generated_images, is_new_scene, ping_sd, vision_thumb_data_url
 from .sd_session import checkpoint_flavor, flavor_brief, load_session, save_session
 from .think_tags import ThinkFeed, chunk_text, split_think
 from .sd_tools import make_sd_tools, seed_last_generated
@@ -574,7 +574,7 @@ class RenderWindow(PromptManager):
             if info.get('ok'):
                 ckpt = str(info.get('current') or '')
         flavor = checkpoint_flavor(ckpt)
-        fresh = bool(re.search(
+        fresh = is_new_scene(query) or bool(re.search(
             r'(?ix)\b(start over|from scratch|new (image|picture|scene)|'
             r'forget the (last|previous))\b',
             query,
@@ -624,8 +624,10 @@ class RenderWindow(PromptManager):
                 'paragraph (SDXL/Flux).\n'
                 'Image mode builds ONE prompt across turns.\n'
                 '- First picture → txt2img with that full prompt (quality tags + scene).\n'
-                '- Later → img2img. Pass ONLY what to add. The system prepends the stack. '
-                'denoising 0.42. A new seed every pass.\n'
+                '- Later tweaks → img2img. Pass ONLY what to add. denoising 0.55. '
+                'New seed every pass.\n'
+                '- A different subject ("create an image of a soap bubble") → txt2img. '
+                'Forget the last picture.\n'
                 'You do not see the pixels. Do not critique the picture.\n'
                 f'{magick_hint}\n'
                 'Never generate a second time to "improve" it.\n'

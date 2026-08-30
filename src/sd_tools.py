@@ -177,7 +177,7 @@ def make_sd_tools(
     def do_img2img(
         prompt: str,
         image_name: str = 'last',
-        denoising: float = 0.42,
+        denoising: float = 0.55,
         negative_prompt: str = '',
         steps: int = 28,
     ) -> str:
@@ -189,7 +189,7 @@ def make_sd_tools(
         full = merge_prompt(str(stack.get('prompt') or ''), prompt)
         negative = negative_prompt or str(stack.get('negative') or '')
         full, negative = apply_quality(full, negative, flavor)
-        denoise = min(0.55, max(0.3, float(denoising or 0.42)))
+        denoise = min(0.7, max(0.4, float(denoising or 0.55)))
         seed = -1
         with open(rec['path'], 'rb') as handle:
             src = handle.read()
@@ -255,8 +255,9 @@ def make_sd_tools(
                 description=(
                     'Add to the last picture. Pass ONLY the new ask '
                     '(e.g. "a large soap bubble with rainbow shimmer"). '
-                    'The previous scene prompt is prepended. denoising 0.35-0.5 '
-                    'keeps the scene; default 0.42. A new seed is used each pass.'
+                    'The previous scene prompt is prepended. denoising 0.5-0.65 '
+                    'for pose/detail tweaks; default 0.55. New seed each pass. '
+                    'If the user wants a different subject, do not use this tool.'
                 ),
             ),
         )
