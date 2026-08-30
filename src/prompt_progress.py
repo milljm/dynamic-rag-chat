@@ -1,19 +1,19 @@
-"""Surface prompt-processing % only when the backend actually exposes it.
+"""Surface prompt-processing % during the wait-for-first-token.
 
-LM Studio's Developer log (``Prompt processing progress: 46.6%``) lives on
-native ``POST /api/v1/chat`` as ``prompt_processing.progress``. That endpoint
-is stateful and cannot take assistant history, so we do **not** switch
-generation to it.
+LM Studio's Developer log (``Prompt processing progress: 46.6%``) is the
+native ``prompt_processing.progress`` event. That event is documented on
+``POST /api/v1/chat``, which cannot take assistant history, so we do not
+switch generation to it.
 
-The OpenAI-compat socket Spur already uses (``/v1/chat/completions``) does
-not document those events. llama.cpp does expose ``GET /slots``.
+We stay on OpenAI-compat ``/v1/chat/completions`` (same messages ChatOpenAI
+would send) and:
 
-At stream time we probe the configured origin — ``http://llm:1234`` counts,
-not just localhost:
-
-1. ``GET /slots`` (or ``/v1/slots``) returns JSON → poll it while
-   ``llm.stream()`` runs and update ``Processing Prompt… 46.6%``.
-2. Otherwise → leave LangChain alone. Not supported.
+1. Stream it ourselves so we can see llama.cpp ``prompt_progress`` / LM
+   Studio ``prompt_processing.progress`` / the log line if they leak
+   (``return_progress: true``, never on cloud OpenAI).
+2. Poll ``GET /slots`` on the configured origin (``http://llm:1234`` counts)
+   while the body is silent.
+3. Fall back to LangChain ``llm.stream()`` if the raw POST fails.
 """
 from __future__ import annotations
 
@@ -41,8 +41,6 @@ _CLOUD = (
     'api.mistral.ai',
     'openrouter.ai',
 )
-_PROBE: dict[str, bool] = {}
-_PROBE_LOCK = threading.Lock()
 
 
 @dataclass
@@ -68,7 +66,7 @@ class TokenChunk:
 
 
 def format_prompt_status(fraction: float) -> str:
-    """Status line Spur already knows: Processing Prompt… 46.6%."""
+    """``Processing Prompt… 46.6%`` — Spur puts model/route/context after."""
     frac = _clamp(float(fraction))
     if frac <= 0:
         return 'Processing Prompt…'
@@ -137,12 +135,6 @@ def parse_slots_progress(payload: Any) -> float | None:
     return best
 
 
-def reset_probe_cache() -> None:
-    """Tests: forget GET /slots results."""
-    with _PROBE_LOCK:
-        _PROBE.clear()
-
-
 def _clamp(value: float) -> float:
     return max(0.0, min(1.0, value))
 
@@ -190,15 +182,63 @@ def _chat_url(llm: Any) -> str:
         or getattr(llm, 'base_url', None)
         or ''
     )
-    return str(base).rstrip('/')
+    base = str(base).rstrip('/')
+    if not base:
+        return ''
+    if base.endswith('/chat/completions'):
+        return base
+    return f'{base}/chat/completions'
 
 
-def _headers(llm: Any) -> dict[str, str]:
+def messages_to_openai(messages: Any) -> list[dict]:
+    """LangChain messages → OpenAI dicts."""
+    out: list[dict] = []
+    for msg in messages or []:
+        kind = getattr(msg, 'type', '') or ''
+        role = 'user'
+        if kind in {'system', 'ai', 'assistant', 'tool'}:
+            role = {'ai': 'assistant'}.get(kind, kind)
+        elif msg.__class__.__name__ in {'SystemMessage'}:
+            role = 'system'
+        elif msg.__class__.__name__ in {'AIMessage', 'AIMessageChunk'}:
+            role = 'assistant'
+        elif msg.__class__.__name__ in {'ToolMessage'}:
+            role = 'tool'
+        content = getattr(msg, 'content', msg)
+        out.append({'role': role, 'content': content})
+    return out
+
+
+def _payload_for(llm: Any, messages: Any, with_progress: bool) -> dict:
+    """Request body, preferring ChatOpenAI's own serializer."""
+    getter = getattr(llm, '_get_request_payload', None)
+    payload: dict
+    if callable(getter):
+        try:
+            payload = dict(getter(messages))  # pylint: disable=protected-access
+        except Exception:  # pylint: disable=broad-exception-caught
+            payload = {}
+    else:
+        payload = {}
+    if not payload.get('messages'):
+        payload['messages'] = messages_to_openai(messages)
+    payload['stream'] = True
+    payload.setdefault('model', getattr(llm, 'model_name', None) or getattr(llm, 'model', ''))
+    extra = getattr(llm, 'extra_body', None)
+    if isinstance(extra, dict):
+        for key, value in extra.items():
+            payload.setdefault(key, value)
+    if with_progress and not _is_cloud(_chat_url(llm)):
+        payload['return_progress'] = True
+    return payload
+
+
+def _headers(llm: Any, accept: str = 'application/json') -> dict[str, str]:
     key = str(getattr(llm, 'openai_api_key', None) or getattr(llm, 'api_key', None) or 'none')
     return {
         'Authorization': f'Bearer {key}',
         'Content-Type': 'application/json',
-        'Accept': 'application/json',
+        'Accept': accept,
     }
 
 
@@ -215,26 +255,49 @@ def _json_get(url: str, headers: dict) -> Any | None:
         return None
 
 
-def slots_supported(origin: str, headers: dict) -> bool:
-    """True when GET /slots (or /v1/slots) returns JSON. Cached per origin."""
-    if not origin:
-        return False
-    with _PROBE_LOCK:
-        cached = _PROBE.get(origin)
-        if cached is not None:
-            return cached
-    ok = False
-    for path in ('/slots', '/v1/slots'):
-        if _json_get(f'{origin}{path}', headers) is not None:
-            ok = True
+def _iter_sse_json(body) -> Iterator[dict]:
+    """Yield parsed objects from an HTTP SSE body."""
+    buf = b''
+    while True:
+        chunk = body.read(256)
+        if not chunk:
+            if buf.strip():
+                obj = _line_json(buf.decode('utf-8', errors='replace'))
+                if obj is not None:
+                    yield obj
             break
-    with _PROBE_LOCK:
-        _PROBE[origin] = ok
-    return ok
+        buf += chunk
+        while b'\n' in buf:
+            raw, buf = buf.split(b'\n', 1)
+            obj = _line_json(raw.decode('utf-8', errors='replace'))
+            if obj is not None:
+                yield obj
+
+
+def _line_json(line: str) -> dict | None:
+    text = line.strip()
+    if not text:
+        return None
+    frac = parse_progress_text(text)
+    if frac is not None:
+        return {'type': 'prompt_processing.progress', 'progress': frac}
+    if text.startswith(':') or text == 'data: [DONE]':
+        return None
+    if text.lower().startswith('data:'):
+        text = text[5:].strip()
+    if text.lower().startswith('event:'):
+        return None
+    if not text or text == '[DONE]':
+        return None
+    try:
+        obj = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    return obj if isinstance(obj, dict) else None
 
 
 class _Closable:
-    """Lets ``_abort_llm_stream`` close the LangChain HTTP body."""
+    """Lets ``_abort_llm_stream`` close the raw HTTP body."""
 
     def __init__(self, response, inner: Iterator):
         self._response = response
@@ -260,17 +323,43 @@ def _poll_slots(origin: str, headers: dict, sink: Callable[[float], None],
                 stop: threading.Event) -> None:
     """llama.cpp /slots while the completion is in-flight."""
     urls = [f'{origin}/slots', f'{origin}/v1/slots']
+    misses = 0
     delay = 0.0
     while not stop.wait(delay):
         delay = 0.2
+        hit = False
         for url in urls:
             payload = _json_get(url, headers)
             if payload is None:
                 continue
+            hit = True
+            misses = 0
             frac = parse_slots_progress(payload)
             if frac is not None:
                 sink(frac)
             break
+        if not hit:
+            misses += 1
+            if misses >= 2:
+                return
+
+
+def _post_stream(url: str, payload: dict, headers: dict):
+    """POST the completion. Drop return_progress on 400 and retry once."""
+    body = json.dumps(payload).encode('utf-8')
+    req = urllib.request.Request(url, data=body, headers=headers, method='POST')
+    try:
+        return urllib.request.urlopen(req, timeout=600)
+    except urllib.error.HTTPError as exc:
+        try:
+            exc.read()
+        except Exception:  # pylint: disable=broad-exception-caught
+            pass
+        if exc.code in {400, 404, 415, 422} and payload.pop('return_progress', None):
+            return _post_stream(url, payload, headers)
+        return None
+    except Exception:  # pylint: disable=broad-exception-caught
+        return None
 
 
 def _maybe_progress(frac: float, last_label: str) -> tuple[str, PromptProgress | None]:
@@ -281,8 +370,47 @@ def _maybe_progress(frac: float, last_label: str) -> tuple[str, PromptProgress |
     return label, PromptProgress(frac)
 
 
+def _token_chunk(content: str, reasoning: str) -> TokenChunk:
+    extra = {'reasoning_content': reasoning} if reasoning else {}
+    return TokenChunk(
+        content=content, reasoning_content=reasoning, additional_kwargs=extra,
+    )
+
+
+def delta_text(obj: dict) -> tuple[str, str]:
+    """(content, reasoning) from an OpenAI or native chat-completion chunk."""
+    kind = str(obj.get('type') or '')
+    if kind == 'message.delta':
+        piece = obj.get('content') or ''
+        return (piece if isinstance(piece, str) else str(piece), '')
+    if kind == 'reasoning.delta':
+        piece = obj.get('content') or ''
+        return ('', piece if isinstance(piece, str) else str(piece))
+    choices = obj.get('choices')
+    if not isinstance(choices, list) or not choices:
+        return '', ''
+    choice = choices[0] if isinstance(choices[0], dict) else {}
+    delta = choice.get('delta') or choice.get('message') or {}
+    if not isinstance(delta, dict):
+        return '', ''
+    content = delta.get('content')
+    if content is None:
+        content = ''
+    elif not isinstance(content, str):
+        content = str(content)
+    extra = (
+        delta.get('reasoning_content')
+        or delta.get('reasoning')
+        or ''
+    )
+    if not isinstance(extra, str):
+        extra = str(extra) if extra is not None else ''
+    return content, extra
+
+
 def _drain(box: queue.Queue, stop: threading.Event) -> Iterator[Any]:
-    """Merge /slots fractions with LangChain chunks."""
+    """Merge SSE objects, /slots fractions, and LangChain chunks."""
+    # pylint: disable=too-many-branches
     last_label = ''
     seen_token = False
     try:
@@ -304,49 +432,65 @@ def _drain(box: queue.Queue, stop: threading.Event) -> Iterator[Any]:
                 if item is not None:
                     yield item
                 continue
-            seen_token = True
-            yield payload
+            if kind == 'chunk':
+                seen_token = True
+                yield payload
+                continue
+            frac = parse_progress(payload)
+            if frac is not None and not seen_token:
+                last_label, item = _maybe_progress(frac, last_label)
+                if item is not None:
+                    yield item
+            content, reasoning = delta_text(payload)
+            if content or reasoning:
+                seen_token = True
+                yield _token_chunk(content, reasoning)
     finally:
         stop.set()
 
 
-def _stream_with_slots(llm: Any, messages: Any, origin: str, headers: dict) -> Iterator[Any]:
-    """LangChain tokens plus /slots progress."""
-    stream = llm.stream(messages)
-    box: queue.Queue = queue.Queue()
-    stop = threading.Event()
-
+def _merge_stream(response, origin: str, headers: dict, stop: threading.Event,
+                  box: queue.Queue) -> None:
+    """SSE reader thread + optional /slots poller."""
     def sink(frac: float) -> None:
         box.put(('progress', frac))
 
-    def read() -> None:
+    def read_sse() -> None:
         try:
-            for chunk in stream:
-                box.put(('chunk', chunk))
+            for obj in _iter_sse_json(response):
+                box.put(('sse', obj))
         except Exception as exc:  # pylint: disable=broad-exception-caught
             box.put(('err', exc))
         finally:
             box.put(('eof', None))
 
-    threading.Thread(target=_poll_slots, args=(origin, headers, sink, stop), daemon=True).start()
-    threading.Thread(target=read, daemon=True).start()
-    wrapped = _Closable(stream, _drain(box, stop))
+    threading.Thread(target=read_sse, daemon=True).start()
+    if origin:
+        threading.Thread(
+            target=_poll_slots, args=(origin, headers, sink, stop), daemon=True,
+        ).start()
+
+
+def stream_chat(llm: Any, messages: Any) -> Iterator[Any]:
+    """Yield PromptProgress then TokenChunk (or LangChain chunks on fallback)."""
+    url = _chat_url(llm)
+    if not url or _is_cloud(url):
+        yield from llm.stream(messages)
+        return
+    payload = _payload_for(llm, messages, with_progress=True)
+    headers = _headers(llm, accept='text/event-stream')
+    response = _post_stream(url, payload, headers)
+    if response is None:
+        yield from llm.stream(messages)
+        return
+
+    box: queue.Queue = queue.Queue()
+    stop = threading.Event()
+    origin = _origin(url)
+    _merge_stream(response, origin, _headers(llm), stop, box)
+    wrapped = _Closable(response, _drain(box, stop))
     try:
         yield from wrapped
     finally:
         stop.set()
         wrapped.close()
-
-
-def stream_chat(llm: Any, messages: Any) -> Iterator[Any]:
-    """Yield PromptProgress then LLM chunks, or just ``llm.stream()``."""
-    url = _chat_url(llm)
-    if not url or _is_cloud(url):
-        yield from llm.stream(messages)
-        return
-    origin = _origin(url)
-    headers = _headers(llm)
-    if not slots_supported(origin, headers):
-        yield from llm.stream(messages)
-        return
-    yield from _stream_with_slots(llm, messages, origin, headers)

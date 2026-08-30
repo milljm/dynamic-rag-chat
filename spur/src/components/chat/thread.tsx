@@ -410,6 +410,12 @@ function RecallMark({ names }: { names?: string[] }) {
   );
 }
 
+function splitPromptPct(label: string): { text: string; pct: string } {
+  const match = label.match(/^(Processing Prompt…?)\s+([\d.]+%)\s*$/i);
+  if (!match) return { text: label, pct: "" };
+  return { text: match[1], pct: match[2] };
+}
+
 function StatusLine({
   status,
   model,
@@ -437,13 +443,15 @@ function StatusLine({
       </p>
     );
   }
+  const { text, pct } = splitPromptPct(label);
   const showModel =
-    Boolean(model) && /^(Streaming|Processing Prompt|Reasoning)/i.test(label);
+    Boolean(model) && /^(Streaming|Processing Prompt|Reasoning)/i.test(text);
   return (
     <p className="text-sm text-muted-foreground">
-      <span className="shimmer-text">{label}</span>
+      <span className="shimmer-text">{text}</span>
       {showModel ? (
         <span className="ml-1.5 font-mono text-[10px] font-normal tracking-tight text-muted-foreground/40">
+          {pct ? `${pct} ` : ""}
           [{model}]
           {route ? ` [${route}]` : ""}
           {context ? ` ${fmtContext(context)}` : ""}
