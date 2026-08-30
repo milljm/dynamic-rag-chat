@@ -6,6 +6,7 @@ export type ChatRequest = {
   images: string[];
   includes?: string[];
   useAgent?: boolean;
+  useSd?: boolean;
   noContext?: boolean;
   rare?: string[];
   oocDiagnostics?: string;

@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { ArrowUp, Paperclip, RefreshCw, Square, X } from "lucide-react";
+import { ArrowUp, Palette, Paperclip, RefreshCw, Square, X } from "lucide-react";
 import { toast } from "sonner";
 import { lastUserMessage, modeOf, turnCount } from "@/lib/chat/branch-mode";
 import { useChatStore } from "@/lib/chat/store";
@@ -25,6 +25,8 @@ export function Composer({
   const removePending = useChatStore((s) => s.removePending);
   const forceAgent = useChatStore((s) => s.forceAgent);
   const setForceAgent = useChatStore((s) => s.setForceAgent);
+  const forceSd = useChatStore((s) => s.forceSd);
+  const setForceSd = useChatStore((s) => s.setForceSd);
   const currentId = useChatStore((s) => s.currentId);
   const branch = useChatStore((s) => s.branches[s.currentId]);
   const ref = useRef<HTMLTextAreaElement>(null);
@@ -38,6 +40,7 @@ export function Composer({
   const canSend =
     !streaming && (value.trim().length > 0 || pending.length > 0);
   const agentOn = mode === "assistant" && forceAgent;
+  const imageOn = mode === "assistant" && forceSd;
   const dragging = dragDepth > 0;
 
   function submit() {
@@ -182,6 +185,27 @@ export function Composer({
                 )}
               >
                 Agent
+              </button>
+              <button
+                type="button"
+                aria-pressed={imageOn}
+                disabled={mode !== "assistant" || streaming}
+                title={
+                  mode === "assistant"
+                    ? "Force image generate / edit this turn"
+                    : "Image is locked to assistant mode"
+                }
+                onClick={() => setForceSd(!forceSd)}
+                className={cn(
+                  "inline-flex h-8 items-center gap-1.5 rounded-sm px-2.5 text-xs font-medium transition-colors",
+                  imageOn
+                    ? "bg-primary text-primary-foreground"
+                    : "text-muted-foreground hover:bg-accent hover:text-foreground",
+                  mode !== "assistant" && "opacity-40",
+                )}
+              >
+                <Palette className="size-3.5" />
+                Image
               </button>
             </div>
             <div className="flex items-center gap-1">

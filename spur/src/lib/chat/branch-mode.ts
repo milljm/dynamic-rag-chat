@@ -373,7 +373,18 @@ export function applySetForceAgent(
 ): ChatSnapshot {
   const current = state.branches[state.currentId];
   const allowed = current ? modeOf(current) === "assistant" : false;
-  return { ...state, forceAgent: allowed && enabled };
+  const on = allowed && enabled;
+  return { ...state, forceAgent: on, forceSd: on ? false : state.forceSd };
+}
+
+export function applySetForceSd(
+  state: ChatSnapshot,
+  enabled: boolean,
+): ChatSnapshot {
+  const current = state.branches[state.currentId];
+  const allowed = current ? modeOf(current) === "assistant" : false;
+  const on = allowed && enabled;
+  return { ...state, forceSd: on, forceAgent: on ? false : state.forceAgent };
 }
 
 function cloneMessage(m: Message): Message {
@@ -409,6 +420,7 @@ export function emptySnapshot(): ChatSnapshot {
     currentId: "story",
     pendingAttachments: [],
     forceAgent: false,
+    forceSd: false,
     pendingOoc: "",
     branches: {
       story: lockedBranch("story", now),
@@ -462,6 +474,7 @@ export function migrateSnapshot(raw: ChatSnapshot): ChatSnapshot {
     branches,
     pendingAttachments: raw.pendingAttachments ?? [],
     forceAgent: false,
+    forceSd: false,
     pendingOoc: "",
   };
 }

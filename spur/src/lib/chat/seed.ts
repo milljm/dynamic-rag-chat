@@ -70,6 +70,7 @@ export function seedSnapshot(): ChatSnapshot {
     currentId: "story",
     pendingAttachments: [],
     forceAgent: false,
+    forceSd: false,
     pendingOoc: "",
     branches: {
       story: {

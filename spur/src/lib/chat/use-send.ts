@@ -56,6 +56,7 @@ export function useSend() {
 
       const mode = modeOf(branch);
       const agent = Boolean(opts.agent) && mode === "assistant";
+      const image = Boolean(opts.image) && mode === "assistant";
       const noContext = Boolean(opts.noContext);
       const ooc = Boolean(opts.ooc);
       const includes = parseIncludes(opts.text);
@@ -88,9 +89,10 @@ export function useSend() {
       }
 
       const flags: TurnFlags | undefined =
-        agent || noContext || ooc || opts.includeBranch
+        agent || noContext || ooc || opts.includeBranch || image
           ? {
               agent,
+              image,
               noContext,
               ooc,
               includeBranch: opts.includeBranch,
@@ -121,7 +123,11 @@ export function useSend() {
         id: assistantId,
         role: "assistant",
         content: "",
-        status: agent ? "Agent Web Search…" : "Processing Prompt…",
+        status: image
+          ? "Stable Diffusion…"
+          : agent
+            ? "Agent Web Search…"
+            : "Processing Prompt…",
         createdAt: Date.now(),
       };
       store.appendMessage(assistantMsg, [], originId);
@@ -174,6 +180,7 @@ export function useSend() {
             images,
             includes: includes.urls,
             useAgent: agent,
+            useSd: image,
             noContext,
             rare: opts.rare,
             oocDiagnostics: oocDiagnostics || undefined,
@@ -333,6 +340,7 @@ export function useSend() {
       await generate({
         text: parsed.text,
         agent: store.forceAgent,
+        image: store.forceSd,
         noContext: false,
         rare: parsed.rare,
         ooc: parsed.ooc,
@@ -356,6 +364,7 @@ export function useSend() {
       text: last.content,
       regenerate: true,
       agent: Boolean(flags?.agent || store.forceAgent),
+      image: Boolean(flags?.image || store.forceSd),
       noContext: Boolean(flags?.noContext),
       includeBranch: flags?.includeBranch,
       ooc: Boolean(flags?.ooc),
@@ -438,6 +447,7 @@ function handleLocalCommand(
         text: last.content,
         regenerate: true,
         agent: Boolean(flags?.agent || store.forceAgent),
+        image: Boolean(flags?.image || store.forceSd),
         noContext: Boolean(flags?.noContext),
         includeBranch: flags?.includeBranch,
         ooc: Boolean(flags?.ooc),
@@ -482,9 +492,10 @@ async function generateViaChatPy(
         ?.attachments ?? []
     : store.pendingAttachments;
   const flags: TurnFlags | undefined =
-    agent || noContext || opts.ooc || opts.includeBranch
+    agent || useSd || noContext || opts.ooc || opts.includeBranch
       ? {
           agent,
+          image: useSd,
           noContext,
           ooc: opts.ooc,
           includeBranch: opts.includeBranch,
@@ -516,7 +527,11 @@ async function generateViaChatPy(
       id: assistantId,
       role: "assistant",
       content: "",
-      status: "RAG Processing…",
+      status: useSd
+        ? "Stable Diffusion…"
+        : agent
+          ? "Agent Web Search…"
+          : "RAG Processing…",
       createdAt: Date.now(),
     },
     [],

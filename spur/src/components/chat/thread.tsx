@@ -6,6 +6,7 @@ import {
   GitBranch,
   Globe,
   Lock,
+  Palette,
   PanelLeft,
 } from "lucide-react";
 import { isLockedBranch, modeOf, turnCount } from "@/lib/chat/branch-mode";
@@ -275,6 +276,7 @@ function MessageBubble({
           </ul>
         )}
         {(message.flags?.agent ||
+          message.flags?.image ||
           message.flags?.noContext ||
           message.flags?.includeBranch ||
           message.flags?.ooc) && (
@@ -283,6 +285,12 @@ function MessageBubble({
               <>
                 <Globe className="size-3" />
                 Agent
+              </>
+            )}
+            {message.flags.image && (
+              <>
+                <Palette className="size-3" />
+                Image
               </>
             )}
             {message.flags.noContext && <span>No context</span>}
