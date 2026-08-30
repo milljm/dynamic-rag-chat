@@ -60,6 +60,9 @@ _SLOT_MARKERS = frozenset({
     'n_ctx', 'n_predict', 'id_task', 'is_processing',
     'prompt_progress', 'next_token', 'slot_id', 'task_id',
 })
+_LMS_TOKEN = re.compile(
+    r'^sk-lm-(?P<id>[A-Za-z0-9]+):(?P<key>[A-Za-z0-9]+)$',
+)
 # LM Studio SDK / daemon API (not the OpenAI REST port).
 _API_PORTS = (41343, 52993, 16141, 39414, 22931)
 
@@ -130,7 +133,7 @@ def parse_progress(obj: Any) -> float | None:
     if not isinstance(obj, dict):
         return None
     kind = str(obj.get('type') or '')
-    if kind == 'prompt_processing.progress':
+    if kind in {'prompt_processing.progress', 'promptProcessingProgress'}:
         return _as_fraction(obj.get('progress'))
     blob = obj.get('prompt_progress')
     if isinstance(blob, dict):
@@ -318,8 +321,32 @@ def _payload_for(llm: Any, messages: Any, with_progress: bool) -> dict:
     return payload
 
 
+def _secret(value: Any) -> str:
+    """Unwrap LangChain SecretStr; ``str(SecretStr)`` is asterisks."""
+    if value is None:
+        return ''
+    getter = getattr(value, 'get_secret_value', None)
+    if callable(getter):
+        try:
+            value = getter()
+        except Exception:  # pylint: disable=broad-exception-caught
+            pass
+    text = str(value or '').strip().strip('"').strip("'")
+    if text.lower().startswith('bearer '):
+        text = text[7:].strip()
+    if not text or text.lower() in {'none', 'null'}:
+        return ''
+    if set(text) <= {'*'}:
+        return ''
+    return text
+
+
 def _headers(llm: Any, accept: str = 'application/json') -> dict[str, str]:
-    key = str(getattr(llm, 'openai_api_key', None) or getattr(llm, 'api_key', None) or 'none')
+    key = (
+        _secret(getattr(llm, 'openai_api_key', None))
+        or _secret(getattr(llm, 'api_key', None))
+        or 'none'
+    )
     return {
         'Authorization': f'Bearer {key}',
         'Content-Type': 'application/json',
@@ -411,7 +438,22 @@ def _host_port(origin: str) -> tuple[str, int]:
     return host, port
 
 
-def _auth_packet() -> dict:
+def _bearer_token(headers: dict | None) -> str:
+    auth = (headers or {}).get('Authorization') or ''
+    if auth.lower().startswith('bearer '):
+        return auth[7:].strip()
+    return auth.strip()
+
+
+def _auth_packet(headers: dict | None = None) -> dict:
+    """SDK websocket auth. Guest cannot streamLogs; ``sk-lm-id:key`` can."""
+    match = _LMS_TOKEN.match(_bearer_token(headers))
+    if match:
+        return {
+            'authVersion': 1,
+            'clientIdentifier': match.group('id'),
+            'clientPasskey': match.group('key'),
+        }
     return {
         'authVersion': 1,
         'clientIdentifier': f'guest:{uuid.uuid4()}',
@@ -461,7 +503,8 @@ def find_api_host(origin: str, headers: dict) -> str | None:
     return result
 
 
-def _ws_open(url: str, timeout: float = 1.2) -> socket.socket | None:
+def _ws_open(url: str, headers: dict | None = None,
+             timeout: float = 1.2) -> socket.socket | None:
     """HTTP Upgrade to websocket. None if the peer is not a WS server."""
     parsed = urlparse(url)
     host = parsed.hostname
@@ -470,6 +513,10 @@ def _ws_open(url: str, timeout: float = 1.2) -> socket.socket | None:
     if not host:
         return None
     key = base64.b64encode(os.urandom(16)).decode('ascii')
+    extra = ''
+    token = _bearer_token(headers)
+    if token and token != 'none':
+        extra = f'Authorization: Bearer {token}\r\n'
     req = (
         f'GET {path} HTTP/1.1\r\n'
         f'Host: {host}:{port}\r\n'
@@ -477,6 +524,7 @@ def _ws_open(url: str, timeout: float = 1.2) -> socket.socket | None:
         'Connection: Upgrade\r\n'
         f'Sec-WebSocket-Key: {key}\r\n'
         'Sec-WebSocket-Version: 13\r\n'
+        f'{extra}'
         '\r\n'
     )
     try:
@@ -584,7 +632,7 @@ def _ws_recv_json(sock: socket.socket, stop: threading.Event) -> Any | None:
             continue
         if opcode == 0xA:
             continue
-        if opcode != 0x1 or not payload:
+        if opcode not in {0x1, 0x2} or not payload:
             continue
         text = payload.decode('utf-8', errors='replace')
         frac = parse_progress_text(text)
@@ -597,22 +645,23 @@ def _ws_recv_json(sock: socket.socket, stop: threading.Event) -> Any | None:
     return None
 
 
-def _stream_diagnostics(api_host: str, sink: Callable[[float], None],
+def _stream_diagnostics(api_host: str, headers: dict,
+                        sink: Callable[[float], None],
                         stop: threading.Event) -> None:
     """Subscribe to diagnostics.streamLogs and parse Developer-log lines."""
-    sock = _ws_open(f'ws://{api_host}/diagnostics')
+    sock = _ws_open(f'ws://{api_host}/diagnostics', headers)
     if sock is None:
         return
     try:
         sock.settimeout(0.3)
-        _ws_send_json(sock, _auth_packet())
+        _ws_send_json(sock, _auth_packet(headers))
         greeting = _ws_recv_json(sock, stop)
         if not isinstance(greeting, dict) or not greeting.get('success'):
             return
         _ws_send_json(sock, {
             'type': 'channelCreate',
             'endpoint': 'streamLogs',
-            'channelId': 0,
+            'channelId': 1,
         })
         while not stop.is_set():
             obj = _ws_recv_json(sock, stop)
@@ -680,7 +729,7 @@ def _sideband(origin: str, headers: dict, sink: Callable[[float], None],
     api_host = find_api_host(origin, headers)
     if not api_host:
         return
-    _stream_diagnostics(api_host, sink, stop)
+    _stream_diagnostics(api_host, headers, sink, stop)
 
 
 def _post_stream(url: str, payload: dict, headers: dict):
@@ -810,6 +859,28 @@ def _merge_stream(response, origin: str, headers: dict, stop: threading.Event,
         ).start()
 
 
+def _merge_langchain(llm: Any, messages: Any, origin: str, headers: dict,
+                     stop: threading.Event, box: queue.Queue) -> None:
+    """LangChain stream + the same /slots or diagnostics sideband."""
+    def sink(frac: float) -> None:
+        box.put(('progress', frac))
+
+    def read() -> None:
+        try:
+            for chunk in llm.stream(messages):
+                box.put(('chunk', chunk))
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            box.put(('err', exc))
+        finally:
+            box.put(('eof', None))
+
+    threading.Thread(target=read, daemon=True).start()
+    if origin:
+        threading.Thread(
+            target=_sideband, args=(origin, headers, sink, stop), daemon=True,
+        ).start()
+
+
 def stream_chat(llm: Any, messages: Any) -> Iterator[Any]:
     """Yield PromptProgress then TokenChunk (or LangChain chunks on fallback)."""
     url = _chat_url(llm)
@@ -818,15 +889,20 @@ def stream_chat(llm: Any, messages: Any) -> Iterator[Any]:
         return
     payload = _payload_for(llm, messages, with_progress=True)
     headers = _headers(llm, accept='text/event-stream')
-    response = _post_stream(url, payload, headers)
-    if response is None:
-        yield from llm.stream(messages)
-        return
-
+    json_headers = _headers(llm)
+    origin = _origin(url)
     box: queue.Queue = queue.Queue()
     stop = threading.Event()
-    origin = _origin(url)
-    _merge_stream(response, origin, _headers(llm), stop, box)
+    response = _post_stream(url, payload, headers)
+    if response is None:
+        _merge_langchain(llm, messages, origin, json_headers, stop, box)
+        try:
+            yield from _drain(box, stop)
+        finally:
+            stop.set()
+        return
+
+    _merge_stream(response, origin, json_headers, stop, box)
     wrapped = _Closable(response, _drain(box, stop))
     try:
         yield from wrapped

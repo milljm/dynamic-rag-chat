@@ -16,10 +16,13 @@ from prompt_progress import (  # noqa: E402  # pylint: disable=wrong-import-posi
     PromptProgress,
     TokenChunk,
     _API_CACHE,
+    _auth_packet,
+    _headers,
     _is_cloud,
     _line_json,
     _origin,
     _payload_for,
+    _secret,
     delta_text,
     find_api_host,
     format_prompt_status,
@@ -32,6 +35,20 @@ from prompt_progress import (  # noqa: E402  # pylint: disable=wrong-import-posi
     reset_progress_caches,
     stream_chat,
 )
+
+
+class _Secret:
+    """LangChain SecretStr stand-in: ``str()`` is asterisks."""
+
+    def __init__(self, value):
+        self._value = value
+
+    def get_secret_value(self):
+        """Return the real token."""
+        return self._value
+
+    def __str__(self):
+        return '**********'
 
 
 class _Msg:
@@ -125,6 +142,50 @@ class ParseProgressTest(unittest.TestCase):
             },
         }
         self.assertAlmostEqual(progress_from_obj(blob), 0.609, places=4)
+
+    def test_runtime_log_envelope(self):
+        blob = {
+            'type': 'channelMessage',
+            'channelId': 1,
+            'message': {
+                'type': 'log',
+                'log': {
+                    'timestamp': 1,
+                    'data': {
+                        'type': 'runtime.log',
+                        'message': (
+                            '[minimax-m2.7] Prompt processing progress: 46.6%'
+                        ),
+                    },
+                },
+            },
+        }
+        self.assertAlmostEqual(progress_from_obj(blob), 0.466, places=4)
+
+    def test_camel_case_progress_event(self):
+        frac = parse_progress({
+            'type': 'promptProcessingProgress', 'progress': 0.25,
+        })
+        self.assertEqual(frac, 0.25)
+
+    def test_secretstr_unwrap(self):
+        token = 'sk-lm-Ab12Cd34:abcdefghijklmnopqrst'
+        self.assertEqual(_secret(_Secret(token)), token)
+        self.assertEqual(_secret('**********'), '')
+        self.assertEqual(_secret('none'), '')
+        self.assertEqual(_secret('Bearer ' + token), token)
+
+    def test_auth_packet_from_lms_token(self):
+        token = 'sk-lm-Ab12Cd34:abcdefghijklmnopqrst'
+        packet = _auth_packet({'Authorization': f'Bearer {token}'})
+        self.assertEqual(packet['authVersion'], 1)
+        self.assertEqual(packet['clientIdentifier'], 'Ab12Cd34')
+        self.assertEqual(packet['clientPasskey'], 'abcdefghijklmnopqrst')
+        guest = _auth_packet({'Authorization': 'Bearer none'})
+        self.assertTrue(guest['clientIdentifier'].startswith('guest:'))
+        masked = _headers(_LLM('http://llm:1234/v1', key=_Secret(token)))
+        self.assertEqual(masked['Authorization'], f'Bearer {token}')
+        self.assertNotIn('*', masked['Authorization'])
 
 
     def test_status_hides_zero(self):
@@ -347,7 +408,9 @@ class StreamChatTest(unittest.TestCase):
 
     def test_diagnostics_websocket_progress(self):
         """LM Studio diagnostics.streamLogs carries the Developer-log %."""
-        ws_port = _start_diagnostics_stub()
+        auths: list = []
+        ws_port = _start_diagnostics_stub(auths)
+        token = 'sk-lm-Ab12Cd34:abcdefghijklmnopqrst'
 
         class Handler(_Quiet):
             def do_POST(self):
@@ -372,16 +435,63 @@ class StreamChatTest(unittest.TestCase):
         http_port = self._serve(Handler)
         origin = f'http://127.0.0.1:{http_port}'
         _API_CACHE[origin] = f'127.0.0.1:{ws_port}'
-        llm = _LLM(f'http://127.0.0.1:{http_port}/v1')
+        llm = _LLM(f'http://127.0.0.1:{http_port}/v1', key=_Secret(token))
         items = list(stream_chat(llm, [_Msg('human', 'hi')]))
         progress = [x for x in items if isinstance(x, PromptProgress)]
         self.assertTrue(progress, items)
         self.assertAlmostEqual(progress[0].fraction, 0.609, places=3)
         tokens = [x for x in items if isinstance(x, TokenChunk)]
         self.assertEqual(''.join(x.content for x in tokens), 'Hi')
+        self.assertTrue(auths, 'diagnostics socket never got an auth packet')
+        self.assertEqual(auths[0].get('clientIdentifier'), 'Ab12Cd34')
+        self.assertEqual(auths[0].get('clientPasskey'), 'abcdefghijklmnopqrst')
+
+    def test_401_fallback_still_reads_diagnostics(self):
+        """Raw POST 401 (masked key) still streams % from diagnostics."""
+        auths: list = []
+        ws_port = _start_diagnostics_stub(auths)
+        token = 'sk-lm-Ab12Cd34:abcdefghijklmnopqrst'
+
+        class Handler(_Quiet):
+            def do_POST(self):
+                self.rfile.read(int(self.headers.get('Content-Length', '0')))
+                self.send_response(401)
+                self.end_headers()
+                self.wfile.write(b'{"error":"unauthorized"}')
+
+            def do_GET(self):
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(
+                    b'{"error":"Unexpected endpoint or method. Returning 200 anyway"}'
+                )
+
+        class Slow(_LLM):
+            def stream(self, messages):
+                self.streamed += 1
+                del messages
+                time.sleep(0.8)
+                yield TokenChunk(content='fallback')
+
+        http_port = self._serve(Handler)
+        origin = f'http://127.0.0.1:{http_port}'
+        _API_CACHE[origin] = f'127.0.0.1:{ws_port}'
+        llm = Slow(f'http://127.0.0.1:{http_port}/v1', key=_Secret(token))
+        items = list(stream_chat(llm, [_Msg('human', 'hi')]))
+        self.assertEqual(llm.streamed, 1)
+        progress = [x for x in items if isinstance(x, PromptProgress)]
+        self.assertTrue(progress, items)
+        self.assertAlmostEqual(progress[0].fraction, 0.609, places=3)
+        self.assertEqual(
+            ''.join(x.content for x in items if isinstance(x, TokenChunk)),
+            'fallback',
+        )
+        self.assertTrue(auths)
+        self.assertEqual(auths[0].get('clientIdentifier'), 'Ab12Cd34')
 
 
-def _start_diagnostics_stub() -> int:
+def _start_diagnostics_stub(auths: list | None = None) -> int:
     """One-shot websocket that speaks LM Studio diagnostics.streamLogs."""
     ready = threading.Event()
     port_box: list[int] = []
@@ -409,12 +519,17 @@ def _start_diagnostics_stub() -> int:
             b'Connection: Upgrade\r\n'
             b'\r\n'
         )
-        _recv_ws_frame(conn)
+        raw = _recv_ws_frame(conn)
+        if auths is not None:
+            try:
+                auths.append(json.loads(raw.decode('utf-8')))
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                auths.append({'raw': raw})
         _send_ws_text(conn, '{"success":true}')
         _recv_ws_frame(conn)
         event = json.dumps({
             'type': 'channelMessage',
-            'channelId': 0,
+            'channelId': 1,
             'message': {
                 'type': 'log',
                 'log': {
