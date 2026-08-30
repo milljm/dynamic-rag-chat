@@ -29,7 +29,7 @@ from .context_manager import ContextManager # For Type Hinting
 from .chat_utils import CommonUtils, ChatOptions, RAGTag # For Type Hinting
 from .model_orchestrator import Orchestration, MAX_AGENT_CALLS
 from .agent_tools import DuckDuckGoSearchTool
-from .sd_tools import make_sd_tools
+from .sd_tools import make_sd_tools, seed_last_generated
 from .think_tags import ThinkFeed, chunk_text, split_think
 from .gold_fetch import MAX_GOLD_FETCHES, take_need_gold, recall_status
 
@@ -556,22 +556,35 @@ class RenderWindow(PromptManager):
         documents['sd_ran'] = True
         documents.setdefault('original_user_query', documents['user_query'])
         documents.setdefault('dynamic_files', '')
-        documents.setdefault('generated_images', [])
         folder = os.path.join(str(self.opts.vector_dir), 'generated')
+        prior = seed_last_generated(folder, limit=1)
+        store = list(prior)
+        documents['generated_images'] = store
+        last_name = prior[-1]['name'] if prior else ''
         tools = make_sd_tools(
             self.opts.sd_server,
             folder,
-            documents['generated_images'],
+            store,
             status=self._status,
             emit_image=self._emit_image,
             checkpoint=getattr(self.opts, 'sd_model', '') or '',
         )
+        last_hint = (
+            f'The last picture on disk is {last_name}. '
+            'If the user wants a change, img2img that once. '
+            if last_name else
+            'No previous picture. Use txt2img once.'
+        )
         prompt = ChatPromptTemplate.from_messages([
             ('system', (
-                'You create images for the user with txt2img. '
-                'Write a detailed visual prompt (subject, medium, lighting, camera). '
-                'After a result you MAY imagemagick or img2img once or twice. '
-                'Then stop. A later model will talk to the user. '
+                'You create or edit one image this turn, then stop.\n'
+                '- New picture → txt2img once (detailed visual prompt).\n'
+                '- Change to the last picture → img2img once.\n'
+                '- Cheap tweak (border, caption, resize, rotate) → imagemagick. '
+                'You may magick after the one generate.\n'
+                'Never call txt2img or img2img a second time to "improve" it. '
+                'The user will ask next turn if they want another generate.\n'
+                f'{last_hint}'
                 'Keep tool chatter short. Do not mention Automatic1111 or pipelines.'
             )),
             ('user', '{input}'),
@@ -579,7 +592,7 @@ class RenderWindow(PromptManager):
         ])
         agent = create_openai_tools_agent(self.llm, tools, prompt)
         agent_executor = AgentExecutor(
-            agent=agent, tools=tools, verbose=False, max_iterations=6,
+            agent=agent, tools=tools, verbose=False, max_iterations=4,
         )
         self._status('Stable Diffusion…')
         try:
@@ -608,12 +621,15 @@ class RenderWindow(PromptManager):
         vision = self.orchestrator.get_model('vision')
         urls = [
             rec['dataUrl'] for rec in documents.get('generated_images') or []
-            if rec.get('dataUrl')
+            if rec.get('dataUrl') and not rec.get('prior')
         ]
         if urls and vision is not None and vision.model_name != 'None':
             documents.setdefault('dynamic_images', [])
             documents['dynamic_images'].extend(urls[-3:])
-        names = [rec.get('name', '') for rec in documents.get('generated_images') or []]
+        names = [
+            rec.get('name', '') for rec in documents.get('generated_images') or []
+            if rec.get('name') and not rec.get('prior')
+        ]
         if names:
             documents['dynamic_files'] += (
                 '\nThe picture is on screen as ' + ', '.join(names[-3:]) + '.\n'

@@ -699,7 +699,10 @@ def persist_turn(
         extra['reasoning'] = reasoning
     if metrics:
         extra['metrics'] = metrics
-    generated = documents.get('generated_images') or []
+    generated = [
+        rec for rec in (documents.get('generated_images') or [])
+        if isinstance(rec, dict) and not rec.get('prior')
+    ]
     if generated:
         extra['attachments'] = _slim_attachments(_vector_dir(), generated)
     if msgs and msgs[-1].get('role') == 'assistant':

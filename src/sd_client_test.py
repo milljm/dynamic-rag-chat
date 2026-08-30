@@ -46,6 +46,15 @@ class SdClientTest(unittest.TestCase):
         plain = _txt2img_payload('a cat')
         self.assertNotIn('override_settings', plain)
 
+    def test_magick_border_and_caption(self):
+        self.assertEqual(
+            magick_argv('border', '12'),
+            ['-bordercolor', 'black', '-border', '12'],
+        )
+        self.assertIn('Hello world', magick_argv('caption', 'Hello world'))
+        with self.assertRaises(ValueError):
+            magick_argv('caption', 'rm -rf / ; hi')
+
 
 if __name__ == '__main__':
     unittest.main()

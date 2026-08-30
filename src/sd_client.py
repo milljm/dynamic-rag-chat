@@ -13,10 +13,11 @@ from typing import Any
 
 _BLANK = frozenset({'', 'none', 'not_set', 'null', '~'})
 _SAFE_ARG = re.compile(r'^[0-9A-Za-zx%+.,\-]+$')
+_SAFE_CAPTION = re.compile(r'^[A-Za-z0-9 .,!?\-]{1,80}$')
 
 MAGICK_OPS = (
     'resize', 'rotate', 'blur', 'sharpen', 'grayscale',
-    'negate', 'modulate', 'brightness',
+    'negate', 'modulate', 'brightness', 'border', 'caption',
 )
 
 
@@ -206,6 +207,13 @@ def magick_argv(operation: str, argument: str = '') -> list[str]:
     arg = (argument or '').strip()
     if op not in MAGICK_OPS:
         raise ValueError(f'Unknown ImageMagick op {operation!r}. Use: {", ".join(MAGICK_OPS)}')
+    if op == 'caption':
+        if not arg or not _SAFE_CAPTION.match(arg):
+            raise ValueError('caption needs short plain text (letters/numbers, max 80).')
+        return [
+            '-gravity', 'South', '-fill', 'white', '-pointsize', '28',
+            '-annotate', '+0+16', arg,
+        ]
     if arg and not _SAFE_ARG.match(arg):
         raise ValueError('ImageMagick argument has disallowed characters.')
     if op == 'resize':
@@ -226,6 +234,8 @@ def magick_argv(operation: str, argument: str = '') -> list[str]:
         return ['-modulate', arg or '100,100,100']
     if op == 'brightness':
         return ['-brightness-contrast', arg or '10x0']
+    if op == 'border':
+        return ['-bordercolor', 'black', '-border', arg or '16']
     raise ValueError(f'Unknown ImageMagick op {operation!r}')
 
 

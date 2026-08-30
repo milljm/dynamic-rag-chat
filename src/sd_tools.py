@@ -34,6 +34,40 @@ def _write_png(folder: str, blob: bytes, stem: str = 'sd') -> dict[str, Any]:
     }
 
 
+def seed_last_generated(folder: str, limit: int = 1) -> list[dict[str, Any]]:
+    """Load the newest PNG(s) so a follow-up turn can img2img / magick them."""
+    if not os.path.isdir(folder):
+        return []
+    names = [
+        n for n in os.listdir(folder)
+        if n.lower().endswith(('.png', '.jpg', '.jpeg', '.webp'))
+    ]
+    paths = sorted(
+        (os.path.join(folder, n) for n in names),
+        key=os.path.getmtime,
+    )
+    out: list[dict[str, Any]] = []
+    for path in paths[-limit:]:
+        try:
+            with open(path, 'rb') as handle:
+                blob = handle.read()
+        except OSError:
+            continue
+        name = os.path.basename(path)
+        out.append({
+            'name': name,
+            'path': path,
+            'rel': f'generated/{name}',
+            'mime': 'image/png',
+            'dataUrl': _data_url(blob),
+            'size': len(blob),
+            'kind': 'image',
+            'id': uuid.uuid4().hex,
+            'prior': True,
+        })
+    return out
+
+
 def _find(store: list[dict], image_name: str) -> dict[str, Any]:
     if not store:
         raise RuntimeError('No generated image yet. Call txt2img first.')
@@ -54,7 +88,13 @@ def make_sd_tools(
     emit_image: Callable[[dict], None] | None = None,
     checkpoint: str = '',
 ) -> list:
-    """txt2img, img2img, imagemagick — all write into ``store``."""
+    """txt2img / img2img once per turn; ImageMagick is cheap follow-up."""
+    sd_calls = {'n': 0}
+    once_msg = (
+        'Already generated once this turn. Use imagemagick for a cheap edit '
+        '(border, caption, resize, rotate), then stop. The user will ask '
+        'for another generate on the next turn.'
+    )
 
     def _status(msg: str) -> None:
         if status:
@@ -62,7 +102,7 @@ def make_sd_tools(
 
     def _emit(rec: dict) -> None:
         store.append(rec)
-        if emit_image:
+        if emit_image and not rec.get('prior'):
             emit_image(rec)
 
     def do_txt2img(
@@ -73,6 +113,9 @@ def make_sd_tools(
         height: int = 768,
     ) -> str:
         """Generate a new image with Automatic1111 txt2img."""
+        if sd_calls['n'] >= 1:
+            return once_msg
+        sd_calls['n'] += 1
         _status('Stable Diffusion…')
         blob = txt2img(
             host, prompt, negative_prompt=negative_prompt,
@@ -82,8 +125,7 @@ def make_sd_tools(
         _emit(rec)
         return (
             f'Generated {rec["name"]} ({width}x{height}). '
-            'Look at it (vision). Adjust with imagemagick or img2img, '
-            'or stop if it satisfies the user.'
+            'You may imagemagick (border/caption/resize). Do not generate again.'
         )
 
     def do_img2img(
@@ -94,7 +136,10 @@ def make_sd_tools(
         steps: int = 20,
     ) -> str:
         """Re-draw an existing generated image with img2img."""
+        if sd_calls['n'] >= 1:
+            return once_msg
         rec = _find(store, image_name)
+        sd_calls['n'] += 1
         with open(rec['path'], 'rb') as handle:
             src = handle.read()
         _status('Stable Diffusion…')
@@ -106,7 +151,7 @@ def make_sd_tools(
         _emit(out)
         return (
             f'Re-drew {rec["name"]} → {out["name"]} (denoise {denoising}). '
-            'Stop if the user would be happy.'
+            'You may imagemagick. Do not generate again.'
         )
 
     def do_magick(
@@ -114,7 +159,7 @@ def make_sd_tools(
         argument: str = '',
         image_name: str = 'last',
     ) -> str:
-        """Run a safe ImageMagick op: resize, rotate, blur, sharpen, grayscale, negate, modulate, brightness."""
+        """Cheap ImageMagick: resize, rotate, blur, sharpen, grayscale, negate, modulate, brightness, border, caption."""
         rec = _find(store, image_name)
         dest_name = f'magick-{operation}-{uuid.uuid4().hex[:6]}.png'
         dest = os.path.join(folder, dest_name)
@@ -140,24 +185,24 @@ def make_sd_tools(
             func=do_txt2img,
             name='txt2img',
             description=(
-                'Generate an image with Stable Diffusion (Automatic1111). '
-                'Write a detailed visual prompt. Call this when the user wants a picture.'
+                'ONE new image this turn via Stable Diffusion. '
+                'Do not call again. Use imagemagick after, or stop.'
             ),
         ),
         StructuredTool.from_function(
             func=do_img2img,
             name='img2img',
             description=(
-                'Adjust a generated image with img2img. '
-                'denoising 0.25=subtle, 0.55=strong. image_name=last or a filename.'
+                'ONE redraw of the last picture this turn (user asked for a change). '
+                'Not for "improving" a fresh txt2img. imagemagick after if needed.'
             ),
         ),
         StructuredTool.from_function(
             func=do_magick,
             name='imagemagick',
             description=(
-                'Crop-less ImageMagick: resize (1024x1024), rotate (90), blur, '
-                'sharpen, grayscale, negate, modulate (100,80,100), brightness (10x0).'
+                'Cheap edits: resize (1024x1024), rotate, blur, sharpen, grayscale, '
+                'negate, modulate, brightness, border (16), caption (short text).'
             ),
         ),
     ]

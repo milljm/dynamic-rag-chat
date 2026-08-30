@@ -19,6 +19,9 @@ _IMAGE_QUERY = re.compile(
     r'.{0,80}\b(image|picture|pic\b|photo|illustration|portrait|logo|icon|wallpaper|artwork|poster)\b'
     r'|\b(image|picture|illustration|portrait|logo)\s+of\b'
     r'|\b(txt2img|img2img|stable\s+diffusion)\b'
+    r'|\b(redraw|re-?generate|re-?draw)\b'
+    r'|\b(the|that|this)\s+(image|picture|photo|drawing)\b'
+    r'|\b(add|put)\b.{0,40}\b(border|caption|text|frame)\b'
 )
 
 class Orchestration():
