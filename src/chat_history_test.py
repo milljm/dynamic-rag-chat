@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import json
 import os
-import pickle
 import sys
 import tempfile
 import unittest
@@ -15,7 +14,6 @@ from concurrent.futures import ThreadPoolExecutor
 try:
     from .chat_utils import (
         HISTORY_JSON,
-        HISTORY_PKL,
         HISTORY_VERSION,
         load_history_from_dir,
         _atomic_write_json,
@@ -26,7 +24,6 @@ except ImportError:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     from chat_utils import (
         HISTORY_JSON,
-        HISTORY_PKL,
         HISTORY_VERSION,
         load_history_from_dir,
         _atomic_write_json,
@@ -48,42 +45,17 @@ def _hist(**extra):
 
 
 class ChatHistoryJsonTest(unittest.TestCase):
-    """JSON history roundtrip and pickle migration."""
+    """JSON history roundtrip."""
 
     def test_roundtrip(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, HISTORY_JSON)
             payload = _hist()
             _atomic_write_json(path, payload)
-            loaded = load_history_from_dir(tmp, migrate=False)
+            loaded = load_history_from_dir(tmp)
             self.assertEqual(loaded['story'][0]['content'], 'hi')
             self.assertEqual(loaded['version'], HISTORY_VERSION)
             self.assertIsInstance(_read_json_dict(path), dict)
-
-    def test_migrates_pickle(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            pkl = os.path.join(tmp, HISTORY_PKL)
-            with open(pkl, 'wb') as handle:
-                pickle.dump(_hist(), handle)
-            loaded = load_history_from_dir(tmp, migrate=True)
-            self.assertEqual(loaded['story'][0]['role'], 'user')
-            json_path = os.path.join(tmp, HISTORY_JSON)
-            self.assertTrue(os.path.isfile(json_path))
-            self.assertTrue(os.path.isfile(pkl))
-            with open(json_path, encoding='utf-8') as handle:
-                disk = json.load(handle)
-            self.assertEqual(disk['story'][0]['content'], 'hi')
-
-    def test_json_wins_over_pickle(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            with open(os.path.join(tmp, HISTORY_PKL), 'wb') as handle:
-                pickle.dump(_hist(story=[{'role': 'user', 'content': 'old'}]), handle)
-            _atomic_write_json(
-                os.path.join(tmp, HISTORY_JSON),
-                _hist(story=[{'role': 'user', 'content': 'new'}]),
-            )
-            loaded = load_history_from_dir(tmp, migrate=False)
-            self.assertEqual(loaded['story'][0]['content'], 'new')
 
     def test_corrupt_json_falls_back_to_bak(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -92,7 +64,7 @@ class ChatHistoryJsonTest(unittest.TestCase):
             _atomic_write_json(path, _hist(story=[{'role': 'user', 'content': 'ok'}]))
             with open(path, 'w', encoding='utf-8') as handle:
                 handle.write('{truncated')
-            loaded = load_history_from_dir(tmp, migrate=False)
+            loaded = load_history_from_dir(tmp)
             self.assertEqual(loaded['story'][0]['content'], 'old')
 
     def test_rejects_list_payload(self):
@@ -100,7 +72,7 @@ class ChatHistoryJsonTest(unittest.TestCase):
             path = os.path.join(tmp, HISTORY_JSON)
             with open(path, 'w', encoding='utf-8') as handle:
                 json.dump([1, 2, 3], handle)
-            self.assertIsNone(load_history_from_dir(tmp, migrate=False))
+            self.assertIsNone(load_history_from_dir(tmp))
 
     def test_assistant_reasoning_roundtrip(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -112,7 +84,7 @@ class ChatHistoryJsonTest(unittest.TestCase):
             })
             path = os.path.join(tmp, HISTORY_JSON)
             _atomic_write_json(path, payload)
-            loaded = load_history_from_dir(tmp, migrate=False)
+            loaded = load_history_from_dir(tmp)
             asst = loaded['story'][-1]
             self.assertEqual(asst['reasoning'], 'The user said hi; greet them.')
             self.assertEqual(asst['content'], 'Hello.')
@@ -129,7 +101,7 @@ class ChatHistoryJsonTest(unittest.TestCase):
 
             with ThreadPoolExecutor(max_workers=8) as pool:
                 list(pool.map(write, range(24)))
-            loaded = load_history_from_dir(tmp, migrate=False)
+            loaded = load_history_from_dir(tmp)
             self.assertIsInstance(loaded, dict)
             self.assertTrue(loaded['story'][0]['content'].startswith('turn-'))
             self.assertFalse(any(

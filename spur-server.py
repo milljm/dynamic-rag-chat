@@ -253,8 +253,8 @@ def _vector_dir() -> str:
 
 
 def read_hist() -> dict:
-    """Load JSON (or legacy pickle) without constructing Chat/Chroma."""
-    loaded = load_history_from_dir(_vector_dir(), migrate=True)
+    """Load JSON without constructing Chat/Chroma."""
+    loaded = load_history_from_dir(_vector_dir())
     if isinstance(loaded, dict):
         return loaded
     if _chat is not None:
