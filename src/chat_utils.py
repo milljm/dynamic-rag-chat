@@ -51,20 +51,24 @@ HISTORY_META_KEYS = frozenset({
 
 
 def active_branch(assistant_mode: bool, history: dict | None) -> str:
-    """Branch for this process.
+    """Which history list to read/write.
 
-    ``--assistant-mode`` (or Spur after a mode sync) stays on assistant.
-    Bare ``./chat.py`` is story — do not resume Spur's last assistant current.
+    Honor ``history['current']`` when it names a real branch (including forks
+    like ``testing``). ``assistant_mode`` only swaps the *protected* pair so a
+    terminal ``./chat.py`` does not resume Spur's last session of the other
+    flavor: ``--assistant-mode`` will not stay on ``story``, and a bare CLI
+    will not stay on ``assistant``.
     """
     hist = history if isinstance(history, dict) else {}
-    if assistant_mode:
-        return 'assistant'
-    current = hist.get('current') or 'story'
-    if current == 'assistant':
-        return 'story'
+    fallback = 'assistant' if assistant_mode else 'story'
+    current = hist.get('current') or fallback
     if current in HISTORY_META_KEYS:
-        return 'story'
+        return fallback
     if hist and not isinstance(hist.get(current), list):
+        return fallback
+    if assistant_mode and current == 'story':
+        return 'assistant'
+    if not assistant_mode and current == 'assistant':
         return 'story'
     return current
 

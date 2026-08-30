@@ -34,6 +34,17 @@ class ActiveBranchTest(unittest.TestCase):
         }
         self.assertEqual(active_branch(False, hist), 'alt-ending')
 
+    def test_assistant_mode_keeps_user_fork(self):
+        hist = {
+            'current': 'testing',
+            'assistant_mode': True,
+            'story': [],
+            'assistant': [{'role': 'user', 'content': 'help'}],
+            'testing': [{'role': 'user', 'content': 'forked'}],
+            'branch_modes': {'testing': True},
+        }
+        self.assertEqual(active_branch(True, hist), 'testing')
+
 
 class ChatOptionsYamlTest(unittest.TestCase):
     """Settings page writes llm_server; unknown keys must not crash."""
