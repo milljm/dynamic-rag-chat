@@ -9,7 +9,7 @@ from typing import Any, Callable
 from langchain_core.tools import StructuredTool
 
 from .sd_client import img2img, is_generated_picture, run_magick, txt2img
-from .sd_session import merge_prompt
+from .sd_session import apply_quality, merge_prompt
 
 
 def _data_url(blob: bytes, mime: str = 'image/png') -> str:
@@ -92,6 +92,7 @@ def make_sd_tools(
     session: dict | None = None,
     persist: Callable[[dict], None] | None = None,
     fresh: bool = False,
+    flavor: str = 'sdxl',
 ) -> list:
     """txt2img first; later turns img2img with the accumulated prompt stack."""
     stack = session if session is not None else {}
@@ -144,6 +145,7 @@ def make_sd_tools(
         if sd_calls['n'] >= 1:
             return once_msg
         sd_calls['n'] += 1
+        prompt, negative_prompt = apply_quality(prompt, negative_prompt, flavor)
         _status('Stable Diffusion…')
         blob, meta = txt2img(
             host, prompt, negative_prompt=negative_prompt,
@@ -168,6 +170,7 @@ def make_sd_tools(
         sd_calls['n'] += 1
         full = merge_prompt(str(stack.get('prompt') or ''), prompt)
         negative = negative_prompt or str(stack.get('negative') or '')
+        full, negative = apply_quality(full, negative, flavor)
         denoise = min(0.4, max(0.2, float(denoising or 0.28)))
         seed = int(stack.get('seed') or -1)
         with open(rec['path'], 'rb') as handle:

@@ -29,10 +29,11 @@ from .context_manager import ContextManager # For Type Hinting
 from .chat_utils import CommonUtils, ChatOptions, RAGTag # For Type Hinting
 from .model_orchestrator import Orchestration, MAX_AGENT_CALLS
 from .agent_tools import DuckDuckGoSearchTool
-from .sd_client import MAGICK_QUERY, has_generated_images, vision_thumb_data_url
+from .sd_client import MAGICK_QUERY, has_generated_images, ping_sd, vision_thumb_data_url
+from .sd_session import checkpoint_flavor, flavor_brief, load_session, save_session
 from .think_tags import ThinkFeed, chunk_text, split_think
 from .sd_tools import make_sd_tools, seed_last_generated
-from .sd_session import load_session, save_session
+from .gold_fetch import MAX_GOLD_FETCHES, take_need_gold, recall_status
 
 
 def _abort_llm_stream(stream) -> None:
@@ -567,6 +568,12 @@ class RenderWindow(PromptManager):
         allow_magick = bool(MAGICK_QUERY.search(query))
         vector_dir = str(self.opts.vector_dir)
         session = load_session(vector_dir)
+        ckpt = (getattr(self.opts, 'sd_model', '') or '').strip()
+        if not ckpt:
+            info = ping_sd(self.opts.sd_server, timeout=3.0)
+            if info.get('ok'):
+                ckpt = str(info.get('current') or '')
+        flavor = checkpoint_flavor(ckpt)
         fresh = bool(re.search(
             r'(?ix)\b(start over|from scratch|new (image|picture|scene)|'
             r'forget the (last|previous))\b',
@@ -585,6 +592,7 @@ class RenderWindow(PromptManager):
             session=session,
             persist=lambda data: save_session(vector_dir, data),
             fresh=fresh,
+            flavor=flavor,
         )
         stack = (session.get('prompt') or '').strip()
         if stack and not fresh:
@@ -609,8 +617,9 @@ class RenderWindow(PromptManager):
         prompt = ChatPromptTemplate.from_messages([
             ('system', (
                 'You create or edit one image this turn, then stop.\n'
+                f'{flavor_brief(flavor, ckpt)}\n'
                 'Image mode builds ONE prompt across turns.\n'
-                '- First picture → txt2img (detailed visual prompt). That becomes the stack.\n'
+                '- First picture → txt2img with a FULL expanded prompt (quality tags + scene).\n'
                 '- Later → img2img. Pass ONLY what to add ("a large soap bubble with '
                 'rainbow shimmer"). The system prepends the stack. denoising 0.28.\n'
                 'You do not see the pixels. Do not critique or describe the image.\n'

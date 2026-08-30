@@ -8,6 +8,8 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from sd_session import (  # noqa: E402
+    apply_quality,
+    checkpoint_flavor,
     clear_session,
     load_session,
     merge_prompt,
@@ -41,6 +43,21 @@ class SdSessionTest(unittest.TestCase):
             self.assertEqual(data.get('seed', -1), -1)
             clear_session(tmp)
             self.assertEqual(load_session(tmp), {})
+
+    def test_checkpoint_flavor(self):
+        self.assertEqual(
+            checkpoint_flavor('ponyDiffusionV6XL_v6StartWithThisOne.safetensors'),
+            'pony',
+        )
+        self.assertEqual(checkpoint_flavor('dreamshaperXL_v21.safetensors'), 'sdxl')
+        self.assertEqual(checkpoint_flavor('realisticVisionV51.safetensors'), 'sd15')
+        self.assertEqual(checkpoint_flavor('waiIllustriousNSFW_v140.safetensors'), 'illustrious')
+
+    def test_apply_quality_pony_prefix(self):
+        pos, neg = apply_quality('1girl, forest', '', 'pony')
+        self.assertTrue(pos.startswith('score_9'))
+        self.assertIn('1girl', pos)
+        self.assertIn('score_4', neg)
 
 
 if __name__ == '__main__':

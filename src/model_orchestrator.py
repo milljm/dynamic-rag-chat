@@ -204,6 +204,8 @@ class Orchestration():
         """Pick agent / vision / tagged assistant model."""
         if self.requires_sd(documents):
             return self.sd_llm()
+        if documents.get('sd_ran'):
+            return self.get_model('casual')
         if self.requires_agent(meta_tags, documents):
             return self.get_model('agent')
 
@@ -233,6 +235,8 @@ class Orchestration():
             return 'story'
         if self.requires_sd(documents):
             return 'sd'
+        if documents.get('sd_ran'):
+            return 'casual'
         if self.requires_agent(meta_tags, documents):
             return 'agent'
         if self._requires_vision(documents):
