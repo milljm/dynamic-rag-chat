@@ -268,6 +268,24 @@ class ThinkTagsTest(unittest.TestCase):
         self.assertTrue(feed.never_think)
         self.assertFalse(feed.in_think)
 
+    def test_null_token_shadow_before_any_text(self):
+        """gpt-oss: blank first chunks are reasoning, not the answer."""
+        feed = ThinkFeed()
+        vis, thought = feed.feed_chunk(_Chunk(content=''))
+        self.assertEqual(vis, '')
+        self.assertEqual(thought, '')
+        self.assertTrue(feed.shadow_think)
+        vis, thought = feed.feed_chunk(
+            _Chunk(content='', reasoning_content='planning the reply'),
+        )
+        self.assertEqual(vis, '')
+        self.assertIn('planning', thought)
+        self.assertTrue(feed.shadow_think)
+        vis, thought = feed.feed_chunk(_Chunk(content='Hello there'))
+        self.assertEqual(vis, 'Hello there')
+        self.assertEqual(thought, '')
+        self.assertTrue(feed.never_think)
+
 
 if __name__ == '__main__':
     unittest.main()

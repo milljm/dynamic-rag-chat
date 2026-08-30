@@ -985,17 +985,33 @@ def _iter_sse_chunks(
         last_gold_channel = 'visible'
         _reset_renderer_think(renderer)
         chunks = renderer.stream_response(packed)
+        announced_reason = False
+        announced_stream = False
         try:
             for chunk in chunks:
                 if first:
                     ttft = time.time() - started
                     first = False
+                visible, thought = parser.feed_chunk(chunk)
+                # Null-token reasoners (gpt-oss): first chunks are blank
+                # content. Don't yell Streaming until a visible token.
+                if (
+                    getattr(parser, 'shadow_think', False)
+                    and not announced_reason
+                    and not announced_stream
+                ):
+                    announced_reason = True
                     yield _status_sse(
-                        'Streaming…', model or '', route or '', context or 0,
+                        'Reasoning…', model or '', route or '', context or 0,
                         recalled,
                     )
-                visible, thought = parser.feed_chunk(chunk)
                 if thought:
+                    if not announced_reason and not announced_stream:
+                        announced_reason = True
+                        yield _status_sse(
+                            'Reasoning…', model or '', route or '',
+                            context or 0, recalled,
+                        )
                     emit_t, hit_t = gold_feed.feed(thought)
                     if emit_t:
                         bump(len(emit_t.split()))
@@ -1005,6 +1021,12 @@ def _iter_sse_chunks(
                         last_gold_channel = 'thought'
                         break
                 if visible:
+                    if not announced_stream:
+                        announced_stream = True
+                        yield _status_sse(
+                            'Streaming…', model or '', route or '',
+                            context or 0, recalled,
+                        )
                     emit_v, hit_v = gold_feed.feed(visible)
                     if emit_v:
                         bump(renderer.response_count(emit_v))

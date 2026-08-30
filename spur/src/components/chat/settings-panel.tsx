@@ -387,50 +387,6 @@ function SettingsPanel({
 
               <section className="grid gap-3">
                 <h3 className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                  Stable Diffusion
-                </h3>
-                <Field
-                  label="Automatic1111"
-                  hint="http://host:7860 with --api. Blank disables."
-                >
-                  <Input
-                    value={values.sd_server}
-                    onChange={(e) => patch("sd_server", e.target.value)}
-                    placeholder="http://127.0.0.1:7860"
-                    autoComplete="off"
-                    spellCheck={false}
-                  />
-                </Field>
-                <Field
-                  label="Checkpoint"
-                  hint="Swaps the A1111 model on the next generate. Blank keeps whatever is loaded."
-                >
-                  <ModelSelect
-                    value={values.sd_model}
-                    onChange={(v) => patch("sd_model", v)}
-                    models={sdModels}
-                    details={[]}
-                    emptyLabel="A1111 default"
-                  />
-                </Field>
-                <div className="flex items-center gap-2">
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    disabled={sdPinging || !values.sd_server}
-                    onClick={() => void onSdPing()}
-                  >
-                    {sdPinging ? "Pinging…" : "Ping"}
-                  </Button>
-                  <span className="text-[11px] text-muted-foreground">
-                    {sdNote}
-                  </span>
-                </div>
-              </section>
-
-              <section className="grid gap-3">
-                <h3 className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                   Required models
                 </h3>
                 <Field label="Generator">
@@ -514,6 +470,51 @@ function SettingsPanel({
                     </div>
                   ))}
                 </div>
+                <details className="mt-4 border-t border-border pt-3">
+                  <summary className="cursor-pointer text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                    Stable Diffusion
+                  </summary>
+                  <div className="mt-3 grid gap-3">
+                    <Field
+                      label="Automatic1111"
+                      hint="http://host:7860 with --api. Blank disables."
+                    >
+                      <Input
+                        value={values.sd_server}
+                        onChange={(e) => patch("sd_server", e.target.value)}
+                        placeholder="http://127.0.0.1:7860"
+                        autoComplete="off"
+                        spellCheck={false}
+                      />
+                    </Field>
+                    <Field
+                      label="Checkpoint"
+                      hint="Swaps the A1111 model on the next generate. Blank keeps whatever is loaded."
+                    >
+                      <ModelSelect
+                        value={values.sd_model}
+                        onChange={(v) => patch("sd_model", v)}
+                        models={sdModels}
+                        details={[]}
+                        emptyLabel="A1111 default"
+                      />
+                    </Field>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        disabled={sdPinging || !values.sd_server}
+                        onClick={() => void onSdPing()}
+                      >
+                        {sdPinging ? "Pinging…" : "Ping"}
+                      </Button>
+                      <span className="text-[11px] text-muted-foreground">
+                        {sdNote}
+                      </span>
+                    </div>
+                  </div>
+                </details>
               </details>
             </div>
           )}
