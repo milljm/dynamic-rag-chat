@@ -9,6 +9,7 @@ from typing import Any, Callable
 from langchain_core.tools import StructuredTool
 
 from .sd_client import img2img, is_generated_picture, run_magick, txt2img
+from .sd_session import merge_prompt
 
 
 def _data_url(blob: bytes, mime: str = 'image/png') -> str:
@@ -88,13 +89,20 @@ def make_sd_tools(
     emit_image: Callable[[dict], None] | None = None,
     checkpoint: str = '',
     allow_magick: bool = False,
+    session: dict | None = None,
+    persist: Callable[[dict], None] | None = None,
+    fresh: bool = False,
 ) -> list:
-    """txt2img / img2img once per turn; ImageMagick is cheap follow-up."""
+    """txt2img first; later turns img2img with the accumulated prompt stack."""
+    stack = session if session is not None else {}
+    if fresh:
+        stack.clear()
     sd_calls = {'n': 0}
     once_msg = (
         'Already generated once this turn. Stop. The user will ask '
         'for another generate on the next turn.'
     )
+    building = bool((stack.get('prompt') or '').strip() and store and not fresh)
 
     def _status(msg: str) -> None:
         if status:
@@ -105,6 +113,21 @@ def make_sd_tools(
         if emit_image and not rec.get('prior'):
             emit_image(rec)
 
+    def _remember(
+        prompt: str, negative: str, width: int = 0, height: int = 0, seed: int = -1,
+    ) -> None:
+        stack['prompt'] = prompt
+        if negative:
+            stack['negative'] = negative
+        if width:
+            stack['width'] = width
+        if height:
+            stack['height'] = height
+        if seed is not None and int(seed) >= 0:
+            stack['seed'] = int(seed)
+        if persist:
+            persist(stack)
+
     def do_txt2img(
         prompt: str,
         negative_prompt: str = '',
@@ -113,40 +136,54 @@ def make_sd_tools(
         height: int = 768,
     ) -> str:
         """Generate a new image with Automatic1111 txt2img."""
+        if building:
+            return (
+                'A prompt stack already exists. Use img2img and pass ONLY the '
+                'new addition (the system keeps the previous scene).'
+            )
         if sd_calls['n'] >= 1:
             return once_msg
         sd_calls['n'] += 1
         _status('Stable Diffusion…')
-        blob = txt2img(
+        blob, meta = txt2img(
             host, prompt, negative_prompt=negative_prompt,
             steps=steps, width=width, height=height, checkpoint=checkpoint,
         )
         rec = _write_png(folder, blob, stem='txt2img')
         _emit(rec)
+        _remember(prompt, negative_prompt, width, height, seed=int(meta.get('seed') or -1))
         return f'Generated {rec["name"]} ({width}x{height}). Stop. Do not edit it this turn.'
 
     def do_img2img(
         prompt: str,
         image_name: str = 'last',
-        denoising: float = 0.45,
+        denoising: float = 0.28,
         negative_prompt: str = '',
         steps: int = 20,
     ) -> str:
-        """Re-draw an existing generated image with img2img."""
+        """Re-draw the last picture, keeping the accumulated prompt."""
         if sd_calls['n'] >= 1:
             return once_msg
         rec = _find(store, image_name)
         sd_calls['n'] += 1
+        full = merge_prompt(str(stack.get('prompt') or ''), prompt)
+        negative = negative_prompt or str(stack.get('negative') or '')
+        denoise = min(0.4, max(0.2, float(denoising or 0.28)))
+        seed = int(stack.get('seed') or -1)
         with open(rec['path'], 'rb') as handle:
             src = handle.read()
         _status('Stable Diffusion…')
-        blob = img2img(
-            host, src, prompt, negative_prompt=negative_prompt,
-            denoising=denoising, steps=steps, checkpoint=checkpoint,
+        blob, meta = img2img(
+            host, src, full, negative_prompt=negative,
+            denoising=denoise, steps=steps, checkpoint=checkpoint, seed=seed,
         )
         out = _write_png(folder, blob, stem='img2img')
         _emit(out)
-        return f'Re-drew {rec["name"]} → {out["name"]}. Stop. Do not generate again.'
+        _remember(full, negative, seed=int(meta.get('seed') or seed))
+        return (
+            f'Re-drew {rec["name"]} → {out["name"]} (denoise {denoise:.2f}). '
+            f'Prompt stack: {full[:240]}'
+        )
 
     def do_magick(
         operation: str,
@@ -174,24 +211,32 @@ def make_sd_tools(
         _emit(out)
         return f'{operation} on {rec["name"]} → {out["name"]}.'
 
-    tools = [
-        StructuredTool.from_function(
-            func=do_txt2img,
-            name='txt2img',
-            description=(
-                'ONE new image this turn via Stable Diffusion. Then stop. '
-                'Do not call imagemagick unless the user asked for a border/caption/resize.'
+    tools: list = []
+    iterating = building or (bool(store) and not fresh)
+    if not iterating:
+        tools.append(
+            StructuredTool.from_function(
+                func=do_txt2img,
+                name='txt2img',
+                description=(
+                    'First picture only. Write a detailed visual prompt (subject, '
+                    'medium, lighting, camera). Later turns must use img2img.'
+                ),
             ),
-        ),
-        StructuredTool.from_function(
-            func=do_img2img,
-            name='img2img',
-            description=(
-                'ONE redraw of the last picture (user asked for a change like darker). '
-                'Not for improving a fresh txt2img. Then stop.'
+        )
+    if iterating or store:
+        tools.append(
+            StructuredTool.from_function(
+                func=do_img2img,
+                name='img2img',
+                description=(
+                    'Add to the last picture. Pass ONLY the new ask '
+                    '(e.g. "a large soap bubble with rainbow shimmer"). '
+                    'The previous scene prompt is prepended. denoising 0.25-0.35 '
+                    'keeps the scene; never go above 0.4. Default 0.28.'
+                ),
             ),
-        ),
-    ]
+        )
     if allow_magick:
         tools.append(
             StructuredTool.from_function(

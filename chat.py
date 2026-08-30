@@ -837,6 +837,13 @@ class Chat():
         if parsed.command == 'image':
             documents['use_sd'] = True
             documents['sd_ran'] = False
+        elif self.opts.assistant_mode:
+            from src.sd_client import has_generated_images, wants_sd
+            from src.sd_session import clear_session
+            query = str(documents.get('user_query') or parsed.clean_text or '')
+            has_last = has_generated_images(str(self.opts.vector_dir))
+            if not wants_sd(query, has_last=has_last):
+                clear_session(str(self.opts.vector_dir))
         if parsed.includes:
             inc_docs = self.load_content_as_context(
                 ' '.join(f'{{{{{x}}}}}' for x in parsed.includes),

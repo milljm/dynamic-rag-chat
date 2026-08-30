@@ -249,6 +249,7 @@ def _img2img_payload(
     denoising: float = 0.45,
     steps: int = 20,
     checkpoint: str = '',
+    seed: int = -1,
 ) -> dict[str, Any]:
     """Body for /sdapi/v1/img2img."""
     payload: dict[str, Any] = {
@@ -258,6 +259,7 @@ def _img2img_payload(
         'denoising_strength': max(0.05, min(0.95, float(denoising or 0.45))),
         'steps': max(1, min(50, int(steps or 20))),
         'cfg_scale': 7,
+        'seed': int(seed) if seed is not None else -1,
         'sampler_name': 'Euler a',
     }
     if (checkpoint or '').strip():
@@ -304,6 +306,34 @@ def ping_sd(host: str, timeout: float = 5.0) -> dict[str, Any]:
     }
 
 
+def _meta_from_a1111(data: dict | None, prompt: str, width: int = 0, height: int = 0) -> dict[str, Any]:
+    """Pull seed (and friends) out of Automatic1111's info blob."""
+    seed = -1
+    info: Any = data.get('info') if isinstance(data, dict) else None
+    parsed: dict[str, Any] = {}
+    if isinstance(info, str):
+        try:
+            loaded = json.loads(info)
+            if isinstance(loaded, dict):
+                parsed = loaded
+        except json.JSONDecodeError:
+            parsed = {}
+    elif isinstance(info, dict):
+        parsed = info
+    raw = parsed.get('seed')
+    if raw is not None:
+        try:
+            seed = int(raw)
+        except (TypeError, ValueError):
+            seed = -1
+    return {
+        'seed': seed,
+        'prompt': prompt,
+        'width': int(width or 0),
+        'height': int(height or 0),
+    }
+
+
 def txt2img(
     host: str,
     prompt: str,
@@ -314,8 +344,8 @@ def txt2img(
     seed: int = -1,
     checkpoint: str = '',
     timeout: float = 180.0,
-) -> bytes:
-    """POST /sdapi/v1/txt2img and return the first PNG/JPEG bytes."""
+) -> tuple[bytes, dict[str, Any]]:
+    """POST /sdapi/v1/txt2img and return (PNG bytes, meta with seed)."""
     origin = normalize_sd_url(host)
     if not origin:
         raise RuntimeError('Stable Diffusion URL is empty.')
@@ -327,7 +357,7 @@ def txt2img(
     images = data.get('images') if isinstance(data, dict) else None
     if not isinstance(images, list) or not images:
         raise RuntimeError('Automatic1111 returned no images.')
-    return base64.b64decode(images[0])
+    return base64.b64decode(images[0]), _meta_from_a1111(data, prompt, width, height)
 
 
 def img2img(
@@ -338,8 +368,9 @@ def img2img(
     denoising: float = 0.45,
     steps: int = 20,
     checkpoint: str = '',
+    seed: int = -1,
     timeout: float = 180.0,
-) -> bytes:
+) -> tuple[bytes, dict[str, Any]]:
     """POST /sdapi/v1/img2img using a PNG/JPEG already on disk."""
     origin = normalize_sd_url(host)
     if not origin:
@@ -347,13 +378,13 @@ def img2img(
     b64 = base64.b64encode(image_bytes).decode('ascii')
     payload = _img2img_payload(
         b64, prompt, negative_prompt=negative_prompt,
-        denoising=denoising, steps=steps, checkpoint=checkpoint,
+        denoising=denoising, steps=steps, checkpoint=checkpoint, seed=seed,
     )
     data = _post(f'{origin}/sdapi/v1/img2img', payload, timeout)
     images = data.get('images') if isinstance(data, dict) else None
     if not isinstance(images, list) or not images:
         raise RuntimeError('Automatic1111 img2img returned no images.')
-    return base64.b64decode(images[0])
+    return base64.b64decode(images[0]), _meta_from_a1111(data, prompt)
 
 
 def magick_argv(operation: str, argument: str = '') -> list[str]:

@@ -32,7 +32,7 @@ from .agent_tools import DuckDuckGoSearchTool
 from .sd_client import MAGICK_QUERY, has_generated_images, vision_thumb_data_url
 from .think_tags import ThinkFeed, chunk_text, split_think
 from .sd_tools import make_sd_tools, seed_last_generated
-from .gold_fetch import MAX_GOLD_FETCHES, take_need_gold, recall_status
+from .sd_session import load_session, save_session
 
 
 def _abort_llm_stream(stream) -> None:
@@ -565,6 +565,15 @@ class RenderWindow(PromptManager):
         last_name = prior[-1]['name'] if prior else ''
         query = str(documents.get('original_user_query') or '')
         allow_magick = bool(MAGICK_QUERY.search(query))
+        vector_dir = str(self.opts.vector_dir)
+        session = load_session(vector_dir)
+        fresh = bool(re.search(
+            r'(?ix)\b(start over|from scratch|new (image|picture|scene)|'
+            r'forget the (last|previous))\b',
+            query,
+        ))
+        if fresh:
+            session = {}
         tools = make_sd_tools(
             self.opts.sd_server,
             folder,
@@ -573,13 +582,25 @@ class RenderWindow(PromptManager):
             emit_image=self._emit_image,
             checkpoint=getattr(self.opts, 'sd_model', '') or '',
             allow_magick=allow_magick,
+            session=session,
+            persist=lambda data: save_session(vector_dir, data),
+            fresh=fresh,
         )
-        last_hint = (
-            f'The last picture on disk is {last_name}. '
-            'If the user wants a change (darker, larger, mood), img2img that once. '
-            if last_name else
-            'No previous picture. Use txt2img once.'
-        )
+        stack = (session.get('prompt') or '').strip()
+        if stack and not fresh:
+            last_hint = (
+                f'PROMPT STACK (keep this scene):\n{stack}\n\n'
+                f'Last picture: {last_name}. img2img once. Pass ONLY the new '
+                'addition. denoising 0.28. Do not txt2img. Do not drop the forest '
+                'for the new object.'
+            )
+        elif last_name and not fresh:
+            last_hint = (
+                f'The last picture on disk is {last_name}. '
+                'img2img that once if this is a change, else txt2img.'
+            )
+        else:
+            last_hint = 'No previous picture. Use txt2img once with a detailed prompt.'
         magick_hint = (
             'The user asked for a cheap edit — you may imagemagick (border/caption/resize). '
             if allow_magick else
@@ -588,12 +609,14 @@ class RenderWindow(PromptManager):
         prompt = ChatPromptTemplate.from_messages([
             ('system', (
                 'You create or edit one image this turn, then stop.\n'
-                '- New picture → txt2img once (detailed visual prompt).\n'
-                '- Change to the last picture → img2img once (describe the change).\n'
+                'Image mode builds ONE prompt across turns.\n'
+                '- First picture → txt2img (detailed visual prompt). That becomes the stack.\n'
+                '- Later → img2img. Pass ONLY what to add ("a large soap bubble with '
+                'rainbow shimmer"). The system prepends the stack. denoising 0.28.\n'
                 'You do not see the pixels. Do not critique or describe the image.\n'
                 f'{magick_hint}\n'
                 'Never generate a second time to "improve" it.\n'
-                f'{last_hint}'
+                f'{last_hint}\n'
                 'Keep tool chatter short. Do not mention Automatic1111 or pipelines. '
                 'Do not explain Photoshop.'
             )),
@@ -605,15 +628,20 @@ class RenderWindow(PromptManager):
             agent=agent, tools=tools, verbose=False, max_iterations=4,
         )
         self._status('Stable Diffusion…')
+        user_input = documents['original_user_query']
+        if stack and not fresh:
+            user_input = (
+                f'SCENE PROMPT SO FAR:\n{stack}\n\n'
+                f'USER ASKED TO ADD/CHANGE:\n{query}\n\n'
+                'Call img2img with ONLY the new details. Keep the scene.'
+            )
         try:
             self.console.print(
                 'Stable Diffusion (ctl-c to cancel)...',
                 style=f'color({self.state.color})',
                 highlight=False,
             )
-            result = agent_executor.invoke({
-                'input': documents['original_user_query'],
-            })
+            result = agent_executor.invoke({'input': user_input})
             documents['dynamic_files'] += f'\n=== IMAGE_GEN ===\n{result}\n\n'
         except KeyboardInterrupt:
             documents['dynamic_files'] += '\n=== IMAGE_GEN ===\nUSER CANCELED\n\n'
