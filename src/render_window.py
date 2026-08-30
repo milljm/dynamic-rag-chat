@@ -1171,7 +1171,8 @@ class RenderWindow(PromptManager):
 
         # ── Context handling (unchanged) ────────────────────────────────
         documents['llm_response'] = current_response
-        self.state.context.handle_context(documents, direction='store')
+        if not documents.get('sd_ran') and (current_response or '').strip():
+            self.state.context.handle_context(documents, direction='store')
         current_response = self.common.sanitize_response(current_response)
 
         if self.state.disable_thinking:
