@@ -37,10 +37,22 @@ IMAGE_EDIT = re.compile(
     r'(?ix)'
     r'\b(now\s+)?(make|render|paint|do)\s+(it|that|this|the)\b'
     r'|\b(darker|brighter|warmer|cooler|redder|bluer|softer|sharper|moodier)\b'
-    r'|\b(more|less)\s+(contrast|saturation|shadows?|highlights?|vignette)\b'
+    r'|\b(more|less)\s+(contrast|saturation|shadows?|highlights?|vignette|dramatic|cinematic|moody|glow|detail)\b'
+    r'|\btoo\s+(dark|bright|yellow|red|blue|orange|green|warm|cold|soft|sharp|noisy|blurry|muddy|flat|busy|warm|cool)\b'
     r'|\b(add|put|give)\s+(a\s+)?(border|caption|text|frame|watermark)\b'
     r'|\b(crop|resize|rotate|flip|grayscale)\b'
-    r'|\b(tweak|adjust|fix|change|edit)\s+(it|that|this)\b'
+    r'|\b(tweak|adjust|fix|change|edit|redo|punch|crank|boost)\s+(it|that|this|up|the)\b'
+    r'|\b(can you|could you|please)\s+(make|change|fix|tweak|adjust|redo)\b'
+    r'|\b(change|fix|tweak|adjust)\s+(the\s+)?(background|lighting|sky|eyes|face|color|colour|mood)\b'
+    r'|\b(try (again|another|a different)|do it again|once more|another (one|pass|version|go))\b'
+)
+# Commentary about the last picture (attach pixels, do not necessarily regenerate).
+ABOUT_IMAGE = re.compile(
+    r'(?ix)'
+    r'\b(image|picture|photo|drawing|render|png|artwork|illustration)\b'
+    r'|\b(looks?|looking|nice one|love it|like it|hate it|pretty|ugly|weird|off|wrong|better|worse|perfect|cool)\b'
+    r'|\b(color|colour|light(?:ing)?|dark|background|foreground|sky|eyes|face|mood|style|vibe|composition|palette)\b'
+    r'|\b(what do you think|thoughts on (it|that|this))\b'
 )
 MAGICK_QUERY = re.compile(
     r'(?ix)'
@@ -57,6 +69,14 @@ def wants_sd(query: str, has_last: bool = False) -> bool:
     if has_last and IMAGE_EDIT.search(text):
         return True
     return False
+
+
+def about_last_image(query: str) -> bool:
+    """True when the user is talking about the picture already on screen."""
+    text = query or ''
+    if IMAGE_QUERY.search(text) or IMAGE_EDIT.search(text):
+        return True
+    return bool(ABOUT_IMAGE.search(text))
 
 
 def has_generated_images(vector_dir: str) -> bool:

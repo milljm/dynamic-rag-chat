@@ -7,6 +7,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from sd_client import (  # noqa: E402
+    about_last_image,
     magick_argv,
     normalize_sd_url,
     sd_enabled,
@@ -61,7 +62,13 @@ class SdClientTest(unittest.TestCase):
         self.assertTrue(wants_sd('Now make it darker', has_last=True))
         self.assertTrue(wants_sd('draw me a red fox'))
         self.assertTrue(wants_sd('generate an image of a fox'))
+        self.assertTrue(wants_sd('too yellow', has_last=True))
+        self.assertTrue(wants_sd('punch up the lighting', has_last=True))
+        self.assertFalse(wants_sd('looks great', has_last=True))
+        self.assertTrue(about_last_image('looks great'))
+        self.assertTrue(about_last_image('love the eyes'))
         self.assertFalse(wants_sd('what is a fox'))
+        self.assertFalse(about_last_image('how do I write a for loop'))
 
 
 if __name__ == '__main__':

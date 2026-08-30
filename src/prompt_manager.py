@@ -94,6 +94,12 @@ class PromptManager():
             extra = f'{self.plot_prompt_file}_sd.md'
             if os.path.exists(extra):
                 parts.append(self.get_prompt(extra))
+        elif documents.get('has_last_image') or has_generated_images(
+                getattr(self.args, 'vector_dir', '') or ''
+        ):
+            extra = f'{self.plot_prompt_file}_sd_last.md'
+            if os.path.exists(extra):
+                parts.append(self.get_prompt(extra))
         return '\n'.join(parts), human
 
     def compose_nostory_tag(self, documents: dict) -> str:
