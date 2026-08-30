@@ -60,6 +60,7 @@ from src import CommonUtils, ChatOptions
 from src import ImportData
 from src import SceneManager
 from src import Orchestration
+from src.sd_session import clear_session
 from src.chat_utils import load_pdf, HISTORY_META_KEYS
 posthog.disabled = True
 dark_rich_142_styles = {
