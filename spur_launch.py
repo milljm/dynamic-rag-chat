@@ -22,6 +22,14 @@ SERVER_SCRIPT = ROOT / 'spur-server.py'
 DEFAULT_URL = 'http://127.0.0.1:8765'
 
 
+def _is_wsl() -> bool:
+    """True on Windows Subsystem for Linux (no working desktop opener)."""
+    try:
+        return 'microsoft' in Path('/proc/version').read_text(encoding='utf-8').lower()
+    except OSError:
+        return False
+
+
 def strip_spur_flags(argv: list[str]) -> list[str]:
     """Drop Spur-only flags so spur-server argparse is clean."""
     skip = {'--spur', '--spur-rebuild', '--serve'}
@@ -176,7 +184,7 @@ def launch(argv: list[str] | None = None) -> int:
             print('LAN bind is on, but no non-loopback IPv4 turned up.')
         print('No login. Do not port-forward this off your network.')
     print('Ctrl-C stops the server.')
-    if os.environ.get('SPUR_NO_BROWSER') != '1':
+    if os.environ.get('SPUR_NO_BROWSER') != '1' and not _is_wsl():
         # Give uvicorn a tick to bind, then open this Mac's browser.
         def _open() -> None:
             time.sleep(0.6)
@@ -187,6 +195,8 @@ def launch(argv: list[str] | None = None) -> int:
 
         import threading
         threading.Thread(target=_open, daemon=True).start()
+    elif _is_wsl():
+        print('WSL: open the URL above in your Windows browser.')
 
     uvicorn.run(mod.app, host=host, port=port, log_level='info')
     return 0

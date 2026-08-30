@@ -49,8 +49,9 @@ Then:
 ./chat.py --spur
 ./chat.py --spur --serve          # same Wi-Fi: iPad / phone. No login — don't port-forward.
 ```
-*Your favorite browser should open, but if not, open it now and visit: [http://localhost:8765](http://localhost:8765)*
-*Note: On WSL you will receive `gio: http://127.0.0.1:8765: Operation not supported - This is normal and can be ignored*
+*Your favorite browser should open. If not, visit [http://localhost:8765](http://localhost:8765).*
+
+On WSL, auto-open is skipped (`gio: … Operation not supported` is harmless). Open the URL in your Windows browser.
 
 First run builds the UI (needs Node). After that it's just Python. Rebuild with `./chat.py --spur --spur-rebuild`. `Ctrl-C` stops it. Open **Settings** (gear) for the server URL and models — next turn uses them. Defaults can live in `.chat.yaml` (see `.chat.yaml.example`).
 

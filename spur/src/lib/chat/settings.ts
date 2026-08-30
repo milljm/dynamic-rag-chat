@@ -38,22 +38,37 @@ export const SETTINGS_KEYS = [
 export type SettingsKey = (typeof SETTINGS_KEYS)[number];
 export type SettingsValues = Record<SettingsKey, string>;
 
-export const ROUTE_ROWS: {
-  id: string;
-  label: string;
-  llm: SettingsKey;
-  server: SettingsKey;
+export const ROUTE_GROUPS: {
+  title: string;
+  rows: {
+    id: string;
+    label: string;
+    llm: SettingsKey;
+    server: SettingsKey;
+  }[];
 }[] = [
-  { id: "vision", label: "Vision", llm: "vision_llm", server: "vision_server" },
-  { id: "agent", label: "Agent", llm: "agent_llm", server: "agent_server" },
-  { id: "coder", label: "Coder", llm: "coder_llm", server: "coder_server" },
-  { id: "casual", label: "Casual", llm: "casual_llm", server: "casual_server" },
-  { id: "general", label: "General", llm: "general_llm", server: "general_server" },
-  { id: "structured", label: "Structured", llm: "structured_llm", server: "structured_server" },
-  { id: "nsfw", label: "NSFW", llm: "nsfw_llm", server: "nsfw_server" },
-  { id: "polisher", label: "Polisher", llm: "polisher_llm", server: "polisher_server" },
-  { id: "entity", label: "Entity", llm: "entity_llm", server: "entity_server" },
+  {
+    title: "Assistant Related Routes:",
+    rows: [
+      { id: "vision", label: "Vision", llm: "vision_llm", server: "vision_server" },
+      { id: "agent", label: "Agent", llm: "agent_llm", server: "agent_server" },
+      { id: "casual", label: "Casual", llm: "casual_llm", server: "casual_server" },
+      { id: "general", label: "General", llm: "general_llm", server: "general_server" },
+      { id: "coder", label: "Coder", llm: "coder_llm", server: "coder_server" },
+      { id: "structured", label: "Structured", llm: "structured_llm", server: "structured_server" },
+    ],
+  },
+  {
+    title: "Optional Story Related Routes:",
+    rows: [
+      { id: "nsfw", label: "NSFW", llm: "nsfw_llm", server: "nsfw_server" },
+      { id: "polisher", label: "Polisher", llm: "polisher_llm", server: "polisher_server" },
+      { id: "entity", label: "Entity", llm: "entity_llm", server: "entity_server" },
+    ],
+  },
 ];
+
+export const ROUTE_ROWS = ROUTE_GROUPS.flatMap((g) => g.rows);
 
 export type SettingsPayload = {
   ok: boolean;

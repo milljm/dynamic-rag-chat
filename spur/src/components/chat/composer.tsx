@@ -30,6 +30,7 @@ export function Composer({
   const setForceAgent = useChatStore((s) => s.setForceAgent);
   const forceSd = useChatStore((s) => s.forceSd);
   const setForceSd = useChatStore((s) => s.setForceSd);
+  const sdEnabled = useChatStore((s) => s.sdEnabled);
   const currentId = useChatStore((s) => s.currentId);
   const branch = useChatStore((s) => s.branches[s.currentId]);
   const ref = useRef<HTMLTextAreaElement>(null);
@@ -197,10 +198,13 @@ export function Composer({
                 aria-pressed={storyImage ? undefined : imageOn}
                 disabled={
                   streaming ||
+                  !sdEnabled ||
                   (storyImage ? !hasBeat : mode !== "assistant")
                 }
                 title={
-                  storyImage
+                  !sdEnabled
+                    ? "Set Automatic1111 URL in Settings"
+                    : storyImage
                     ? hasBeat
                       ? "Illustrate the current scene"
                       : "Play a beat first"
@@ -221,7 +225,9 @@ export function Composer({
                   !storyImage && imageOn
                     ? "bg-primary text-primary-foreground"
                     : "text-muted-foreground hover:bg-accent hover:text-foreground",
-                  (storyImage ? !hasBeat : mode !== "assistant") && "opacity-40",
+                  (!sdEnabled ||
+                    (storyImage ? !hasBeat : mode !== "assistant")) &&
+                    "opacity-40",
                 )}
               >
                 <Palette className="size-3.5" />

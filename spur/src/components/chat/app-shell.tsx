@@ -11,9 +11,9 @@ import { Composer } from "./composer";
 import { Sidebar } from "./sidebar";
 import { Thread } from "./thread";
 
-const SIDEBAR_MIN = 240;
+const SIDEBAR_MIN = 350;
 const SIDEBAR_MAX = 560;
-const SIDEBAR_DEFAULT = 320;
+const SIDEBAR_DEFAULT = 350;
 
 export function AppShell() {
   const ready = useHydrateChat();

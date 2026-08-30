@@ -68,7 +68,7 @@ from src.settings_yaml import (  # noqa: E402
     load_file as load_settings_file,
     save_file as save_settings_file,
 )
-from src.sd_client import ping_sd  # noqa: E402
+from src.sd_client import ping_sd, sd_enabled  # noqa: E402
 from src.sd_session import clear_session  # noqa: E402
 
 LOCKED_BRANCHES = frozenset({'assistant', 'story'})
@@ -428,7 +428,25 @@ def session_payload(chat: Chat | None = None) -> dict[str, Any]:
         }
     if current not in branches:
         current = 'story'
-    return {'currentId': current, 'branches': branches}
+    opts = chat.opts if chat is not None else ChatOptions.from_yaml(ROOT)
+    return {
+        'currentId': current,
+        'branches': branches,
+        'needsSetup': _core_setup_incomplete(opts),
+        'sdEnabled': sd_enabled(getattr(opts, 'sd_server', '')),
+    }
+
+
+def _core_setup_incomplete(opts: ChatOptions) -> bool:
+    """True when the three required models + a server URL are missing."""
+    snap = _opts_snapshot(opts)
+    has_server = bool(blank(snap.get('llm_server')) or blank(snap.get('embedding_server')))
+    return not (
+        blank(snap.get('model'))
+        and blank(snap.get('pre_llm'))
+        and blank(snap.get('embedding_llm'))
+        and has_server
+    )
 
 
 def switch_branch(chat: Chat, name: str) -> tuple[bool, str]:

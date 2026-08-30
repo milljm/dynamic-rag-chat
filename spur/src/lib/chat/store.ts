@@ -242,10 +242,16 @@ export const useChatStore = create<ChatStore>()(
       hydrateFromServer: async () => {
         if (!usesChatPy()) return false;
         try {
-          const snap = sessionToSnapshot(await getSession());
+          const raw = await getSession();
+          const snap = sessionToSnapshot(raw);
           if (!Object.keys(snap.branches).length) return false;
           const merged = mergeRemoteSnapshot(get(), snap);
-          set({ currentId: merged.currentId, branches: merged.branches });
+          set({
+            currentId: merged.currentId,
+            branches: merged.branches,
+            needsSetup: Boolean(raw.needsSetup),
+            sdEnabled: Boolean(raw.sdEnabled),
+          });
           return true;
         } catch {
           return false;
@@ -273,6 +279,8 @@ export const useChatStore = create<ChatStore>()(
             pendingAttachments: current.pendingAttachments,
             forceAgent: false,
             forceSd: false,
+            sdEnabled: current.sdEnabled ?? false,
+            needsSetup: current.needsSetup ?? false,
             pendingOoc: current.pendingOoc ?? "",
           });
           return { ...current, ...migrated };
