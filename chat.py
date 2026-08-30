@@ -513,12 +513,11 @@ class Chat():
             response = self.scraper.get(url, headers=headers, timeout=10)
             if response.status_code == 200:
                 soup = BeautifulSoup(response.content, 'html.parser')
-                return soup.get_text(), '🌍'
-            return f'Error {response.status_code}', '❌'
-        # pylint: disable=bare-except  # too many ways this can go wrong
-        except:
-            return None, None
-        # pylint: enable=bare-except  # too many ways this can go wrong
+                text = ' '.join(soup.get_text().split())
+                return (text[:80_000], '🌍')
+            return (f'Error fetching URL ({response.status_code})', '❌')
+        except Exception:  # pylint: disable=broad-exception-caught
+            return None
 
     def no_context(self, user_input)->tuple:
         """ perform search without any context involved """

@@ -725,13 +725,24 @@ def persist_turn(
 
 
 def apply_includes(chat: Chat, documents: dict, raw: str) -> dict:
+    """Load {{path}} / {{https://url}} the same way the terminal does."""
     try:
         parsed = parse_user_input(raw)
     except Exception:  # pylint: disable=broad-exception-caught
         return documents
-    if not parsed.includes or not hasattr(chat, 'load_content_as_context'):
+    includes = list(parsed.includes or [])
+    if not includes:
+        try:
+            includes = chat.session.common.regex.curly_match.findall(raw or '')
+        except Exception:  # pylint: disable=broad-exception-caught
+            includes = []
+    if not includes or not hasattr(chat, 'load_content_as_context'):
         return documents
-    wrapped = ' '.join(f'{{{{{item}}}}}' for item in parsed.includes)
+    urls = [item for item in includes if str(item).lower().startswith('http')]
+    hook = getattr(getattr(chat.session, 'renderer', None), 'status_hook', None)
+    if urls and callable(hook):
+        hook('Fetching URL…')
+    wrapped = ' '.join(f'{{{{{item}}}}}' for item in includes)
     try:
         extra = chat.load_content_as_context(wrapped)
     except Exception:  # pylint: disable=broad-exception-caught
@@ -742,6 +753,9 @@ def apply_includes(chat: Chat, documents: dict, raw: str) -> dict:
         documents['dynamic_files'] += extra['dynamic_files']
     if extra.get('dynamic_images'):
         documents['dynamic_images'].extend(extra['dynamic_images'])
+    note = extra.get('user_query')
+    if note and note != wrapped:
+        documents['attached_files_note'] = note
     return documents
 
 
@@ -927,7 +941,7 @@ def _prepare_chat_documents(chat, body: dict) -> tuple[dict, list]:
                 'has_files': bool(body.get('files') or has_text),
             },
         )
-        documents = apply_includes(chat, documents, prompt)
+    documents = apply_includes(chat, documents, prompt)
     documents = fold_uploads(
         documents,
         body.get('images') or [],

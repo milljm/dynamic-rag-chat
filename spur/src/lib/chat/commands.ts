@@ -140,6 +140,7 @@ export const SLASH_HELP = [
   { cmd: "\\image msg", hint: "Force Stable Diffusion (Automatic1111)" },
   { cmd: "\\no-context msg", hint: "Skip retrieval this turn" },
   { cmd: "\\include NAME msg", hint: "Attach another branch as context" },
+  { cmd: "{{https://site}}", hint: "Scrape URL for inclusion" },
   { cmd: "\\history N", hint: "Show the last N user inputs" },
   { cmd: "\\branch NAME@N", hint: "Fork a branch, optional cut at turn N" },
   { cmd: "\\dbranch NAME", hint: "Delete a non-active branch" },

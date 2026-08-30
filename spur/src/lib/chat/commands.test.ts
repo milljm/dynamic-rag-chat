@@ -4,6 +4,7 @@ import {
   isOoc,
   parseComposerInput,
   parseIncludes,
+  SLASH_HELP,
   stripRare,
 } from "./commands.ts";
 
@@ -89,6 +90,10 @@ test("includes split urls from filesystem paths", () => {
   );
   assert.deepEqual(found.urls, ["https://example.com/a"]);
   assert.deepEqual(found.paths, ["/tmp/notes.md"]);
+});
+
+test("slash help lists url scrape", () => {
+  assert.ok(SLASH_HELP.some((row) => row.cmd.includes("{{https://")));
 });
 
 test("rare tokens strip from the spoken line", () => {

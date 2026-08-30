@@ -25,6 +25,7 @@
   --spur-turn-bg: rgba(4, 49, 0, 0.78);
   --spur-turn-shadow: 0 1px 6px rgba(124, 232, 122, 0.32),
     0 0 0 1px rgba(217, 224, 142, 0.2);
+  --spur-route: #ff9100;
   --spur-ttl-warn: #f0a8a0;
   --spur-ttl-warn-bg: rgba(48, 18, 16, 0.82);
   --spur-ttl-warn-shadow: 0 1px 6px rgba(220, 90, 80, 0.35),
@@ -66,6 +67,7 @@ html[data-theme="light"] {
   --spur-turn-bg: rgba(110, 255, 100, 0.586);
   --spur-turn-shadow: 0 1px 6px rgb(132, 66, 0),
     0 0 0 1px rgba(30, 110, 34, 0.28);
+  --spur-route: #1e4d2b;
   --spur-ttl-warn: #280500;
   --spur-ttl-warn-bg: rgba(255, 118, 118, 0.666);
   --spur-ttl-warn-shadow: 0 1px 6px rgb(139, 63, 0),
@@ -109,6 +111,7 @@ html[data-theme="light"] {
   --color-code-fg: var(--spur-code-fg);
   --color-turn: var(--spur-turn);
   --color-turn-bg: var(--spur-turn-bg);
+  --color-route: var(--spur-route);
   --color-ttl-warn: var(--spur-ttl-warn);
   --color-ttl-warn-bg: var(--spur-ttl-warn-bg);
 
