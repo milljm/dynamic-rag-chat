@@ -36,7 +36,7 @@ from typing import Any, AsyncIterator, Iterator
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from rich.console import Console
 
@@ -68,6 +68,8 @@ from src.settings_yaml import (  # noqa: E402
     load_file as load_settings_file,
     save_file as save_settings_file,
 )
+from src.sd_client import ping_sd  # noqa: E402
+from src.sd_session import clear_session  # noqa: E402
 
 LOCKED_BRANCHES = frozenset({'assistant', 'story'})
 # Metadata keys in the history file — not message lists.
@@ -132,6 +134,8 @@ def _opts_snapshot(opts: ChatOptions) -> dict[str, str]:
         'entity_llm': blank(opts.entity_llm),
         'entity_server': blank(opts.entity_host),
         'tavily_key': blank(opts.tavily_key),
+        'sd_server': blank(getattr(opts, 'sd_server', '')),
+        'sd_model': blank(getattr(opts, 'sd_model', '')),
     }
 
 
@@ -167,6 +171,21 @@ def sse(obj: dict[str, Any]) -> str:
     # of the stream.
     payload = json.dumps(obj).replace('<', '\\u003c').replace('>', '\\u003e')
     return f'data: {payload}\n\n'
+
+
+def _hook_sse(kind: str, payload: Any) -> bytes:
+    """status_hook / image_hook frames from the SD or web agent thread."""
+    if kind == 'image' and isinstance(payload, dict):
+        return sse({
+            'type': 'image',
+            'name': payload.get('name') or 'image.png',
+            'mime': payload.get('mime') or 'image/png',
+            'dataUrl': payload.get('dataUrl') or '',
+            'size': int(payload.get('size') or 0),
+            'prompt': payload.get('prompt') or '',
+            'negative': payload.get('negative') or '',
+        }).encode()
+    return sse({'type': 'status', 'message': str(payload)}).encode()
 
 
 async def _aiter_sync(factory) -> AsyncIterator[bytes]:
@@ -502,6 +521,11 @@ def delete_branch(chat: Chat, name: str) -> tuple[bool, str]:
     return True, f"Deleted '{name}'."
 
 
+def _clear_sd(chat: Chat) -> None:
+    """Drop the Image-mode prompt stack (rewind / reset / delete-last)."""
+    clear_session(str(getattr(chat.opts, 'vector_dir', '') or ''))
+
+
 def reset_branch(chat: Chat) -> tuple[bool, str]:
     hist = _history(chat)
     branch = hist.get('current', 'story')
@@ -516,6 +540,7 @@ def reset_branch(chat: Chat) -> tuple[bool, str]:
                 shutil.rmtree(path, ignore_errors=True)
     if hasattr(chat.session.renderer, 'clear_ooc'):
         chat.session.renderer.clear_ooc()
+    _clear_sd(chat)
     return True, f"Reset '{branch}'."
 
 
@@ -533,6 +558,7 @@ def delete_last_turn(chat: Chat) -> tuple[bool, str]:
     chat.session.common.save_chat(hist)
     if hasattr(chat.session.renderer, 'clear_ooc'):
         chat.session.renderer.clear_ooc()
+    _clear_sd(chat)
     return True, 'Deleted last turn.'
 
 
@@ -560,6 +586,7 @@ def rewind_to(chat: Chat, n: int) -> tuple[bool, str]:
     chat.session.common.save_chat(hist)
     if hasattr(chat.session.renderer, 'clear_ooc'):
         chat.session.renderer.clear_ooc()
+    _clear_sd(chat)
     return True, f'Rewound to turn {n} of {total}.'
 
 
@@ -590,7 +617,7 @@ def _slim_attachments(vector_dir: str, attachments: list | None) -> list[dict]:
             continue
         rec = {
             k: raw[k]
-            for k in ('id', 'name', 'mime', 'kind', 'size')
+            for k in ('id', 'name', 'mime', 'kind', 'size', 'prompt', 'negative')
             if raw.get(k) is not None
         }
         rec.setdefault('id', uuid.uuid4().hex)
@@ -683,6 +710,12 @@ def persist_turn(
         extra['reasoning'] = reasoning
     if metrics:
         extra['metrics'] = metrics
+    generated = [
+        rec for rec in (documents.get('generated_images') or [])
+        if isinstance(rec, dict) and not rec.get('prior')
+    ]
+    if generated:
+        extra['attachments'] = _slim_attachments(_vector_dir(), generated)
     if msgs and msgs[-1].get('role') == 'assistant':
         # save_history runs sanitize_response which strips ``` fences.
         # Restore the streamed answer so reload still highlights.
@@ -819,6 +852,13 @@ def api_pop() -> JSONResponse:
     return _op(pop_last_assistant, get_chat())
 
 
+@app.post('/api/sd/reset')
+def api_sd_reset() -> JSONResponse:
+    """Drop the Image-mode prompt stack so the next generate is txt2img."""
+    clear_session(_vector_dir())
+    return JSONResponse({'ok': True, 'message': 'Image session cleared.'})
+
+
 @app.post('/api/session/mode')
 async def api_mode(request: Request) -> JSONResponse:
     """Switch story vs assistant mode."""
@@ -847,6 +887,16 @@ async def api_documents_delete(request: Request) -> JSONResponse:
             'ok': False, 'error': f'Could not delete {name}', 'message': f'Could not delete {name}',
         })
     return JSONResponse({'ok': True, 'error': None, 'message': f'Deleted {name}'})
+
+
+@app.get('/api/generated/{name}')
+def api_generated(name: str):
+    """PNG written by the Stable Diffusion agent."""
+    safe = os.path.basename(name)
+    path = os.path.join(_vector_dir(), 'generated', safe)
+    if not safe or not os.path.isfile(path):
+        return JSONResponse({'ok': False, 'error': 'Not found'}, status_code=404)
+    return FileResponse(path, media_type='image/png', filename=safe)
 
 
 def _prepare_chat_documents(chat, body: dict) -> tuple[dict, list]:
@@ -901,6 +951,18 @@ def _prepare_chat_documents(chat, body: dict) -> tuple[dict, list]:
         documents['use_agent'] = True
         documents['agent_ran'] = False
         documents['in_line_commands'] = 'Meta: [agent]'
+    force_sd = bool(body.get('useSd')) or parsed.command == 'image'
+    if force_sd and chat.opts.assistant_mode:
+        documents['use_sd'] = True
+        documents['sd_ran'] = False
+        documents['in_line_commands'] = 'Meta: [image]'
+    elif chat.opts.assistant_mode:
+        clear_session(str(chat.opts.vector_dir))
+    if body.get('illustrateScene') and not chat.opts.assistant_mode:
+        documents['illustrate_scene'] = True
+        documents['use_sd'] = True
+        documents['sd_ran'] = False
+        documents['in_line_commands'] = 'Meta: [image]'
     if body.get('rare'):
         documents['system_addendum'] = (
             'Story controls for this turn: ' + ', '.join(body['rare'])
@@ -951,17 +1013,33 @@ def _iter_sse_chunks(
         last_gold_channel = 'visible'
         _reset_renderer_think(renderer)
         chunks = renderer.stream_response(packed)
+        announced_reason = False
+        announced_stream = False
         try:
             for chunk in chunks:
                 if first:
                     ttft = time.time() - started
                     first = False
+                visible, thought = parser.feed_chunk(chunk)
+                # Null-token reasoners (gpt-oss): first chunks are blank
+                # content. Don't yell Streaming until a visible token.
+                if (
+                    getattr(parser, 'shadow_think', False)
+                    and not announced_reason
+                    and not announced_stream
+                ):
+                    announced_reason = True
                     yield _status_sse(
-                        'Streaming…', model or '', route or '', context or 0,
+                        'Reasoning…', model or '', route or '', context or 0,
                         recalled,
                     )
-                visible, thought = parser.feed_chunk(chunk)
                 if thought:
+                    if not announced_reason and not announced_stream:
+                        announced_reason = True
+                        yield _status_sse(
+                            'Reasoning…', model or '', route or '',
+                            context or 0, recalled,
+                        )
                     emit_t, hit_t = gold_feed.feed(thought)
                     if emit_t:
                         bump(len(emit_t.split()))
@@ -971,6 +1049,12 @@ def _iter_sse_chunks(
                         last_gold_channel = 'thought'
                         break
                 if visible:
+                    if not announced_stream:
+                        announced_stream = True
+                        yield _status_sse(
+                            'Streaming…', model or '', route or '',
+                            context or 0, recalled,
+                        )
                     emit_v, hit_v = gold_feed.feed(visible)
                     if emit_v:
                         bump(renderer.response_count(emit_v))
@@ -1049,8 +1133,9 @@ async def api_chat(request: Request) -> StreamingResponse:
         global _streams
         with _stream_lock:
             _streams += 1
-        notes: queue.Queue[str] = queue.Queue()
-        renderer.status_hook = notes.put
+        notes: queue.Queue[tuple[str, Any]] = queue.Queue()
+        renderer.status_hook = lambda msg: notes.put(('status', msg))
+        renderer.image_hook = lambda rec: notes.put(('image', rec))
         try:
             _sync_chat_object(chat)
             if body.get('regenerate'):
@@ -1076,18 +1161,28 @@ async def api_chat(request: Request) -> StreamingResponse:
             pack_task = asyncio.create_task(asyncio.to_thread(_pack))
             while not pack_task.done():
                 try:
-                    msg = notes.get_nowait()
+                    kind, payload = notes.get_nowait()
                 except queue.Empty:
                     await asyncio.sleep(0.05)
                     continue
-                yield sse({'type': 'status', 'message': msg}).encode()
+                yield _hook_sse(kind, payload)
             packed = await pack_task
             while True:
                 try:
-                    msg = notes.get_nowait()
+                    kind, payload = notes.get_nowait()
                 except queue.Empty:
                     break
-                yield sse({'type': 'status', 'message': msg}).encode()
+                yield _hook_sse(kind, payload)
+
+            if documents.get('sd_ran') and not packed:
+                persist_turn(
+                    renderer,
+                    documents,
+                    '',
+                    attachments=body.get('attachments') or None,
+                )
+                yield sse({'type': 'done'}).encode()
+                return
 
             model = getattr(renderer.llm, 'model_name', '') or ''
             route = (renderer.orchestrator.name_of(renderer.llm)
@@ -1110,7 +1205,8 @@ async def api_chat(request: Request) -> StreamingResponse:
                 route=route, context=context, meta=meta,
             )):
                 yield frame
-            if ((stats.get('answer') or stats.get('reasoning'))
+            if ((stats.get('answer') or stats.get('reasoning')
+                    or documents.get('generated_images'))
                     and not documents.get('no_context')):
                 persist_turn(
                     renderer,
@@ -1132,6 +1228,7 @@ async def api_chat(request: Request) -> StreamingResponse:
             yield sse({'type': 'error', 'error': str(exc)}).encode()
         finally:
             renderer.status_hook = None
+            renderer.image_hook = None
             with _stream_lock:
                 _streams -= 1
     return StreamingResponse(
@@ -1225,9 +1322,12 @@ async def api_settings_save(request: Request) -> JSONResponse:
 async def api_settings_ping(request: Request) -> JSONResponse:
     """List models on an OpenAI-compatible server (LM Studio / Ollama)."""
     body = await request.json()
-    host = blank(body.get('host') or body.get('llm_server'))
+    host = blank(body.get('host') or body.get('llm_server') or body.get('sd_server'))
     api_key = blank(body.get('api_key')) or 'none'
-    result = list_models(host, api_key)
+    if body.get('kind') == 'sd':
+        result = ping_sd(host)
+    else:
+        result = list_models(host, api_key)
     return JSONResponse(result, status_code=200 if result.get('ok') else 502)
 
 

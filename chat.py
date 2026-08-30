@@ -100,6 +100,7 @@ HELP_TEXT = (
     '\t\\regenerate                  - regenerate last turn\n'
     '\t\\no-context msg              - perform a query with no context\n'
     '\t\\agent msg                   - force agent (web search)\n'
+    '\t\\image msg                   - force Stable Diffusion (Automatic1111)\n'
     '\t\\delete-last                 - delete last message from history\n'
     '\t\\turn                        - show turn/status\n'
     '\t\\rewind N                    - rewind to turn N (keep 0..N)\n'
@@ -571,6 +572,8 @@ class Chat():
             history[self.chat_branch] = delete_last_turn(history[self.chat_branch])
             self.session.common.save_chat(history)
             self.session.renderer.clear_ooc()
+            from src.sd_session import clear_session
+            clear_session(str(self.opts.vector_dir))
             console.print('[green]Deleted last turn.[/green]', highlight=False)
         except IndexError:
             console.print('[yellow]History empty.[/yellow]')
@@ -591,6 +594,8 @@ class Chat():
                 highlight=False,
             )
             self.session.renderer.clear_ooc()
+            from src.sd_session import clear_session
+            clear_session(str(self.opts.vector_dir))
         except ValueError:
             console.print('[red]usage: \\rewind N[/red]')
 
@@ -636,6 +641,8 @@ class Chat():
                 shutil.rmtree(path)
         console.print(f'[green]Reset: [/green]{self.chat_branch}', highlight=False)
         self.session.common.save_chat(history)
+        from src.sd_session import clear_session
+        clear_session(str(self.opts.vector_dir))
 
     def _list_branches(self, history: dict) -> None:
         """Print branch names with turn counts and a preview of the last message."""
@@ -791,7 +798,7 @@ class Chat():
         if cmd in skip_and_done:
             skip_and_done[cmd]()
             return parsed, True
-        if cmd in ('no-context', 'include', 'agent'):
+        if cmd in ('no-context', 'include', 'agent', 'image'):
             if not self.opts.assistant_mode:
                 console.print('[red]Only available while in assistant mode.[/red]')
                 return parsed, True
@@ -807,7 +814,7 @@ class Chat():
     def _prepare_turn_documents(self, parsed, history: dict, raw: str):
         """Build the documents dict for this user turn, or None on failure."""
         meta_data = []
-        if parsed.command in ('no-context', 'agent'):
+        if parsed.command in ('no-context', 'agent', 'image'):
             if parsed.command == 'no-context':
                 documents = self.no_context(parsed.args or parsed.clean_text)
             else:
@@ -833,6 +840,12 @@ class Chat():
         if parsed.command == 'agent':
             documents['use_agent'] = True
             documents['agent_ran'] = False
+        if parsed.command == 'image':
+            documents['use_sd'] = True
+            documents['sd_ran'] = False
+        elif self.opts.assistant_mode:
+            from src.sd_session import clear_session
+            clear_session(str(self.opts.vector_dir))
         if parsed.includes:
             inc_docs = self.load_content_as_context(
                 ' '.join(f'{{{{{x}}}}}' for x in parsed.includes),
@@ -1034,6 +1047,16 @@ def _add_user_and_api_args(parser, D):
                           help='Your API Key (default: REDACTED)')
     api_args.add_argument('--tavily-key', metavar='', default=D('tavily_key'),
                           type=str, help='Your Tavily API Key (default: REDACTED)')
+    api_args.add_argument(
+        '--sd-server', metavar='', dest='sd_server', type=str,
+        default=D('sd_server'),
+        help='Automatic1111 URL (http://host:7860). Blank disables.',
+    )
+    api_args.add_argument(
+        '--sd-model', metavar='', dest='sd_model', type=str,
+        default=D('sd_model'),
+        help='Automatic1111 checkpoint title. Blank keeps whatever A1111 has loaded.',
+    )
 
 
 def _add_context_args(parser, D):

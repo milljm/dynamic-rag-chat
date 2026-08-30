@@ -13,7 +13,7 @@ import { chatPyOrigin, usesChatPy } from "./remote";
 import { ragFromPending, useChatStore } from "./store";
 import { streamChat, streamSse } from "./stream";
 import { feedThink } from "./think";
-import type { Message, RagChunk, StreamMetrics, TurnFlags } from "./types";
+import type { Attachment, Message, RagChunk, StreamMetrics, TurnFlags } from "./types";
 
 function estimateTokens(text: string): number {
   return Math.max(1, Math.round(text.length / 4));
@@ -33,6 +33,8 @@ export function useSend() {
       text: string;
       regenerate?: boolean;
       agent?: boolean;
+      image?: boolean;
+      illustrateScene?: boolean;
       noContext?: boolean;
       rare?: string[];
       ooc?: boolean;
@@ -55,6 +57,7 @@ export function useSend() {
 
       const mode = modeOf(branch);
       const agent = Boolean(opts.agent) && mode === "assistant";
+      const image = Boolean(opts.image) && mode === "assistant";
       const noContext = Boolean(opts.noContext);
       const ooc = Boolean(opts.ooc);
       const includes = parseIncludes(opts.text);
@@ -87,9 +90,10 @@ export function useSend() {
       }
 
       const flags: TurnFlags | undefined =
-        agent || noContext || ooc || opts.includeBranch
+        agent || noContext || ooc || opts.includeBranch || image
           ? {
               agent,
+              image,
               noContext,
               ooc,
               includeBranch: opts.includeBranch,
@@ -120,7 +124,11 @@ export function useSend() {
         id: assistantId,
         role: "assistant",
         content: "",
-        status: agent ? "Agent Web Search…" : "Processing Prompt…",
+        status: image
+          ? "Stable Diffusion…"
+          : agent
+            ? "Agent Web Search…"
+            : "Processing Prompt…",
         createdAt: Date.now(),
       };
       store.appendMessage(assistantMsg, [], originId);
@@ -173,6 +181,7 @@ export function useSend() {
             images,
             includes: includes.urls,
             useAgent: agent,
+            useSd: image,
             noContext,
             rare: opts.rare,
             oocDiagnostics: oocDiagnostics || undefined,
@@ -199,10 +208,14 @@ export function useSend() {
               patch({
                 content,
                 reasoning: reasoning || undefined,
-                status: content ? undefined : "Streaming…",
-                streamingModel: content ? undefined : model || undefined,
-                streamingRoute: content ? undefined : route || undefined,
-                streamingContext: content ? undefined : context || undefined,
+                status: content
+                  ? "Streaming…"
+                  : reasoning
+                    ? "Reasoning…"
+                    : "Streaming…",
+                streamingModel: model || undefined,
+                streamingRoute: route || undefined,
+                streamingContext: context || undefined,
               });
             } else if (event.type === "reasoning") {
               if (first) {
@@ -212,10 +225,10 @@ export function useSend() {
               reasoning += event.content;
               patch({
                 reasoning,
-                status: content ? undefined : "Streaming…",
-                streamingModel: content ? undefined : model || undefined,
-                streamingRoute: content ? undefined : route || undefined,
-                streamingContext: content ? undefined : context || undefined,
+                status: content ? "Streaming…" : "Reasoning…",
+                streamingModel: model || undefined,
+                streamingRoute: route || undefined,
+                streamingContext: context || undefined,
               });
             } else if (event.type === "usage") {
               promptTokens = event.promptTokens;
@@ -304,17 +317,20 @@ export function useSend() {
           toast.message(
             parsed.agent
               ? "Usage: \\agent your question"
-              : "Usage: \\no-context your question",
+              : parsed.image
+                ? "Usage: \\image what to draw"
+                : "Usage: \\no-context your question",
           );
           return;
         }
-        if (parsed.agent && modeOf(branch) !== "assistant") {
-          toast.message("Agent is only available in assistant mode.");
+        if ((parsed.agent || parsed.image) && modeOf(branch) !== "assistant") {
+          toast.message("Only available in assistant mode.");
           return;
         }
         await generate({
           text: parsed.text,
           agent: parsed.agent,
+          image: parsed.image,
           noContext: parsed.noContext,
           rare: parsed.rare,
           ooc: parsed.ooc,
@@ -325,6 +341,7 @@ export function useSend() {
       await generate({
         text: parsed.text,
         agent: store.forceAgent,
+        image: store.forceSd,
         noContext: false,
         rare: parsed.rare,
         ooc: parsed.ooc,
@@ -348,13 +365,36 @@ export function useSend() {
       text: last.content,
       regenerate: true,
       agent: Boolean(flags?.agent || store.forceAgent),
+      image: Boolean(flags?.image || store.forceSd),
       noContext: Boolean(flags?.noContext),
       includeBranch: flags?.includeBranch,
       ooc: Boolean(flags?.ooc),
     });
   }, [generate]);
 
-  return { send, stop, regenerate, streaming };
+  const illustrate = useCallback(async () => {
+    const store = useChatStore.getState();
+    const branch = store.branches[store.currentId];
+    if (!branch || modeOf(branch) !== "story") {
+      toast.message("Scene illustrate is for story mode.");
+      return;
+    }
+    const hasBeat = [...branch.messages]
+      .reverse()
+      .some((m) => m.role === "assistant" && Boolean(m.content?.trim()));
+    if (!hasBeat) {
+      toast.message("Play a beat first.");
+      return;
+    }
+    await generate({
+      text: "Illustrate the current scene.",
+      image: true,
+      illustrateScene: true,
+      noContext: true,
+    });
+  }, [generate]);
+
+  return { send, stop, regenerate, illustrate, streaming };
 }
 
 function handleLocalCommand(
@@ -430,6 +470,7 @@ function handleLocalCommand(
         text: last.content,
         regenerate: true,
         agent: Boolean(flags?.agent || store.forceAgent),
+        image: Boolean(flags?.image || store.forceSd),
         noContext: Boolean(flags?.noContext),
         includeBranch: flags?.includeBranch,
         ooc: Boolean(flags?.ooc),
@@ -445,6 +486,8 @@ type GenerateOpts = {
   text: string;
   regenerate?: boolean;
   agent?: boolean;
+  image?: boolean;
+  illustrateScene?: boolean;
   noContext?: boolean;
   rare?: string[];
   ooc?: boolean;
@@ -466,15 +509,19 @@ async function generateViaChatPy(
 
   const mode = modeOf(branch);
   const agent = Boolean(opts.agent) && mode === "assistant";
+  const useSd =
+    Boolean(opts.image) &&
+    (mode === "assistant" || Boolean(opts.illustrateScene));
   const noContext = Boolean(opts.noContext);
   const pending = opts.regenerate
     ? lastUserMessage(useChatStore.getState().branches[originId]?.messages ?? [])
         ?.attachments ?? []
     : store.pendingAttachments;
   const flags: TurnFlags | undefined =
-    agent || noContext || opts.ooc || opts.includeBranch
+    agent || useSd || noContext || opts.ooc || opts.includeBranch
       ? {
           agent,
+          image: useSd,
           noContext,
           ooc: opts.ooc,
           includeBranch: opts.includeBranch,
@@ -506,7 +553,11 @@ async function generateViaChatPy(
       id: assistantId,
       role: "assistant",
       content: "",
-      status: "RAG Processing…",
+      status: useSd
+        ? "Stable Diffusion…"
+        : agent
+          ? "Agent Web Search…"
+          : "RAG Processing…",
       createdAt: Date.now(),
     },
     [],
@@ -534,6 +585,7 @@ async function generateViaChatPy(
   let context = 0;
   let recalling = false;
   let recalled: string[] = [];
+  let attachments: Attachment[] = [];
 
   const ac = new AbortController();
   abortRef.current = ac;
@@ -549,6 +601,8 @@ async function generateViaChatPy(
         text: opts.text,
         regenerate: Boolean(opts.regenerate),
         useAgent: agent,
+        useSd,
+        illustrateScene: Boolean(opts.illustrateScene),
         noContext,
         rare: opts.rare,
         includeBranch: opts.includeBranch,
@@ -610,12 +664,29 @@ async function generateViaChatPy(
             ...(recalling
               ? {}
               : {
-                  status: "Streaming…",
+                  status: content ? "Streaming…" : "Reasoning…",
                   streamingModel: model || undefined,
                   streamingRoute: route || undefined,
                   streamingContext: context || undefined,
                 }),
           });
+        } else if (event.type === "image") {
+          if (event.dataUrl) {
+            attachments = [
+              ...attachments.filter((a) => a.name !== event.name),
+              {
+                id: crypto.randomUUID(),
+                name: event.name || "image.png",
+                mime: event.mime || "image/png",
+                kind: "image" as const,
+                dataUrl: event.dataUrl,
+                size: event.size || 0,
+                prompt: event.prompt || undefined,
+                negative: event.negative || undefined,
+              },
+            ];
+            patch({ attachments });
+          }
         } else if (event.type === "usage") {
           promptTokens = event.promptTokens;
           completionTokens = event.completionTokens;
@@ -652,6 +723,7 @@ async function generateViaChatPy(
           ttft,
         },
         recalled: recalled.length ? recalled : undefined,
+        attachments: attachments.length ? attachments : undefined,
         status: undefined,
       },
       originId,

@@ -2,6 +2,7 @@
 import re
 from langchain_openai import ChatOpenAI
 from .chat_utils import ChatOptions, RAGTag # For Type Hinting
+from .sd_client import sd_enabled
 
 MAX_AGENT_CALLS = 2
 # Tagger often scores these 1.0 anyway; force a search when the query is live.
@@ -129,6 +130,28 @@ class Orchestration():
             return True
         return False
 
+    def requires_sd(self, documents: dict | None = None) -> bool:
+        """True only when Image is on (use_sd) or story illustrate."""
+        documents = documents or {}
+        if not sd_enabled(getattr(self.args, 'sd_server', '')):
+            return False
+        if documents.get('sd_ran'):
+            return False
+        if documents.get('illustrate_scene'):
+            return True
+        if not self.args.assistant_mode:
+            return False
+        if documents.get('use_sd'):
+            return True
+        return False
+
+    def sd_llm(self):
+        """Tool-calling model that writes A1111 prompts. Vision is not used."""
+        agent = self.__llm.get('agent')
+        if agent is not None and agent.model_name != 'None':
+            return agent
+        return self.__llm['general']
+
     def requires_agent(self, meta_tags: list[RAGTag], documents)->bool:
         """True when this turn should run AgentExecutor (capped at 2)."""
         if not self.args.assistant_mode or self.__llm['agent'].model_name == 'None':
@@ -147,6 +170,8 @@ class Orchestration():
         # Explicit: \agent, Spur Agent toggle, or pre-processor search_internet
         if documents.get('use_agent'):
             return True
+        if self.requires_sd(documents):
+            return False
         query = str(documents.get('user_query') or '')
         if _LIVE_QUERY.search(query) and not (
                 documents.get('has_images') or documents.get('dynamic_images')
@@ -179,6 +204,10 @@ class Orchestration():
 
     def _route_assistant(self, meta_tags, documents)->ChatOpenAI:
         """Pick agent / vision / tagged assistant model."""
+        if self.requires_sd(documents):
+            return self.sd_llm()
+        if documents.get('sd_ran'):
+            return self.get_model('casual')
         if self.requires_agent(meta_tags, documents):
             return self.get_model('agent')
 
@@ -206,6 +235,10 @@ class Orchestration():
             if documents.get('explicit', False):
                 return 'nsfw'
             return 'story'
+        if self.requires_sd(documents):
+            return 'sd'
+        if documents.get('sd_ran'):
+            return 'casual'
         if self.requires_agent(meta_tags, documents):
             return 'agent'
         if self._requires_vision(documents):

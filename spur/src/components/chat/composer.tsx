@@ -1,7 +1,8 @@
 import { useRef, useState } from "react";
-import { ArrowUp, Paperclip, RefreshCw, Square, X } from "lucide-react";
+import { ArrowUp, Palette, Paperclip, RefreshCw, RotateCcw, Square, X } from "lucide-react";
 import { toast } from "sonner";
 import { lastUserMessage, modeOf, turnCount } from "@/lib/chat/branch-mode";
+import { postOp } from "@/lib/chat/remote";
 import { useChatStore } from "@/lib/chat/store";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -12,11 +13,13 @@ export function Composer({
   onSend,
   onStop,
   onRegenerate,
+  onIllustrate,
 }: {
   streaming: boolean;
   onSend: (text: string) => void;
   onStop: () => void;
   onRegenerate: () => void;
+  onIllustrate?: () => void;
 }) {
   const [value, setValue] = useState("");
   const [dragDepth, setDragDepth] = useState(0);
@@ -25,6 +28,8 @@ export function Composer({
   const removePending = useChatStore((s) => s.removePending);
   const forceAgent = useChatStore((s) => s.forceAgent);
   const setForceAgent = useChatStore((s) => s.setForceAgent);
+  const forceSd = useChatStore((s) => s.forceSd);
+  const setForceSd = useChatStore((s) => s.setForceSd);
   const currentId = useChatStore((s) => s.currentId);
   const branch = useChatStore((s) => s.branches[s.currentId]);
   const ref = useRef<HTMLTextAreaElement>(null);
@@ -38,6 +43,10 @@ export function Composer({
   const canSend =
     !streaming && (value.trim().length > 0 || pending.length > 0);
   const agentOn = mode === "assistant" && forceAgent;
+  const imageOn = mode === "assistant" && forceSd;
+  const storyImage = mode === "story";
+  const hasBeat = (branch?.messages ?? [])
+    .some((m) => m.role === "assistant" && Boolean(m.content?.trim()));
   const dragging = dragDepth > 0;
 
   function submit() {
@@ -183,6 +192,57 @@ export function Composer({
               >
                 Agent
               </button>
+              <button
+                type="button"
+                aria-pressed={storyImage ? undefined : imageOn}
+                disabled={
+                  streaming ||
+                  (storyImage ? !hasBeat : mode !== "assistant")
+                }
+                title={
+                  storyImage
+                    ? hasBeat
+                      ? "Illustrate the current scene"
+                      : "Play a beat first"
+                    : mode === "assistant"
+                      ? "Force image generate / edit this turn"
+                      : "Image is locked to assistant mode"
+                }
+                onClick={() => {
+                  if (storyImage) {
+                    onIllustrate?.();
+                    return;
+                  }
+                  if (forceSd) void postOp("/api/sd/reset");
+                  setForceSd(!forceSd);
+                }}
+                className={cn(
+                  "inline-flex h-8 items-center gap-1.5 rounded-sm px-2.5 text-xs font-medium transition-colors",
+                  !storyImage && imageOn
+                    ? "bg-primary text-primary-foreground"
+                    : "text-muted-foreground hover:bg-accent hover:text-foreground",
+                  (storyImage ? !hasBeat : mode !== "assistant") && "opacity-40",
+                )}
+              >
+                <Palette className="size-3.5" />
+                Image
+              </button>
+              {!storyImage && imageOn ? (
+                <button
+                  type="button"
+                  disabled={streaming}
+                  title="New picture — forget the last generate"
+                  onClick={() => {
+                    void postOp("/api/sd/reset").then((r) => {
+                      if (r.ok) toast.message("Next generate is a new picture.");
+                    });
+                  }}
+                  className="inline-flex h-8 items-center gap-1 rounded-sm px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                >
+                  <RotateCcw className="size-3.5" />
+                  New
+                </button>
+              ) : null}
             </div>
             <div className="flex items-center gap-1">
               {streaming ? (

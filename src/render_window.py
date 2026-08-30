@@ -1,5 +1,6 @@
 """ module responsible for rendering output to the screen """
 from dataclasses import dataclass, field
+import os
 import time
 import re
 import traceback
@@ -28,7 +29,16 @@ from .context_manager import ContextManager # For Type Hinting
 from .chat_utils import CommonUtils, ChatOptions, RAGTag # For Type Hinting
 from .model_orchestrator import Orchestration, MAX_AGENT_CALLS
 from .agent_tools import DuckDuckGoSearchTool
+from .sd_client import MAGICK_QUERY, has_generated_images, is_new_scene, ping_sd, vision_thumb_data_url
+from .sd_session import (
+    checkpoint_flavor,
+    clear_session,
+    flavor_brief,
+    load_session,
+    save_session,
+)
 from .think_tags import ThinkFeed, chunk_text, split_think
+from .sd_tools import make_sd_tools, seed_last_generated
 from .gold_fetch import MAX_GOLD_FETCHES, take_need_gold, recall_status
 
 
@@ -157,6 +167,7 @@ class RenderWindow(PromptManager):
         self.ooc_response = ''
         self.llm = None
         self.status_hook = None
+        self.image_hook = None
 
         # populate dataclasses, setup
         self._load_states(current_dir, context, args)
@@ -388,15 +399,16 @@ class RenderWindow(PromptManager):
     def add_image_block(messages: list[BaseMessage], images: list)->list[BaseMessage]:
         """ add/return image block if images are present """
         if images:
-            image_blocks = [
-                {
+            latest = images[-1]
+            thumb = vision_thumb_data_url(
+                RenderWindow._as_image_data_url(latest),
+            )
+            image_blocks = []
+            if thumb:
+                image_blocks = [{
                     'type': 'image_url',
-                    'image_url': {
-                        'url': RenderWindow._as_image_data_url(img_b64),
-                    }
-                }
-                for img_b64 in images
-            ]
+                    'image_url': {'url': thumb},
+                }]
             for i, msg in enumerate(messages):
                 if isinstance(msg, HumanMessage):
                     if isinstance(msg.content, str):
@@ -475,6 +487,12 @@ class RenderWindow(PromptManager):
         if callable(hook):
             hook(message)
 
+    def _emit_image(self, rec: dict) -> None:
+        """Push a generated PNG to Spur while the SD agent is still running."""
+        hook = getattr(self, 'image_hook', None)
+        if callable(hook):
+            hook(rec)
+
     def _invoke_web_agent(self, documents: dict, polish: bool, meta_data) -> list:
         """Run AgentExecutor once, then recurse so a follow-up search can happen."""
         if int(documents.get('agent_calls', 0)) >= MAX_AGENT_CALLS:
@@ -542,12 +560,229 @@ class RenderWindow(PromptManager):
                 )
         return self.get_messages(meta_data, documents, polish=polish)
 
+    def _story_illustration_pack(self, documents: dict) -> str:
+        """Canon + last beat for a story-mode scene still."""
+        history = self.common.load_chat()
+        branch = self.common.active_branch(history)
+        last_ai = ''
+        last_user = ''
+        for msg in reversed(history.get(branch) or []):
+            if not isinstance(msg, dict):
+                continue
+            role = msg.get('role')
+            text = str(msg.get('content') or '').strip()
+            if not text:
+                continue
+            if role == 'assistant' and not last_ai:
+                last_ai = text[:2500]
+            elif role == 'user' and not last_user:
+                last_user = text[:800]
+            if last_ai and last_user:
+                break
+        scene = {}
+        try:
+            scene = self.state.context.scene.get_scene() or {}
+        except Exception:  # pylint: disable=broad-exception-caught
+            scene = {}
+        loc = str(scene.get('player_location') or '').strip()
+        names = []
+        for key in ('entity', 'audience', 'known_characters'):
+            raw = scene.get(key) or []
+            if isinstance(raw, str):
+                raw = [raw]
+            for name in raw:
+                token = str(name).strip().lower()
+                if token and token not in names:
+                    names.append(token)
+        sheets = []
+        root = os.path.join(str(self.opts.vector_dir), 'entities')
+        for name in names[:8]:
+            safe = self.common.regex.safe_name.sub('_', name).strip('_')
+            path = os.path.join(root, f'{safe}.txt')
+            if not os.path.isfile(path):
+                continue
+            try:
+                with open(path, encoding='utf-8') as handle:
+                    body = handle.read().strip()[:900]
+            except OSError:
+                continue
+            if body:
+                sheets.append(f'[{name}]\n{body}')
+        beat = last_ai or last_user or str(documents.get('user_query') or '')
+        look = '\n\n'.join(sheets) if sheets else '(no character sheets)'
+        return (
+            'Illustrate THIS story beat as a single cinematic still. '
+            'Match character looks from the sheets. Do not invent a new plot.\n\n'
+            f'BEAT:\n{beat}\n\n'
+            f'LOCATION: {loc or "(unspecified)"}\n'
+            f'PRESENT: {", ".join(names) or "(unspecified)"}\n\n'
+            f'CHARACTER LOOKS:\n{look}\n'
+        )
+
+    def _invoke_sd_agent(self, documents: dict, polish: bool, meta_data) -> list:
+        """Run txt2img / img2img / ImageMagick, then recurse to the answerer."""
+        documents['sd_ran'] = True
+        documents.setdefault('original_user_query', documents['user_query'])
+        documents.setdefault('dynamic_files', '')
+        folder = os.path.join(str(self.opts.vector_dir), 'generated')
+        prior = seed_last_generated(folder, limit=1)
+        store = list(prior)
+        documents['generated_images'] = store
+        last_name = prior[-1]['name'] if prior else ''
+        query = str(documents.get('original_user_query') or '')
+        illustrate = bool(documents.get('illustrate_scene'))
+        allow_magick = bool(MAGICK_QUERY.search(query)) and not illustrate
+        vector_dir = str(self.opts.vector_dir)
+        session = load_session(vector_dir)
+        ckpt = (getattr(self.opts, 'sd_model', '') or '').strip()
+        if not ckpt:
+            info = ping_sd(self.opts.sd_server, timeout=3.0)
+            if info.get('ok'):
+                ckpt = str(info.get('current') or '')
+        flavor = checkpoint_flavor(ckpt)
+        fresh = illustrate or is_new_scene(query) or bool(re.search(
+            r'(?ix)\b(start over|from scratch|new (image|picture|scene)|'
+            r'forget the (last|previous))\b',
+            query,
+        ))
+        if fresh:
+            session = {}
+        tools = make_sd_tools(
+            self.opts.sd_server,
+            folder,
+            store,
+            status=self._status,
+            emit_image=self._emit_image,
+            checkpoint=getattr(self.opts, 'sd_model', '') or '',
+            allow_magick=allow_magick,
+            session=session,
+            persist=lambda data: save_session(vector_dir, data),
+            fresh=fresh,
+            flavor=flavor,
+        )
+        stack = (session.get('prompt') or '').strip()
+        if stack and not fresh:
+            last_hint = (
+                f'PROMPT STACK (keep this scene):\n{stack}\n\n'
+                f'Last picture: {last_name}. img2img once. Pass ONLY the new '
+                'addition. denoising 0.55. Do not txt2img.'
+            )
+        elif last_name and not fresh:
+            last_hint = (
+                f'The last picture on disk is {last_name}. '
+                'img2img that once if this is a change, else txt2img.'
+            )
+        else:
+            last_hint = 'No previous picture. Use txt2img once with a detailed prompt.'
+        magick_hint = (
+            'The user asked for a cheap edit — you may imagemagick (border/caption/resize). '
+            if allow_magick else
+            'Do not call imagemagick. Do not add a border.'
+        )
+        if illustrate:
+            last_hint = (
+                'STORY ILLUSTRATION. txt2img once. Cinematic still of the BEAT. '
+                'Use character looks. Ignore any previous PNG.'
+            )
+            system = (
+                'You illustrate one story beat with Stable Diffusion, then stop.\n'
+                f'{flavor_brief(flavor, ckpt)}\n'
+                'Write the BEST prompt for this checkpoint from the beat, location, '
+                'and character sheets. Camera, lighting, clothing, faces from the sheets. '
+                'Do not add plot. Do not caption text. txt2img once.\n'
+                f'{last_hint}\n'
+                'Keep tool chatter short. Do not mention Automatic1111 or pipelines.'
+            )
+        else:
+            system = (
+                'You are a Stable Diffusion prompt engineer. One image this turn, then stop.\n'
+                f'{flavor_brief(flavor, ckpt)}\n'
+                'The user relies on you to write the BEST prompt for this checkpoint — '
+                'expand their sketch into lighting, camera, materials, atmosphere, composition. '
+                'Never send a one-liner. 30–80 tags (Pony/Illustrious) or a dense cinematic '
+                'paragraph (SDXL/Flux).\n'
+                'Image mode builds ONE prompt across turns.\n'
+                '- First picture → txt2img with that full prompt (quality tags + scene).\n'
+                '- Later tweaks → img2img. Pass ONLY what to add. denoising 0.55. '
+                'New seed every pass.\n'
+                '- A different subject ("create an image of a soap bubble") → txt2img. '
+                'Forget the last picture.\n'
+                'You do not see the pixels. Do not critique the picture.\n'
+                f'{magick_hint}\n'
+                'Never generate a second time to "improve" it.\n'
+                f'{last_hint}\n'
+                'Keep tool chatter short. Do not mention Automatic1111 or pipelines. '
+                'Do not explain Photoshop.'
+            )
+        prompt = ChatPromptTemplate.from_messages([
+            ('system', system),
+            ('user', '{input}'),
+            MessagesPlaceholder(variable_name='agent_scratchpad'),
+        ])
+        agent = create_openai_tools_agent(self.llm, tools, prompt)
+        agent_executor = AgentExecutor(
+            agent=agent, tools=tools, verbose=False, max_iterations=4,
+        )
+        self._status('Stable Diffusion…')
+        if illustrate:
+            user_input = self._story_illustration_pack(documents)
+        else:
+            user_input = documents['original_user_query']
+            if stack and not fresh:
+                user_input = (
+                    f'SCENE PROMPT SO FAR:\n{stack}\n\n'
+                    f'USER ASKED TO ADD/CHANGE:\n{query}\n\n'
+                    'Call img2img with ONLY the new details. Keep the scene.'
+                )
+        try:
+            self.console.print(
+                'Stable Diffusion (ctl-c to cancel)...',
+                style=f'color({self.state.color})',
+                highlight=False,
+            )
+            result = agent_executor.invoke({'input': user_input})
+            documents['dynamic_files'] += f'\n=== IMAGE_GEN ===\n{result}\n\n'
+        except KeyboardInterrupt:
+            documents['dynamic_files'] += '\n=== IMAGE_GEN ===\nUSER CANCELED\n\n'
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            self.console.print(
+                f'Stable Diffusion error: {exc}',
+                style=f'color({self.state.color})',
+                highlight=False,
+            )
+            documents['dynamic_files'] += (
+                '\n=== IMAGE_GEN ===\n'
+                'ERROR: image generation failed. Tell the user you could not make the picture. '
+                'Do not mention tools or pipelines.\n\n'
+            )
+        documents['dynamic_images'] = []
+        documents['has_last_image'] = True
+        names = [
+            rec.get('name', '') for rec in documents.get('generated_images') or []
+            if rec.get('name') and not rec.get('prior')
+        ]
+        if names:
+            documents['dynamic_files'] += (
+                '\nThe picture is on screen as ' + ', '.join(names[-3:]) + '.\n'
+            )
+        if illustrate:
+            clear_session(vector_dir)
+        return []
+
+    def _note_last_image(self, documents: dict) -> None:
+        """Flag that a generated picture is on screen. Do not send pixels to the LLM."""
+        if documents.get('has_last_image'):
+            return
+        if has_generated_images(getattr(self.opts, 'vector_dir', '') or ''):
+            documents['has_last_image'] = True
+
     def get_messages(self,
                      meta_data: RAGTag,
                      documents: dict,
                      polish: bool = False)->list[Document]:
         """ return formatted message to be sent to LLM stream """
         prompts = self.prompts
+        self._note_last_image(documents)
         if polish:
             self.llm = self.orchestrator.get_model('polisher')
         else:
@@ -653,6 +888,8 @@ class RenderWindow(PromptManager):
                           highlight=False)
 
         documents.setdefault('agent_error', '<AGENT_ERROR: FALSE>')
+        if self.orchestrator.requires_sd(documents):
+            return self._invoke_sd_agent(documents, polish, meta_data)
         if self.orchestrator.requires_agent(meta_data, documents):
             return self._invoke_web_agent(documents, polish, meta_data)
         self.common.write_debug(f'live_stream-{self.llm.model_name}', messages)
@@ -918,6 +1155,9 @@ class RenderWindow(PromptManager):
         self.llm = self.orchestrator.route(meta_data, documents)
         messages = self.get_messages(meta_data, documents)
         self.llm = self.orchestrator.route(meta_data, documents)
+        if documents.get('sd_ran') and not messages:
+            self.save_history(documents, '')
+            return None
         pre_process_time += time.time() - start_time
         token_total = documents.get('prompt_tokens') or self.packed_prompt_tokens(messages)
         branch = self.common.active_branch(history)
@@ -1012,7 +1252,8 @@ class RenderWindow(PromptManager):
 
         # ── Context handling (unchanged) ────────────────────────────────
         documents['llm_response'] = current_response
-        self.state.context.handle_context(documents, direction='store')
+        if not documents.get('sd_ran') and (current_response or '').strip():
+            self.state.context.handle_context(documents, direction='store')
         current_response = self.common.sanitize_response(current_response)
 
         if self.state.disable_thinking:

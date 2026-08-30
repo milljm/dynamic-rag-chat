@@ -6,6 +6,8 @@ export type ChatRequest = {
   images: string[];
   includes?: string[];
   useAgent?: boolean;
+  useSd?: boolean;
+  illustrateScene?: boolean;
   noContext?: boolean;
   rare?: string[];
   oocDiagnostics?: string;
@@ -18,6 +20,7 @@ export type ChatEvent =
   | { type: "usage"; promptTokens: number; completionTokens: number; model: string; tokenSavings?: number }
   | { type: "error"; error: string }
   | { type: "documents"; documents: { name: string; chars: number }[] }
+  | { type: "image"; name: string; mime?: string; dataUrl: string; size?: number; prompt?: string; negative?: string }
   | { type: "done" };
 
 export async function streamSse(

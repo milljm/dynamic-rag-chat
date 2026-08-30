@@ -2,6 +2,7 @@
 import os
 import sys
 from .chat_utils import ChatOptions # For Type Hinting
+from .sd_client import has_generated_images
 
 class PromptManager():
     """
@@ -89,6 +90,12 @@ class PromptManager():
             extra = f'{self.plot_prompt_file}_search.md'
             if os.path.exists(extra):
                 parts.append(self.get_prompt(extra))
+        if documents.get('has_last_image') or has_generated_images(
+                getattr(self.args, 'vector_dir', '') or ''
+        ):
+            extra = f'{self.plot_prompt_file}_sd_last.md'
+            if os.path.exists(extra):
+                parts.append(self.get_prompt(extra))
         return '\n'.join(parts), human
 
     def compose_nostory_tag(self, documents: dict) -> str:
@@ -109,4 +116,8 @@ class PromptManager():
             extra = f'{self.tag_prompt_file}_files.md'
         if extra and os.path.exists(extra):
             human = human.rstrip() + '\n' + self.get_prompt(extra)
+        if has_generated_images(getattr(self.args, 'vector_dir', '') or ''):
+            sd_tag = f'{self.tag_prompt_file}_sd.md'
+            if os.path.exists(sd_tag):
+                human = human.rstrip() + '\n' + self.get_prompt(sd_tag)
         return human

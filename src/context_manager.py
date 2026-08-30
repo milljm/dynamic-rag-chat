@@ -242,6 +242,8 @@ class ContextManager(PromptManager):
             .. code-block:: python
                 return None
         """
+        if documents.get('sd_ran') or not (documents.get('llm_response') or '').strip():
+            return
         # Handle Scene State
         history = documents['history'] # shorthand
         if not collection:

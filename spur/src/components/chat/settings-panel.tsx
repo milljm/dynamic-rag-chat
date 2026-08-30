@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import {
   fetchSettings,
   pingSettings,
+  pingSd,
   saveSettings,
   ROUTE_ROWS,
   type ModelInfo,
@@ -145,8 +146,11 @@ function SettingsPanel({
   const [models, setModels] = useState<string[]>([]);
   const [details, setDetails] = useState<ModelInfo[]>([]);
   const [pingNote, setPingNote] = useState("");
+  const [sdNote, setSdNote] = useState("");
+  const [sdModels, setSdModels] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [pinging, setPinging] = useState(false);
+  const [sdPinging, setSdPinging] = useState(false);
 
   function patch(key: SettingsKey, value: string) {
     setValues((prev) => (prev ? { ...prev, [key]: value } : prev));
@@ -206,6 +210,25 @@ function SettingsPanel({
           if (!cancelled && ping.ok) applyPing(ping);
           else if (!cancelled) setPingNote(ping.error || "unreachable");
         }
+        if (merged.sd_server) {
+          const sd = await pingSd(merged.sd_server);
+          if (cancelled) return;
+          if (sd.ok) {
+            setSdModels(sd.models);
+            setSdNote(
+              sd.current
+                ? `${sd.models.length} checkpoints · loaded`
+                : `${sd.models.length} checkpoints`,
+            );
+            if (sd.current && !merged.sd_model) {
+              setValues((prev) =>
+                prev ? { ...prev, sd_model: sd.current || "" } : prev,
+              );
+            }
+          } else {
+            setSdNote(sd.error || "unreachable");
+          }
+        }
       } catch (err) {
         if (!cancelled) toast.error(String(err));
       }
@@ -240,6 +263,31 @@ function SettingsPanel({
       }
     } finally {
       setPinging(false);
+    }
+  }
+
+  async function onSdPing() {
+    if (!values?.sd_server) return;
+    setSdPinging(true);
+    try {
+      const ping = await pingSd(values.sd_server);
+      if (ping.ok) {
+        setSdModels(ping.models);
+        setSdNote(
+          ping.current
+            ? `${ping.models.length} checkpoints · loaded`
+            : `${ping.models.length} checkpoints`,
+        );
+        if (ping.current && !values.sd_model) {
+          patch("sd_model", ping.current);
+        }
+        toast.success(`Automatic1111 — ${ping.models.length} checkpoints`);
+      } else {
+        setSdNote(ping.error || "unreachable");
+        toast.error(ping.error || "Stable Diffusion did not answer");
+      }
+    } finally {
+      setSdPinging(false);
     }
   }
 
@@ -426,6 +474,57 @@ function SettingsPanel({
                   ))}
                 </div>
               </details>
+              <details className="border-t border-border pt-3">
+                <summary className="cursor-pointer text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                  Stable Diffusion
+                </summary>
+                  <p className="mt-2 text-[11px] text-muted-foreground">
+                    Needs a model that can call tools (set Agent, or it uses
+                    the generator). Vision is not used — the picture lands in
+                    the chat. The agent writes the prompt; it does not look
+                    at the pixels.
+                  </p>
+                  <div className="mt-3 grid gap-3">
+                    <Field
+                      label="Automatic1111"
+                      hint="http://host:7860 with --api. Blank disables."
+                    >
+                      <Input
+                        value={values.sd_server}
+                        onChange={(e) => patch("sd_server", e.target.value)}
+                        placeholder="http://127.0.0.1:7860"
+                        autoComplete="off"
+                        spellCheck={false}
+                      />
+                    </Field>
+                    <Field
+                      label="Checkpoint"
+                      hint="Swaps the A1111 model on the next generate. Blank keeps whatever is loaded."
+                    >
+                      <ModelSelect
+                        value={values.sd_model}
+                        onChange={(v) => patch("sd_model", v)}
+                        models={sdModels}
+                        details={[]}
+                        emptyLabel="A1111 default"
+                      />
+                    </Field>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        disabled={sdPinging || !values.sd_server}
+                        onClick={() => void onSdPing()}
+                      >
+                        {sdPinging ? "Pinging…" : "Ping"}
+                      </Button>
+                      <span className="text-[11px] text-muted-foreground">
+                        {sdNote}
+                      </span>
+                    </div>
+                  </div>
+                </details>
             </div>
           )}
         </div>

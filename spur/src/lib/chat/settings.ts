@@ -31,6 +31,8 @@ export const SETTINGS_KEYS = [
   "entity_llm",
   "entity_server",
   "tavily_key",
+  "sd_server",
+  "sd_model",
 ] as const;
 
 export type SettingsKey = (typeof SETTINGS_KEYS)[number];
@@ -74,6 +76,7 @@ export type PingResult = {
   knows_loaded?: boolean;
   source?: string;
   url?: string;
+  current?: string;
 };
 
 function emptyValues(): SettingsValues {
@@ -143,5 +146,22 @@ export async function pingSettings(host: string, apiKey: string): Promise<PingRe
     knows_loaded: Boolean(json.knows_loaded),
     source: json.source,
     url: json.url,
+  };
+}
+
+export async function pingSd(host: string): Promise<PingResult> {
+  const res = await fetch(url("/api/settings/ping"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ host, kind: "sd" }),
+  });
+  const json = (await res.json()) as PingResult;
+  return {
+    ok: Boolean(json.ok),
+    error: json.error,
+    models: Array.isArray(json.models) ? json.models.map(String) : [],
+    current: typeof json.current === "string" ? json.current : "",
+    url: json.url,
+    source: json.source,
   };
 }

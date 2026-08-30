@@ -9,6 +9,8 @@ export type Attachment = {
   text?: string;
   dataUrl?: string;
   size: number;
+  prompt?: string;
+  negative?: string;
 };
 
 export type StreamMetrics = {
@@ -22,6 +24,7 @@ export type StreamMetrics = {
 
 export type TurnFlags = {
   agent?: boolean;
+  image?: boolean;
   noContext?: boolean;
   ooc?: boolean;
   includeBranch?: string;
@@ -69,5 +72,6 @@ export type ChatSnapshot = {
   branches: Record<string, Branch>;
   pendingAttachments: Attachment[];
   forceAgent: boolean;
+  forceSd: boolean;
   pendingOoc: string;
 };

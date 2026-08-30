@@ -43,7 +43,7 @@ streamlit run streamlit_chat.py -- --assistant-mode
 - **Status** — `RAG Processing…` → `Agent Web Search…` (when it searches) → `Processing Prompt… [model] [route] [12.4k]` → `Streaming…`. DUP / CTX live in the footer.
 - **Reasoning** — think-block in a disclosure; the answer streams below.
 - **Light / dark / system** — sand paper vs ink. Code fences: per-block Pygments theme dropdown (sticky).
-- **Settings** — gear in the header. Server, the three required models, collapsed routes. Saves `.chat.yaml` and the next turn uses them.
+- **Settings** — gear in the header. Server, the three required models, collapsed routes, Stable Diffusion. Saves `.chat.yaml` and the next turn uses them.
 
 Spur never imports LangChain. The adapter owns history, RAG, Documents, agent tools, and SSE (`status`, `token`, `reasoning`, `documents`, `usage`, `done`).
 
@@ -95,6 +95,7 @@ That is the whole product: targeted context, not a bigger window.
   Summarize {{https://example.com/article}}
   ```
 - **Agents** — pre-processor can request a web search (threshold via `--distrust-confidence`), or force it with `\agent …`. The agent may re-search once more (cap 2) if the first dump looks thin.
+- **Stable Diffusion** — Settings → Automatic1111 URL (`--sd-server`). Never auto-routes: turn **Image** on in assistant (or click Image in story). Assistant: toggle + **New ↻**. Story: one-click still of the current beat. PNG lands in chat — no follow-up LLM. Needs a tool-calling model (Agent). ImageMagick is optional (`conda install -c conda-forge imagemagick`). Needs `--api` on A1111.
 - **Think tags** — MiniMax `<mm:think>`, `<think>`, and null-token reasoners are split out of the visible stream. Spur has a Reasoning disclosure.
 - **Debug** — `--debug` / `--prompts-debug` dumps prompts, tags, and RAG payloads
 
@@ -107,6 +108,7 @@ Same slash commands in Spur, Streamlit, and the terminal.
 \regenerate                 regenerate last turn
 \no-context msg             query with no RAG / history context
 \agent msg                  force web-search agent
+\image msg                  force Stable Diffusion (Automatic1111)
 \delete-last                drop the last user+assistant pair
 \turn                       print current turn count
 \rewind N                   keep turns 1..N
@@ -210,6 +212,8 @@ Conda + `uv` is the intended path. System Python will fight you. Node is require
 ```bash
 conda create -n dynamic-rag python=3.13 uv pip nodejs
 conda activate dynamic-rag
+# optional: cheap image edits (border / caption) after Stable Diffusion
+conda install -c conda-forge imagemagick
 git clone https://github.com/milljm/dynamic-rag-chat.git
 cd dynamic-rag-chat
 uv pip install -r requirements.txt

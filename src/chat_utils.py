@@ -288,6 +288,8 @@ class ChatOptions:
     time_zone: str = 'GMT'
     api_key: str = 'none'
     tavily_key: str = 'none'
+    sd_server: str = ''
+    sd_model: str = ''
     assistant_mode: bool = False
     no_rags: bool = False
     debug: bool = False
@@ -392,6 +394,11 @@ class ChatOptions:
         'coder_server':              'coder_host',
         'structured_server':         'structured_host',
         'general_server':            'general_host',
+        'tavily_key':                'tavily_key',
+        'sd_server':                 'sd_server',
+        'sd_host':                   'sd_server',
+        'stable_diffusion':          'sd_server',
+        'sd_model':                  'sd_model',
     }
 
     _INT_FIELDS = {'matches', 'completion_tokens', 'chat_history', 'history_sessions'}

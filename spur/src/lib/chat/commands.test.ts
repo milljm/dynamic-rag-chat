@@ -46,6 +46,7 @@ test("inline agent and no-context strip the command", () => {
   assert.deepEqual(parseComposerInput("\\agent what shipped today?"), {
     kind: "inline",
     agent: true,
+    image: false,
     noContext: false,
     text: "what shipped today?",
     rare: [],
@@ -54,8 +55,18 @@ test("inline agent and no-context strip the command", () => {
   assert.deepEqual(parseComposerInput("\\no-context just riff"), {
     kind: "inline",
     agent: false,
+    image: false,
     noContext: true,
     text: "just riff",
+    rare: [],
+    ooc: false,
+  });
+  assert.deepEqual(parseComposerInput("\\image a red fox at dusk"), {
+    kind: "inline",
+    agent: false,
+    image: true,
+    noContext: false,
+    text: "a red fox at dusk",
     rare: [],
     ooc: false,
   });

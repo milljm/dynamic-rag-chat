@@ -6,6 +6,7 @@ import {
   GitBranch,
   Globe,
   Lock,
+  Palette,
   PanelLeft,
 } from "lucide-react";
 import { isLockedBranch, modeOf, turnCount } from "@/lib/chat/branch-mode";
@@ -21,6 +22,7 @@ import {
 import { ThemeToggle } from "./theme-toggle";
 import { SettingsButton } from "./settings-panel";
 import { Markdown } from "./markdown";
+import { ChatImage } from "./chat-image";
 
 const NEAR_BOTTOM = 96;
 
@@ -34,6 +36,7 @@ export function Thread({
   const currentId = useChatStore((s) => s.currentId);
   const branch = useChatStore((s) => s.branches[s.currentId]);
   const scrollerRef = useRef<HTMLDivElement>(null);
+  const innerRef = useRef<HTMLDivElement>(null);
   const pinnedRef = useRef(true);
   const [pinned, setPinned] = useState(true);
 
@@ -58,6 +61,17 @@ export function Thread({
     const el = scrollerRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [branch?.messages, streaming]);
+
+  useEffect(() => {
+    const el = scrollerRef.current;
+    const inner = innerRef.current;
+    if (!el || !inner) return;
+    const ro = new ResizeObserver(() => {
+      if (pinnedRef.current) el.scrollTop = el.scrollHeight;
+    });
+    ro.observe(inner);
+    return () => ro.disconnect();
+  }, [currentId]);
 
   if (!branch) return null;
 
@@ -106,17 +120,22 @@ export function Thread({
         <div
           ref={scrollerRef}
           className="h-full overflow-y-auto [overflow-anchor:none]"
+          onWheel={(e) => {
+            if (e.deltaY < 0) releasePin();
+          }}
           onScroll={(e) => {
             const el = e.currentTarget;
             const near =
               el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM;
-            if (near !== pinnedRef.current) {
-              pinnedRef.current = near;
-              setPinned(near);
-            }
-            }}
+            if (near === pinnedRef.current) return;
+            pinnedRef.current = near;
+            setPinned(near);
+          }}
         >
-          <div className="mx-auto flex max-w-3xl flex-col gap-5 px-4 py-6 md:px-8">
+          <div
+            ref={innerRef}
+            className="mx-auto flex max-w-3xl flex-col gap-5 px-4 py-6 md:px-8"
+          >
             {branch.messages.length === 0 ? (
               <EmptyState
                 name={branch.name}
@@ -241,10 +260,12 @@ function MessageBubble({
               <li key={att.id} className="text-xs text-muted-foreground">
                 {att.name}
                 {att.kind === "image" && att.dataUrl && (
-                  <img
+                  <ChatImage
                     src={att.dataUrl}
                     alt={att.name}
-                    className="mt-2 max-h-48 rounded-sm outline outline-1 -outline-offset-1 outline-foreground/10"
+                    name={att.name}
+                    prompt={att.prompt}
+                    negative={att.negative}
                   />
                 )}
               </li>
@@ -252,6 +273,7 @@ function MessageBubble({
           </ul>
         )}
         {(message.flags?.agent ||
+          message.flags?.image ||
           message.flags?.noContext ||
           message.flags?.includeBranch ||
           message.flags?.ooc) && (
@@ -260,6 +282,12 @@ function MessageBubble({
               <>
                 <Globe className="size-3" />
                 Agent
+              </>
+            )}
+            {message.flags.image && (
+              <>
+                <Palette className="size-3" />
+                Image
               </>
             )}
             {message.flags.noContext && <span>No context</span>}
@@ -410,7 +438,7 @@ function StatusLine({
     );
   }
   const showModel =
-    Boolean(model) && /^(Streaming|Processing Prompt)/i.test(label);
+    Boolean(model) && /^(Streaming|Processing Prompt|Reasoning)/i.test(label);
   return (
     <p className="text-sm text-muted-foreground">
       <span className="shimmer-text">{label}</span>
