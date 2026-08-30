@@ -52,6 +52,7 @@ def make_sd_tools(
     store: list[dict],
     status: Callable[[str], None] | None = None,
     emit_image: Callable[[dict], None] | None = None,
+    checkpoint: str = '',
 ) -> list:
     """txt2img, img2img, imagemagick — all write into ``store``."""
 
@@ -75,7 +76,7 @@ def make_sd_tools(
         _status('Stable Diffusion…')
         blob = txt2img(
             host, prompt, negative_prompt=negative_prompt,
-            steps=steps, width=width, height=height,
+            steps=steps, width=width, height=height, checkpoint=checkpoint,
         )
         rec = _write_png(folder, blob, stem='txt2img')
         _emit(rec)
@@ -99,7 +100,7 @@ def make_sd_tools(
         _status('Stable Diffusion…')
         blob = img2img(
             host, src, prompt, negative_prompt=negative_prompt,
-            denoising=denoising, steps=steps,
+            denoising=denoising, steps=steps, checkpoint=checkpoint,
         )
         out = _write_png(folder, blob, stem='img2img')
         _emit(out)

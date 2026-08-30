@@ -1043,6 +1043,11 @@ def _add_user_and_api_args(parser, D):
         default=D('sd_server'),
         help='Automatic1111 URL (http://host:7860). Blank disables.',
     )
+    api_args.add_argument(
+        '--sd-model', metavar='', dest='sd_model', type=str,
+        default=D('sd_model'),
+        help='Automatic1111 checkpoint title. Blank keeps whatever A1111 has loaded.',
+    )
 
 
 def _add_context_args(parser, D):

@@ -32,6 +32,7 @@ export const SETTINGS_KEYS = [
   "entity_server",
   "tavily_key",
   "sd_server",
+  "sd_model",
 ] as const;
 
 export type SettingsKey = (typeof SETTINGS_KEYS)[number];
@@ -75,6 +76,7 @@ export type PingResult = {
   knows_loaded?: boolean;
   source?: string;
   url?: string;
+  current?: string;
 };
 
 function emptyValues(): SettingsValues {
@@ -158,6 +160,7 @@ export async function pingSd(host: string): Promise<PingResult> {
     ok: Boolean(json.ok),
     error: json.error,
     models: Array.isArray(json.models) ? json.models.map(String) : [],
+    current: typeof json.current === "string" ? json.current : "",
     url: json.url,
     source: json.source,
   };

@@ -564,6 +564,7 @@ class RenderWindow(PromptManager):
             documents['generated_images'],
             status=self._status,
             emit_image=self._emit_image,
+            checkpoint=getattr(self.opts, 'sd_model', '') or '',
         )
         prompt = ChatPromptTemplate.from_messages([
             ('system', (

@@ -58,6 +58,60 @@ def _get(url: str, timeout: float = 5.0) -> Any:
         return json.loads(resp.read().decode('utf-8', errors='replace'))
 
 
+def _txt2img_payload(
+    prompt: str,
+    negative_prompt: str = '',
+    steps: int = 20,
+    width: int = 768,
+    height: int = 768,
+    seed: int = -1,
+    checkpoint: str = '',
+) -> dict[str, Any]:
+    """Body for /sdapi/v1/txt2img, including an optional checkpoint swap."""
+    payload: dict[str, Any] = {
+        'prompt': prompt,
+        'negative_prompt': negative_prompt or '',
+        'steps': max(1, min(50, int(steps or 20))),
+        'width': _align(width),
+        'height': _align(height),
+        'cfg_scale': 7,
+        'seed': int(seed),
+        'sampler_name': 'Euler a',
+    }
+    if (checkpoint or '').strip():
+        payload['override_settings'] = {
+            'sd_model_checkpoint': checkpoint.strip(),
+        }
+        payload['override_settings_restore_afterwards'] = False
+    return payload
+
+
+def _img2img_payload(
+    b64: str,
+    prompt: str,
+    negative_prompt: str = '',
+    denoising: float = 0.45,
+    steps: int = 20,
+    checkpoint: str = '',
+) -> dict[str, Any]:
+    """Body for /sdapi/v1/img2img."""
+    payload: dict[str, Any] = {
+        'prompt': prompt,
+        'negative_prompt': negative_prompt or '',
+        'init_images': [b64],
+        'denoising_strength': max(0.05, min(0.95, float(denoising or 0.45))),
+        'steps': max(1, min(50, int(steps or 20))),
+        'cfg_scale': 7,
+        'sampler_name': 'Euler a',
+    }
+    if (checkpoint or '').strip():
+        payload['override_settings'] = {
+            'sd_model_checkpoint': checkpoint.strip(),
+        }
+        payload['override_settings_restore_afterwards'] = False
+    return payload
+
+
 def ping_sd(host: str, timeout: float = 5.0) -> dict[str, Any]:
     """List Automatic1111 checkpoints. OpenAI /models will not work here."""
     origin = normalize_sd_url(host)
@@ -81,7 +135,17 @@ def ping_sd(host: str, timeout: float = 5.0) -> dict[str, Any]:
                 names.append(str(ident))
         elif isinstance(item, str) and item:
             names.append(item)
-    return {'ok': True, 'error': None, 'models': names, 'url': url, 'source': 'automatic1111'}
+    current = ''
+    try:
+        opts = _get(f'{origin}/sdapi/v1/options', timeout=timeout)
+        if isinstance(opts, dict):
+            current = str(opts.get('sd_model_checkpoint') or '')
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError):
+        current = ''
+    return {
+        'ok': True, 'error': None, 'models': names, 'current': current,
+        'url': url, 'source': 'automatic1111',
+    }
 
 
 def txt2img(
@@ -92,22 +156,17 @@ def txt2img(
     width: int = 768,
     height: int = 768,
     seed: int = -1,
+    checkpoint: str = '',
     timeout: float = 180.0,
 ) -> bytes:
     """POST /sdapi/v1/txt2img and return the first PNG/JPEG bytes."""
     origin = normalize_sd_url(host)
     if not origin:
         raise RuntimeError('Stable Diffusion URL is empty.')
-    payload = {
-        'prompt': prompt,
-        'negative_prompt': negative_prompt or '',
-        'steps': max(1, min(50, int(steps or 20))),
-        'width': _align(width),
-        'height': _align(height),
-        'cfg_scale': 7,
-        'seed': int(seed),
-        'sampler_name': 'Euler a',
-    }
+    payload = _txt2img_payload(
+        prompt, negative_prompt=negative_prompt, steps=steps,
+        width=width, height=height, seed=seed, checkpoint=checkpoint,
+    )
     data = _post(f'{origin}/sdapi/v1/txt2img', payload, timeout)
     images = data.get('images') if isinstance(data, dict) else None
     if not isinstance(images, list) or not images:
@@ -122,6 +181,7 @@ def img2img(
     negative_prompt: str = '',
     denoising: float = 0.45,
     steps: int = 20,
+    checkpoint: str = '',
     timeout: float = 180.0,
 ) -> bytes:
     """POST /sdapi/v1/img2img using a PNG/JPEG already on disk."""
@@ -129,15 +189,10 @@ def img2img(
     if not origin:
         raise RuntimeError('Stable Diffusion URL is empty.')
     b64 = base64.b64encode(image_bytes).decode('ascii')
-    payload = {
-        'prompt': prompt,
-        'negative_prompt': negative_prompt or '',
-        'init_images': [b64],
-        'denoising_strength': max(0.05, min(0.95, float(denoising or 0.45))),
-        'steps': max(1, min(50, int(steps or 20))),
-        'cfg_scale': 7,
-        'sampler_name': 'Euler a',
-    }
+    payload = _img2img_payload(
+        b64, prompt, negative_prompt=negative_prompt,
+        denoising=denoising, steps=steps, checkpoint=checkpoint,
+    )
     data = _post(f'{origin}/sdapi/v1/img2img', payload, timeout)
     images = data.get('images') if isinstance(data, dict) else None
     if not isinstance(images, list) or not images:

@@ -200,10 +200,14 @@ export function useSend() {
               patch({
                 content,
                 reasoning: reasoning || undefined,
-                status: content ? undefined : "Streaming…",
-                streamingModel: content ? undefined : model || undefined,
-                streamingRoute: content ? undefined : route || undefined,
-                streamingContext: content ? undefined : context || undefined,
+                status: content
+                  ? "Streaming…"
+                  : reasoning
+                    ? "Reasoning…"
+                    : "Streaming…",
+                streamingModel: model || undefined,
+                streamingRoute: route || undefined,
+                streamingContext: context || undefined,
               });
             } else if (event.type === "reasoning") {
               if (first) {
@@ -213,10 +217,10 @@ export function useSend() {
               reasoning += event.content;
               patch({
                 reasoning,
-                status: content ? undefined : "Streaming…",
-                streamingModel: content ? undefined : model || undefined,
-                streamingRoute: content ? undefined : route || undefined,
-                streamingContext: content ? undefined : context || undefined,
+                status: content ? "Streaming…" : "Reasoning…",
+                streamingModel: model || undefined,
+                streamingRoute: route || undefined,
+                streamingContext: context || undefined,
               });
             } else if (event.type === "usage") {
               promptTokens = event.promptTokens;
@@ -618,7 +622,7 @@ async function generateViaChatPy(
             ...(recalling
               ? {}
               : {
-                  status: "Streaming…",
+                  status: content ? "Streaming…" : "Reasoning…",
                   streamingModel: model || undefined,
                   streamingRoute: route || undefined,
                   streamingContext: context || undefined,

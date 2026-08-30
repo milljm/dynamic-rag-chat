@@ -10,6 +10,7 @@ from sd_client import (  # noqa: E402
     magick_argv,
     normalize_sd_url,
     sd_enabled,
+    _txt2img_payload,
 )
 
 
@@ -34,6 +35,16 @@ class SdClientTest(unittest.TestCase):
             magick_argv('resize', '$(reboot)')
         with self.assertRaises(ValueError):
             magick_argv('explode', '1')
+
+    def test_checkpoint_override(self):
+        body = _txt2img_payload('a cat', checkpoint='dreamshaper_8')
+        self.assertEqual(
+            body['override_settings']['sd_model_checkpoint'],
+            'dreamshaper_8',
+        )
+        self.assertFalse(body['override_settings_restore_afterwards'])
+        plain = _txt2img_payload('a cat')
+        self.assertNotIn('override_settings', plain)
 
 
 if __name__ == '__main__':

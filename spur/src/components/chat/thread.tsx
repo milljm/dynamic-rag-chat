@@ -21,6 +21,7 @@ import {
 import { ThemeToggle } from "./theme-toggle";
 import { SettingsButton } from "./settings-panel";
 import { Markdown } from "./markdown";
+import { ChatImage } from "./chat-image";
 
 const NEAR_BOTTOM = 96;
 
@@ -241,10 +242,10 @@ function MessageBubble({
               <li key={att.id} className="text-xs text-muted-foreground">
                 {att.name}
                 {att.kind === "image" && att.dataUrl && (
-                  <img
+                  <ChatImage
                     src={att.dataUrl}
                     alt={att.name}
-                    className="mt-2 max-h-48 rounded-sm outline outline-1 -outline-offset-1 outline-foreground/10"
+                    name={att.name}
                   />
                 )}
               </li>
@@ -410,7 +411,7 @@ function StatusLine({
     );
   }
   const showModel =
-    Boolean(model) && /^(Streaming|Processing Prompt)/i.test(label);
+    Boolean(model) && /^(Streaming|Processing Prompt|Reasoning)/i.test(label);
   return (
     <p className="text-sm text-muted-foreground">
       <span className="shimmer-text">{label}</span>

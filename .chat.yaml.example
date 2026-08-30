@@ -200,6 +200,7 @@
                                         # Leave empty if not using Tavily
 
    sd_server: http://127.0.0.1:7860     # Automatic1111 with --api. Blank disables image gen.
+   sd_model:                            # Checkpoint title from A1111. Blank = whatever is loaded.
 
    # ---------------------------------------------------------------------------
    # UI / UX

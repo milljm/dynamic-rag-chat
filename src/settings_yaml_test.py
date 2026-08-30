@@ -143,6 +143,10 @@ class SettingsYamlTest(unittest.TestCase):
             read_values(out)['sd_server'], 'http://192.168.1.9:7860',
         )
 
+    def test_sd_model_roundtrip(self):
+        out = upsert_keys(SAMPLE, {'sd_model': 'dreamshaper_8'})
+        self.assertEqual(read_values(out)['sd_model'], 'dreamshaper_8')
+
 
 
 if __name__ == '__main__':

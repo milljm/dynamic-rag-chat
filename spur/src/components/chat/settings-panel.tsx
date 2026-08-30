@@ -144,6 +144,7 @@ function SettingsPanel({
   const [details, setDetails] = useState<ModelInfo[]>([]);
   const [pingNote, setPingNote] = useState("");
   const [sdNote, setSdNote] = useState("");
+  const [sdModels, setSdModels] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [pinging, setPinging] = useState(false);
   const [sdPinging, setSdPinging] = useState(false);
@@ -206,6 +207,25 @@ function SettingsPanel({
           if (!cancelled && ping.ok) applyPing(ping);
           else if (!cancelled) setPingNote(ping.error || "unreachable");
         }
+        if (merged.sd_server) {
+          const sd = await pingSd(merged.sd_server);
+          if (cancelled) return;
+          if (sd.ok) {
+            setSdModels(sd.models);
+            setSdNote(
+              sd.current
+                ? `${sd.models.length} checkpoints · loaded`
+                : `${sd.models.length} checkpoints`,
+            );
+            if (sd.current && !merged.sd_model) {
+              setValues((prev) =>
+                prev ? { ...prev, sd_model: sd.current || "" } : prev,
+              );
+            }
+          } else {
+            setSdNote(sd.error || "unreachable");
+          }
+        }
       } catch (err) {
         if (!cancelled) toast.error(String(err));
       }
@@ -249,7 +269,15 @@ function SettingsPanel({
     try {
       const ping = await pingSd(values.sd_server);
       if (ping.ok) {
-        setSdNote(`${ping.models.length} checkpoints`);
+        setSdModels(ping.models);
+        setSdNote(
+          ping.current
+            ? `${ping.models.length} checkpoints · loaded`
+            : `${ping.models.length} checkpoints`,
+        );
+        if (ping.current && !values.sd_model) {
+          patch("sd_model", ping.current);
+        }
         toast.success(`Automatic1111 — ${ping.models.length} checkpoints`);
       } else {
         setSdNote(ping.error || "unreachable");
@@ -371,6 +399,18 @@ function SettingsPanel({
                     placeholder="http://127.0.0.1:7860"
                     autoComplete="off"
                     spellCheck={false}
+                  />
+                </Field>
+                <Field
+                  label="Checkpoint"
+                  hint="Swaps the A1111 model on the next generate. Blank keeps whatever is loaded."
+                >
+                  <ModelSelect
+                    value={values.sd_model}
+                    onChange={(v) => patch("sd_model", v)}
+                    models={sdModels}
+                    details={[]}
+                    emptyLabel="A1111 default"
                   />
                 </Field>
                 <div className="flex items-center gap-2">
