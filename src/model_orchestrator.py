@@ -144,10 +144,7 @@ class Orchestration():
         return wants_sd(query, has_last=has_last)
 
     def sd_llm(self):
-        """Vision if set (can see the result), else the tool agent, else general."""
-        vision = self.__llm.get('vision')
-        if vision is not None and vision.model_name != 'None':
-            return vision
+        """Tool-calling model that writes A1111 prompts. Vision is not used."""
         agent = self.__llm.get('agent')
         if agent is not None and agent.model_name != 'None':
             return agent

@@ -29,12 +29,7 @@ from .context_manager import ContextManager # For Type Hinting
 from .chat_utils import CommonUtils, ChatOptions, RAGTag # For Type Hinting
 from .model_orchestrator import Orchestration, MAX_AGENT_CALLS
 from .agent_tools import DuckDuckGoSearchTool
-from .sd_client import (
-    MAGICK_QUERY,
-    about_last_image,
-    vision_thumb_data_url,
-    wants_sd,
-)
+from .sd_client import MAGICK_QUERY, has_generated_images, vision_thumb_data_url
 from .think_tags import ThinkFeed, chunk_text, split_think
 from .sd_tools import make_sd_tools, seed_last_generated
 from .gold_fetch import MAX_GOLD_FETCHES, take_need_gold, recall_status
@@ -580,8 +575,8 @@ class RenderWindow(PromptManager):
             allow_magick=allow_magick,
         )
         last_hint = (
-            f'The last picture on disk is {last_name}. It is attached — LOOK AT IT. '
-            'If the user wants a change (darker, mood, content), img2img that once. '
+            f'The last picture on disk is {last_name}. '
+            'If the user wants a change (darker, larger, mood), img2img that once. '
             if last_name else
             'No previous picture. Use txt2img once.'
         )
@@ -590,33 +585,19 @@ class RenderWindow(PromptManager):
             if allow_magick else
             'Do not call imagemagick. Do not add a border.'
         )
-        last_url = ''
-        if prior:
-            last_url = str(prior[-1].get('dataUrl') or '')
-        user_content: list[dict] = [
-            {'type': 'text', 'text': str(documents.get('original_user_query') or '')},
-        ]
-        if last_url:
-            thumb = vision_thumb_data_url(
-                last_url, src_path=str(prior[-1].get('path') or ''),
-            )
-            if thumb:
-                user_content.append(
-                    {'type': 'image_url', 'image_url': {'url': thumb}},
-                )
         prompt = ChatPromptTemplate.from_messages([
             ('system', (
                 'You create or edit one image this turn, then stop.\n'
                 '- New picture → txt2img once (detailed visual prompt).\n'
-                '- Change to the last picture (darker, mood, content) → img2img once. '
-                'The last picture is attached. Work from what you SEE, not a guess.\n'
+                '- Change to the last picture → img2img once (describe the change).\n'
+                'You do not see the pixels. Do not critique or describe the image.\n'
                 f'{magick_hint}\n'
                 'Never generate a second time to "improve" it.\n'
                 f'{last_hint}'
                 'Keep tool chatter short. Do not mention Automatic1111 or pipelines. '
                 'Do not explain Photoshop.'
             )),
-            MessagesPlaceholder(variable_name='input_messages'),
+            ('user', '{input}'),
             MessagesPlaceholder(variable_name='agent_scratchpad'),
         ])
         agent = create_openai_tools_agent(self.llm, tools, prompt)
@@ -632,7 +613,6 @@ class RenderWindow(PromptManager):
             )
             result = agent_executor.invoke({
                 'input': documents['original_user_query'],
-                'input_messages': [HumanMessage(content=user_content)],
             })
             documents['dynamic_files'] += f'\n=== IMAGE_GEN ===\n{result}\n\n'
         except KeyboardInterrupt:
@@ -648,16 +628,8 @@ class RenderWindow(PromptManager):
                 'ERROR: image generation failed. Tell the user you could not make the picture. '
                 'Do not mention tools or pipelines.\n\n'
             )
-        vision = self.orchestrator.get_model('vision')
-        urls = [
-            rec['dataUrl'] for rec in documents.get('generated_images') or []
-            if rec.get('dataUrl') and not rec.get('prior')
-        ]
-        if urls and vision is not None and vision.model_name != 'None':
-            documents['dynamic_images'] = [urls[-1]]
-            documents['has_last_image'] = True
-        else:
-            documents['dynamic_images'] = []
+        documents['dynamic_images'] = []
+        documents['has_last_image'] = True
         names = [
             rec.get('name', '') for rec in documents.get('generated_images') or []
             if rec.get('name') and not rec.get('prior')
@@ -668,27 +640,12 @@ class RenderWindow(PromptManager):
             )
         return self.get_messages(meta_data, documents, polish=polish)
 
-    def _attach_last_image(self, documents: dict) -> None:
-        """Give vision the last generated PNG so small-talk is about THAT picture."""
-        if documents.get('dynamic_images'):
+    def _note_last_image(self, documents: dict) -> None:
+        """Flag that a generated picture is on screen. Do not send pixels to the LLM."""
+        if documents.get('has_last_image'):
             return
-        if not getattr(self.opts, 'assistant_mode', False):
-            return
-        query = str(documents.get('user_query') or '')
-        if not (wants_sd(query, True) or about_last_image(query)):
-            return
-        folder = os.path.join(str(self.opts.vector_dir), 'generated')
-        prior = seed_last_generated(folder, limit=1)
-        if not prior:
-            return
-        thumb = vision_thumb_data_url(
-            prior[-1].get('dataUrl') or '',
-            src_path=str(prior[-1].get('path') or ''),
-        )
-        if not thumb:
-            return
-        documents['dynamic_images'] = [thumb]
-        documents['has_last_image'] = True
+        if has_generated_images(getattr(self.opts, 'vector_dir', '') or ''):
+            documents['has_last_image'] = True
 
     def get_messages(self,
                      meta_data: RAGTag,
@@ -696,7 +653,7 @@ class RenderWindow(PromptManager):
                      polish: bool = False)->list[Document]:
         """ return formatted message to be sent to LLM stream """
         prompts = self.prompts
-        self._attach_last_image(documents)
+        self._note_last_image(documents)
         if polish:
             self.llm = self.orchestrator.get_model('polisher')
         else:

@@ -476,10 +476,10 @@ function SettingsPanel({
                   Stable Diffusion
                 </summary>
                   <p className="mt-2 text-[11px] text-muted-foreground">
-                    Enabling this needs a multimodal model with tool calling
-                    (set Vision, or Agent). It writes the A1111 prompt and
-                    looks at the result. A text-only model cannot run this
-                    route.
+                    Needs a model that can call tools (set Agent, or it uses
+                    the generator). Vision is not used — the picture lands in
+                    the chat. The agent writes the prompt; it does not look
+                    at the pixels.
                   </p>
                   <div className="mt-3 grid gap-3">
                     <Field
