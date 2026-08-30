@@ -7,6 +7,7 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 import urllib.error
 import urllib.request
 from typing import Any
@@ -85,9 +86,92 @@ def has_generated_images(vector_dir: str) -> bool:
     if not os.path.isdir(folder):
         return False
     for name in os.listdir(folder):
-        if name.lower().endswith(('.png', '.jpg', '.jpeg', '.webp')):
+        if is_generated_picture(name):
             return True
     return False
+
+
+VISION_THUMB = 512
+_THUMB_NAME = re.compile(r'\.v\d+\.png$', re.I)
+
+
+def is_generated_picture(name: str) -> bool:
+    """True for a user-facing PNG/JPEG, not a vision sidecar thumb."""
+    lower = (name or '').lower()
+    if _THUMB_NAME.search(lower):
+        return False
+    return lower.endswith(('.png', '.jpg', '.jpeg', '.webp'))
+
+
+def _png_data_url(blob: bytes) -> str:
+    return f'data:image/png;base64,{base64.b64encode(blob).decode("ascii")}'
+
+
+def _image_bytes(raw: str | bytes) -> bytes:
+    """PNG/JPEG bytes from a data URL, bare base64, or raw bytes."""
+    if isinstance(raw, (bytes, bytearray)):
+        return bytes(raw)
+    text = str(raw or '').strip()
+    if text.startswith('data:') and ',' in text:
+        text = text.split(',', 1)[1]
+    try:
+        return base64.b64decode(text)
+    except Exception:  # pylint: disable=broad-exception-caught
+        return b''
+
+
+def _resize_file(src: str, dest: str, size: int) -> bytes:
+    """ImageMagick fit-inside size×size, no upscale. Empty bytes on miss."""
+    binary = shutil.which('magick') or shutil.which('convert')
+    if not binary:
+        return b''
+    cmd = [binary]
+    if os.path.basename(binary) == 'magick':
+        cmd.append('convert')
+    cmd.extend([src, '-resize', f'{int(size)}x{int(size)}>', dest])
+    proc = subprocess.run(cmd, check=False, capture_output=True, text=True)
+    if proc.returncode != 0 or not os.path.isfile(dest):
+        return b''
+    with open(dest, 'rb') as handle:
+        return handle.read()
+
+
+def vision_thumb_data_url(
+    raw: str | bytes = '',
+    src_path: str = '',
+    size: int = VISION_THUMB,
+) -> str:
+    """Data URL fit inside size×size for the LLM. Original file is untouched."""
+    size = int(size or VISION_THUMB)
+    if src_path and os.path.isfile(src_path):
+        cache = f'{src_path}.v{size}.png'
+        try:
+            if (os.path.isfile(cache)
+                    and os.path.getmtime(cache) >= os.path.getmtime(src_path)):
+                with open(cache, 'rb') as handle:
+                    return _png_data_url(handle.read())
+        except OSError:
+            pass
+        blob = _resize_file(src_path, cache, size)
+        if blob:
+            return _png_data_url(blob)
+        with open(src_path, 'rb') as handle:
+            return _png_data_url(handle.read())
+    incoming = _image_bytes(raw)
+    original = (
+        raw if isinstance(raw, str) and str(raw).startswith('data:') else ''
+    )
+    if not incoming:
+        return original
+    with tempfile.TemporaryDirectory() as tmp:
+        src = os.path.join(tmp, 'in.png')
+        dest = os.path.join(tmp, 'out.png')
+        with open(src, 'wb') as handle:
+            handle.write(incoming)
+        blob = _resize_file(src, dest, size)
+        if blob:
+            return _png_data_url(blob)
+    return original or _png_data_url(incoming)
 
 
 def sd_enabled(host: str | None) -> bool:

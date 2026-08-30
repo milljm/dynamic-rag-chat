@@ -8,7 +8,7 @@ from typing import Any, Callable
 
 from langchain_core.tools import StructuredTool
 
-from .sd_client import img2img, run_magick, txt2img
+from .sd_client import img2img, is_generated_picture, run_magick, txt2img
 
 
 def _data_url(blob: bytes, mime: str = 'image/png') -> str:
@@ -40,7 +40,7 @@ def seed_last_generated(folder: str, limit: int = 1) -> list[dict[str, Any]]:
         return []
     names = [
         n for n in os.listdir(folder)
-        if n.lower().endswith(('.png', '.jpg', '.jpeg', '.webp'))
+        if is_generated_picture(n)
     ]
     paths = sorted(
         (os.path.join(folder, n) for n in names),

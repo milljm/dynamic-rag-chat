@@ -29,7 +29,12 @@ from .context_manager import ContextManager # For Type Hinting
 from .chat_utils import CommonUtils, ChatOptions, RAGTag # For Type Hinting
 from .model_orchestrator import Orchestration, MAX_AGENT_CALLS
 from .agent_tools import DuckDuckGoSearchTool
-from .sd_client import MAGICK_QUERY, about_last_image, wants_sd
+from .sd_client import (
+    MAGICK_QUERY,
+    about_last_image,
+    vision_thumb_data_url,
+    wants_sd,
+)
 from .think_tags import ThinkFeed, chunk_text, split_think
 from .sd_tools import make_sd_tools, seed_last_generated
 from .gold_fetch import MAX_GOLD_FETCHES, take_need_gold, recall_status
@@ -396,7 +401,9 @@ class RenderWindow(PromptManager):
                 {
                     'type': 'image_url',
                     'image_url': {
-                        'url': RenderWindow._as_image_data_url(img_b64),
+                        'url': vision_thumb_data_url(
+                            RenderWindow._as_image_data_url(img_b64),
+                        ),
                     }
                 }
                 for img_b64 in images
@@ -591,7 +598,10 @@ class RenderWindow(PromptManager):
             {'type': 'text', 'text': str(documents.get('original_user_query') or '')},
         ]
         if last_url:
-            user_content.append({'type': 'image_url', 'image_url': {'url': last_url}})
+            thumb = vision_thumb_data_url(
+                last_url, src_path=str(prior[-1].get('path') or ''),
+            )
+            user_content.append({'type': 'image_url', 'image_url': {'url': thumb}})
         prompt = ChatPromptTemplate.from_messages([
             ('system', (
                 'You create or edit one image this turn, then stop.\n'

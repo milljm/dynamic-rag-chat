@@ -8,9 +8,11 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from sd_client import (  # noqa: E402
     about_last_image,
+    is_generated_picture,
     magick_argv,
     normalize_sd_url,
     sd_enabled,
+    vision_thumb_data_url,
     wants_sd,
     _txt2img_payload,
 )
@@ -69,6 +71,18 @@ class SdClientTest(unittest.TestCase):
         self.assertTrue(about_last_image('love the eyes'))
         self.assertFalse(wants_sd('what is a fox'))
         self.assertFalse(about_last_image('how do I write a for loop'))
+
+    def test_vision_sidecars_are_not_pictures(self):
+        self.assertTrue(is_generated_picture('txt2img-120000-abc.png'))
+        self.assertFalse(is_generated_picture('txt2img-120000-abc.png.v512.png'))
+
+    def test_vision_thumb_returns_data_url(self):
+        tiny = (
+            'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4'
+            '2mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
+        )
+        url = vision_thumb_data_url(f'data:image/png;base64,{tiny}')
+        self.assertTrue(url.startswith('data:image/png;base64,'))
 
 
 if __name__ == '__main__':

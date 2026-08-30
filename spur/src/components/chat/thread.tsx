@@ -35,6 +35,7 @@ export function Thread({
   const currentId = useChatStore((s) => s.currentId);
   const branch = useChatStore((s) => s.branches[s.currentId]);
   const scrollerRef = useRef<HTMLDivElement>(null);
+  const innerRef = useRef<HTMLDivElement>(null);
   const pinnedRef = useRef(true);
   const [pinned, setPinned] = useState(true);
 
@@ -59,6 +60,17 @@ export function Thread({
     const el = scrollerRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [branch?.messages, streaming]);
+
+  useEffect(() => {
+    const el = scrollerRef.current;
+    const inner = innerRef.current;
+    if (!el || !inner) return;
+    const ro = new ResizeObserver(() => {
+      if (pinnedRef.current) el.scrollTop = el.scrollHeight;
+    });
+    ro.observe(inner);
+    return () => ro.disconnect();
+  }, [currentId]);
 
   if (!branch) return null;
 
@@ -108,6 +120,13 @@ export function Thread({
           ref={scrollerRef}
           className="h-full overflow-y-auto [overflow-anchor:none]"
           onScroll={(e) => {
+            if (streaming) {
+              if (!pinnedRef.current) {
+                pinnedRef.current = true;
+                setPinned(true);
+              }
+              return;
+            }
             const el = e.currentTarget;
             const near =
               el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM;
@@ -117,7 +136,10 @@ export function Thread({
             }
             }}
         >
-          <div className="mx-auto flex max-w-3xl flex-col gap-5 px-4 py-6 md:px-8">
+          <div
+            ref={innerRef}
+            className="mx-auto flex max-w-3xl flex-col gap-5 px-4 py-6 md:px-8"
+          >
             {branch.messages.length === 0 ? (
               <EmptyState
                 name={branch.name}
