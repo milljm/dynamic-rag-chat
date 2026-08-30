@@ -475,6 +475,12 @@ function SettingsPanel({
                 <summary className="cursor-pointer text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                   Stable Diffusion
                 </summary>
+                  <p className="mt-2 text-[11px] text-muted-foreground">
+                    Enabling this needs a multimodal model with tool calling
+                    (set Vision, or Agent). It writes the A1111 prompt and
+                    looks at the result. A text-only model cannot run this
+                    route.
+                  </p>
                   <div className="mt-3 grid gap-3">
                     <Field
                       label="Automatic1111"
