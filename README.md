@@ -95,7 +95,7 @@ That is the whole product: targeted context, not a bigger window.
   Summarize {{https://example.com/article}}
   ```
 - **Agents** — pre-processor can request a web search (threshold via `--distrust-confidence`), or force it with `\agent …`. The agent may re-search once more (cap 2) if the first dump looks thin.
-- **Stable Diffusion** — Settings → Automatic1111 URL (`--sd-server`). Assistant: Image toggle (or `\image …`) for txt2img / img2img; **New ↻** starts a fresh picture. Story: Image is a one-click still of the current beat (location + character sheets). The PNG lands in chat — no follow-up LLM. Needs a tool-calling model (Agent). ImageMagick is optional for borders / captions (`conda install -c conda-forge imagemagick` — not on pip). Needs `--api` on A1111.
+- **Stable Diffusion** — Settings → Automatic1111 URL (`--sd-server`). Never auto-routes: turn **Image** on in assistant (or click Image in story). Assistant: toggle + **New ↻**. Story: one-click still of the current beat. PNG lands in chat — no follow-up LLM. Needs a tool-calling model (Agent). ImageMagick is optional (`conda install -c conda-forge imagemagick`). Needs `--api` on A1111.
 - **Think tags** — MiniMax `<mm:think>`, `<think>`, and null-token reasoners are split out of the visible stream. Spur has a Reasoning disclosure.
 - **Debug** — `--debug` / `--prompts-debug` dumps prompts, tags, and RAG payloads
 

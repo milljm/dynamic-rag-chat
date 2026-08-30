@@ -68,7 +68,7 @@ from src.settings_yaml import (  # noqa: E402
     load_file as load_settings_file,
     save_file as save_settings_file,
 )
-from src.sd_client import ping_sd, wants_sd, has_generated_images  # noqa: E402
+from src.sd_client import ping_sd  # noqa: E402
 from src.sd_session import clear_session  # noqa: E402
 
 LOCKED_BRANCHES = frozenset({'assistant', 'story'})
@@ -957,10 +957,7 @@ def _prepare_chat_documents(chat, body: dict) -> tuple[dict, list]:
         documents['sd_ran'] = False
         documents['in_line_commands'] = 'Meta: [image]'
     elif chat.opts.assistant_mode:
-        query = str(documents.get('user_query') or parsed.clean_text or prompt or '')
-        has_last = has_generated_images(str(chat.opts.vector_dir))
-        if not wants_sd(query, has_last=has_last):
-            clear_session(str(chat.opts.vector_dir))
+        clear_session(str(chat.opts.vector_dir))
     if body.get('illustrateScene') and not chat.opts.assistant_mode:
         documents['illustrate_scene'] = True
         documents['use_sd'] = True

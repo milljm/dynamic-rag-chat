@@ -2,7 +2,7 @@
 import re
 from langchain_openai import ChatOpenAI
 from .chat_utils import ChatOptions, RAGTag # For Type Hinting
-from .sd_client import has_generated_images, sd_enabled, wants_sd
+from .sd_client import sd_enabled
 
 MAX_AGENT_CALLS = 2
 # Tagger often scores these 1.0 anyway; force a search when the query is live.
@@ -131,7 +131,7 @@ class Orchestration():
         return False
 
     def requires_sd(self, documents: dict | None = None) -> bool:
-        """True when this turn should run the Automatic1111 image agent."""
+        """True only when Image is on (use_sd) or story illustrate."""
         documents = documents or {}
         if not sd_enabled(getattr(self.args, 'sd_server', '')):
             return False
@@ -143,9 +143,7 @@ class Orchestration():
             return False
         if documents.get('use_sd'):
             return True
-        query = str(documents.get('user_query') or '')
-        has_last = has_generated_images(getattr(self.args, 'vector_dir', '') or '')
-        return wants_sd(query, has_last=has_last)
+        return False
 
     def sd_llm(self):
         """Tool-calling model that writes A1111 prompts. Vision is not used."""
