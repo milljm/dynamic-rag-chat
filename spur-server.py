@@ -69,7 +69,7 @@ from src.settings_yaml import (
 )
 from src.sd_client import ping_sd, sd_enabled
 from src.sd_session import clear_session
-
+from src.prompt_progress import PromptProgress, format_prompt_status
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 
@@ -1051,6 +1051,13 @@ def _iter_sse_chunks(
         announced_stream = False
         try:
             for chunk in chunks:
+                if isinstance(chunk, PromptProgress):
+                    yield _status_sse(
+                        format_prompt_status(chunk.fraction),
+                        model or '', route or '', context or 0,
+                        recalled,
+                    )
+                    continue
                 if first:
                     ttft = time.time() - started
                     first = False
