@@ -4,6 +4,7 @@ import sys
 from .chat_utils import ChatOptions # For Type Hinting
 from .sd_client import has_generated_images
 
+# pylint: disable=no-member  # (build_prompts construct members on class init)
 class PromptManager():
     """
     Handle all the possible prompt files we may introduce with RAG/Tagging
@@ -19,6 +20,8 @@ class PromptManager():
         self.prompt_model = prompt_model
         self.model = self._match_model(prompt_model)
         self.current_dir = current_dir
+        # instance build_prompts to kick start member availability
+        self.build_prompts()
 
     def _match_model(self, model: str)->str:
         """ attempt to match model, default to 'default' """
@@ -27,7 +30,7 @@ class PromptManager():
         supported = ['gemma', 'llama', 'qwen', 'deepseek', 'mixtral']
         return next((x for x in supported if x in model.lower()), 'default')
 
-    def build_prompts(self):
+    def build_prompts(self) -> None:
         """
         A way to manage a growing number of prompt templates
         {key : value} pairs become self.key_* : contents-of-file
