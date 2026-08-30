@@ -17,12 +17,11 @@ from typing import Any, Mapping, Optional
 from typing import NamedTuple
 import pytz
 import yaml
+from langchain_core.documents import Document
+from pypdf import PdfReader
 
 def load_pdf(path: str) -> list:
     """Read a PDF with pypdf. Replaces langchain_community.PyPDFLoader."""
-    from pypdf import PdfReader
-    from langchain_core.documents import Document
-
     reader = PdfReader(path)
     docs = []
     for i, page in enumerate(reader.pages):

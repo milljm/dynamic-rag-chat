@@ -19,6 +19,7 @@ disable=
     duplicate-code,
     consider-using-f-string,
     import-error,
+    wrong-import-position,  # sys.path.insert must precede local imports in test files
 
 [DESIGN]
 max-statements=50

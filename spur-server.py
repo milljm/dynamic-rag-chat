@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# pylint: disable=line-too-long,too-many-lines  # Wrapper file containing all GUI adaptation code
+
 """
 Spur adapter — drop this next to chat.py.
 
@@ -40,12 +42,9 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from rich.console import Console
 
-ROOT = os.path.dirname(os.path.abspath(__file__))
-if os.path.basename(ROOT) == 'public':
-    ROOT = os.path.dirname(ROOT)
-sys.path.insert(0, ROOT)
-
-from chat import (  # noqa: E402
+# Import local modules. The project root is automatically in sys.path
+# when running python spur-server.py from the repo root.
+from chat import (
     Chat,
     ChatOptions,
     SessionContext,
@@ -53,23 +52,26 @@ from chat import (  # noqa: E402
     parse_user_input,
     seed_from_string,
 )
-from src.think_tags import ThinkFeed  # noqa: E402
-from src.gold_fetch import GoldNeedFeed, MAX_GOLD_FETCHES, recall_status  # noqa: E402
-from src.attachment_store import list_attachments  # noqa: E402
-from src.chat_utils import (  # noqa: E402
+from src.think_tags import ThinkFeed
+from src.gold_fetch import GoldNeedFeed, MAX_GOLD_FETCHES, recall_status
+from src.attachment_store import list_attachments
+from src.chat_utils import (
     HISTORY_META_KEYS,
     CommonUtils,
     load_history_from_dir,
 )
-from src.settings_yaml import (  # noqa: E402
+from src.settings_yaml import (
     ALL_KEYS,
     blank,
     list_models,
     load_file as load_settings_file,
     save_file as save_settings_file,
 )
-from src.sd_client import ping_sd, sd_enabled  # noqa: E402
-from src.sd_session import clear_session  # noqa: E402
+from src.sd_client import ping_sd, sd_enabled
+from src.sd_session import clear_session
+
+
+ROOT = os.path.dirname(os.path.abspath(__file__))
 
 LOCKED_BRANCHES = frozenset({'assistant', 'story'})
 # Metadata keys in the history file — not message lists.
