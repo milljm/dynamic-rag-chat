@@ -120,22 +120,17 @@ export function Thread({
         <div
           ref={scrollerRef}
           className="h-full overflow-y-auto [overflow-anchor:none]"
+          onWheel={(e) => {
+            if (e.deltaY < 0) releasePin();
+          }}
           onScroll={(e) => {
-            if (streaming) {
-              if (!pinnedRef.current) {
-                pinnedRef.current = true;
-                setPinned(true);
-              }
-              return;
-            }
             const el = e.currentTarget;
             const near =
               el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM;
-            if (near !== pinnedRef.current) {
-              pinnedRef.current = near;
-              setPinned(near);
-            }
-            }}
+            if (near === pinnedRef.current) return;
+            pinnedRef.current = near;
+            setPinned(near);
+          }}
         >
           <div
             ref={innerRef}
