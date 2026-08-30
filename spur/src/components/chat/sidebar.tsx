@@ -321,7 +321,7 @@ function lastAssistantPreview(branch: Branch): string {
     .find((m) => m.role === "assistant" && m.content);
   if (!last) return "";
   const flat = last.content.replace(/\s+/g, " ").trim();
-  return flat.length > 42 ? `${flat.slice(0, 42)}…` : flat;
+  return flat.length > 52 ? `${flat.slice(0, 52)}…` : flat;
 }
 
 function CreateBranchForm({
