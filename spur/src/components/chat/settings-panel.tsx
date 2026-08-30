@@ -19,8 +19,11 @@ import { Input } from "@/components/ui/input";
 const fieldClass =
   "flex h-10 w-full rounded-sm bg-secondary px-3 text-sm text-foreground shadow-[var(--shadow-border)] transition-[box-shadow] duration-150 placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70 disabled:cursor-not-allowed disabled:opacity-50";
 
+const fieldLabelClass =
+  "text-[11px] font-medium uppercase tracking-wide text-muted-foreground";
+
 const modelLabelClass =
-  "text-xs font-medium uppercase tracking-[0.22em] text-turn";
+  "font-display text-[13px] font-semibold uppercase tracking-[0.32em] text-route";
 
 function Field({
   label,
@@ -33,7 +36,7 @@ function Field({
 }) {
   return (
     <label className="grid gap-1">
-      <span className={modelLabelClass}>
+      <span className={fieldLabelClass}>
         {label}
       </span>
       {children}
