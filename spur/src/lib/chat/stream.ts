@@ -19,7 +19,7 @@ export type ChatEvent =
   | { type: "usage"; promptTokens: number; completionTokens: number; model: string; tokenSavings?: number }
   | { type: "error"; error: string }
   | { type: "documents"; documents: { name: string; chars: number }[] }
-  | { type: "image"; name: string; mime?: string; dataUrl: string; size?: number }
+  | { type: "image"; name: string; mime?: string; dataUrl: string; size?: number; prompt?: string; negative?: string }
   | { type: "done" };
 
 export async function streamSse(

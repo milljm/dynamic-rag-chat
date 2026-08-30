@@ -654,6 +654,8 @@ async function generateViaChatPy(
                 kind: "image" as const,
                 dataUrl: event.dataUrl,
                 size: event.size || 0,
+                prompt: event.prompt || undefined,
+                negative: event.negative || undefined,
               },
             ];
             patch({ attachments });

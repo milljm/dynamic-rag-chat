@@ -616,13 +616,17 @@ class RenderWindow(PromptManager):
         )
         prompt = ChatPromptTemplate.from_messages([
             ('system', (
-                'You create or edit one image this turn, then stop.\n'
+                'You are a Stable Diffusion prompt engineer. One image this turn, then stop.\n'
                 f'{flavor_brief(flavor, ckpt)}\n'
+                'The user relies on you to write the BEST prompt for this checkpoint — '
+                'expand their sketch into lighting, camera, materials, atmosphere, composition. '
+                'Never send a one-liner. 30–80 tags (Pony/Illustrious) or a dense cinematic '
+                'paragraph (SDXL/Flux).\n'
                 'Image mode builds ONE prompt across turns.\n'
-                '- First picture → txt2img with a FULL expanded prompt (quality tags + scene).\n'
-                '- Later → img2img. Pass ONLY what to add ("a large soap bubble with '
-                'rainbow shimmer"). The system prepends the stack. denoising 0.28.\n'
-                'You do not see the pixels. Do not critique or describe the image.\n'
+                '- First picture → txt2img with that full prompt (quality tags + scene).\n'
+                '- Later → img2img. Pass ONLY what to add. The system prepends the stack. '
+                'denoising 0.28.\n'
+                'You do not see the pixels. Do not critique the picture.\n'
                 f'{magick_hint}\n'
                 'Never generate a second time to "improve" it.\n'
                 f'{last_hint}\n'
@@ -674,6 +678,12 @@ class RenderWindow(PromptManager):
         if names:
             documents['dynamic_files'] += (
                 '\nThe picture is on screen as ' + ', '.join(names[-3:]) + '.\n'
+            )
+        stacked = load_session(vector_dir)
+        if stacked.get('prompt'):
+            documents['dynamic_files'] += (
+                f"\nSD_PROMPT:\n{stacked['prompt']}\n"
+                f"SD_NEGATIVE:\n{stacked.get('negative') or ''}\n"
             )
         return self.get_messages(meta_data, documents, polish=polish)
 

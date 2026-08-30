@@ -269,6 +269,8 @@ function MessageBubble({
                     src={att.dataUrl}
                     alt={att.name}
                     name={att.name}
+                    prompt={att.prompt}
+                    negative={att.negative}
                   />
                 )}
               </li>

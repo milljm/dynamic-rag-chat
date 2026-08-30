@@ -182,6 +182,8 @@ def _hook_sse(kind: str, payload: Any) -> bytes:
             'mime': payload.get('mime') or 'image/png',
             'dataUrl': payload.get('dataUrl') or '',
             'size': int(payload.get('size') or 0),
+            'prompt': payload.get('prompt') or '',
+            'negative': payload.get('negative') or '',
         }).encode()
     return sse({'type': 'status', 'message': str(payload)}).encode()
 
@@ -607,7 +609,7 @@ def _slim_attachments(vector_dir: str, attachments: list | None) -> list[dict]:
             continue
         rec = {
             k: raw[k]
-            for k in ('id', 'name', 'mime', 'kind', 'size')
+            for k in ('id', 'name', 'mime', 'kind', 'size', 'prompt', 'negative')
             if raw.get(k) is not None
         }
         rec.setdefault('id', uuid.uuid4().hex)

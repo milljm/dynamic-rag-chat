@@ -9,6 +9,8 @@ export type Attachment = {
   text?: string;
   dataUrl?: string;
   size: number;
+  prompt?: string;
+  negative?: string;
 };
 
 export type StreamMetrics = {

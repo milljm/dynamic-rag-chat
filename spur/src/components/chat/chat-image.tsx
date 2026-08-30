@@ -1,6 +1,6 @@
 import { useEffect, useState, type MouseEvent } from "react";
 import { createPortal } from "react-dom";
-import { Download, X } from "lucide-react";
+import { Copy, Download, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -8,14 +8,19 @@ export function ChatImage({
   src,
   alt,
   name,
+  prompt,
+  negative,
   className,
 }: {
   src: string;
   alt: string;
   name?: string;
+  prompt?: string;
+  negative?: string;
   className?: string;
 }) {
   const [open, setOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -37,28 +42,74 @@ export function ChatImage({
     a.href = src;
     a.download = name || alt || "image.png";
     a.rel = "noopener";
-    document.body.appendChild(a);
     a.click();
-    a.remove();
+  }
+
+  function copyPrompt(e: MouseEvent) {
+    e.stopPropagation();
+    const text = [
+      prompt ? `Positive:\n${prompt}` : "",
+      negative ? `Negative:\n${negative}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+    if (!text) return;
+    void navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1200);
+    });
   }
 
   return (
     <>
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        className="mt-2 block max-w-full cursor-zoom-in rounded-sm text-left"
-        title="View full size"
-      >
-        <img
-          src={src}
-          alt={alt}
-          className={cn(
-            "max-h-48 rounded-sm outline outline-1 -outline-offset-1 outline-foreground/10",
-            className,
-          )}
-        />
-      </button>
+      <div className="mt-2">
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="block max-w-full cursor-zoom-in rounded-sm text-left"
+          title="View full size"
+        >
+          <img
+            src={src}
+            alt={alt}
+            className={cn(
+              "max-h-48 rounded-sm outline outline-1 -outline-offset-1 outline-foreground/10",
+              className,
+            )}
+          />
+        </button>
+        {prompt ? (
+          <div className="mt-2 max-w-prose rounded-sm bg-muted/40 px-2 py-1.5">
+            <div className="mb-1 flex items-center justify-between gap-2">
+              <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                Prompt
+              </span>
+              <button
+                type="button"
+                onClick={copyPrompt}
+                className="inline-flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground"
+                title="Copy prompt"
+              >
+                <Copy className="size-3" />
+                {copied ? "Copied" : "Copy"}
+              </button>
+            </div>
+            <pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-snug text-muted-foreground">
+              {prompt}
+            </pre>
+            {negative ? (
+              <>
+                <p className="mt-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                  Negative
+                </p>
+                <pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-snug text-muted-foreground">
+                  {negative}
+                </pre>
+              </>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
       {open
         ? createPortal(
             <div

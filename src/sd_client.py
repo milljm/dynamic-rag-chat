@@ -227,7 +227,7 @@ def _txt2img_payload(
     payload: dict[str, Any] = {
         'prompt': prompt,
         'negative_prompt': negative_prompt or '',
-        'steps': max(1, min(50, int(steps or 20))),
+        'steps': max(1, min(50, int(steps or 28))),
         'width': _align(width),
         'height': _align(height),
         'cfg_scale': 7,
@@ -338,7 +338,7 @@ def txt2img(
     host: str,
     prompt: str,
     negative_prompt: str = '',
-    steps: int = 20,
+    steps: int = 28,
     width: int = 768,
     height: int = 768,
     seed: int = -1,

@@ -35,6 +35,16 @@ def _write_png(folder: str, blob: bytes, stem: str = 'sd') -> dict[str, Any]:
     }
 
 
+def _write_prompt_sidecar(png_path: str, prompt: str, negative: str) -> None:
+    """Save the A1111 prompt next to the PNG so you can paste it back."""
+    dest = f'{png_path}.txt'
+    try:
+        with open(dest, 'w', encoding='utf-8') as handle:
+            handle.write(f'Positive:\n{prompt or ""}\n\nNegative:\n{negative or ""}\n')
+    except OSError:
+        pass
+
+
 def seed_last_generated(folder: str, limit: int = 1) -> list[dict[str, Any]]:
     """Load the newest PNG(s) so a follow-up turn can img2img / magick them."""
     if not os.path.isdir(folder):
@@ -132,7 +142,7 @@ def make_sd_tools(
     def do_txt2img(
         prompt: str,
         negative_prompt: str = '',
-        steps: int = 20,
+        steps: int = 28,
         width: int = 768,
         height: int = 768,
     ) -> str:
@@ -152,9 +162,16 @@ def make_sd_tools(
             steps=steps, width=width, height=height, checkpoint=checkpoint,
         )
         rec = _write_png(folder, blob, stem='txt2img')
+        rec['prompt'] = prompt
+        rec['negative'] = negative_prompt
         _emit(rec)
         _remember(prompt, negative_prompt, width, height, seed=int(meta.get('seed') or -1))
-        return f'Generated {rec["name"]} ({width}x{height}). Stop. Do not edit it this turn.'
+        _write_prompt_sidecar(rec['path'], prompt, negative_prompt)
+        return (
+            f'Generated {rec["name"]} ({width}x{height}).\n'
+            f'POSITIVE: {prompt}\nNEGATIVE: {negative_prompt}\n'
+            'Stop. Do not edit it this turn.'
+        )
 
     def do_img2img(
         prompt: str,
@@ -181,11 +198,14 @@ def make_sd_tools(
             denoising=denoise, steps=steps, checkpoint=checkpoint, seed=seed,
         )
         out = _write_png(folder, blob, stem='img2img')
+        out['prompt'] = full
+        out['negative'] = negative
         _emit(out)
         _remember(full, negative, seed=int(meta.get('seed') or seed))
+        _write_prompt_sidecar(out['path'], full, negative)
         return (
-            f'Re-drew {rec["name"]} → {out["name"]} (denoise {denoise:.2f}). '
-            f'Prompt stack: {full[:240]}'
+            f'Re-drew {rec["name"]} → {out["name"]} (denoise {denoise:.2f}).\n'
+            f'POSITIVE: {full}\nNEGATIVE: {negative}'
         )
 
     def do_magick(
