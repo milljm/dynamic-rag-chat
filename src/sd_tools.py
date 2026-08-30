@@ -113,7 +113,8 @@ def make_sd_tools(
         'Already generated once this turn. Stop. The user will ask '
         'for another generate on the next turn.'
     )
-    building = bool((stack.get('prompt') or '').strip() and store and not fresh)
+    building = bool((stack.get('prompt') or '').strip() and not fresh)
+    iterating = building
 
     def _status(msg: str) -> None:
         if status:
@@ -247,7 +248,7 @@ def make_sd_tools(
                 ),
             ),
         )
-    if iterating or store:
+    if iterating:
         tools.append(
             StructuredTool.from_function(
                 func=do_img2img,

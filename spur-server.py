@@ -521,6 +521,11 @@ def delete_branch(chat: Chat, name: str) -> tuple[bool, str]:
     return True, f"Deleted '{name}'."
 
 
+def _clear_sd(chat: Chat) -> None:
+    """Drop the Image-mode prompt stack (rewind / reset / delete-last)."""
+    clear_session(str(getattr(chat.opts, 'vector_dir', '') or ''))
+
+
 def reset_branch(chat: Chat) -> tuple[bool, str]:
     hist = _history(chat)
     branch = hist.get('current', 'story')
@@ -535,6 +540,7 @@ def reset_branch(chat: Chat) -> tuple[bool, str]:
                 shutil.rmtree(path, ignore_errors=True)
     if hasattr(chat.session.renderer, 'clear_ooc'):
         chat.session.renderer.clear_ooc()
+    _clear_sd(chat)
     return True, f"Reset '{branch}'."
 
 
@@ -552,6 +558,7 @@ def delete_last_turn(chat: Chat) -> tuple[bool, str]:
     chat.session.common.save_chat(hist)
     if hasattr(chat.session.renderer, 'clear_ooc'):
         chat.session.renderer.clear_ooc()
+    _clear_sd(chat)
     return True, 'Deleted last turn.'
 
 
@@ -579,6 +586,7 @@ def rewind_to(chat: Chat, n: int) -> tuple[bool, str]:
     chat.session.common.save_chat(hist)
     if hasattr(chat.session.renderer, 'clear_ooc'):
         chat.session.renderer.clear_ooc()
+    _clear_sd(chat)
     return True, f'Rewound to turn {n} of {total}.'
 
 

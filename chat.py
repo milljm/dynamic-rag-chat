@@ -572,6 +572,8 @@ class Chat():
             history[self.chat_branch] = delete_last_turn(history[self.chat_branch])
             self.session.common.save_chat(history)
             self.session.renderer.clear_ooc()
+            from src.sd_session import clear_session
+            clear_session(str(self.opts.vector_dir))
             console.print('[green]Deleted last turn.[/green]', highlight=False)
         except IndexError:
             console.print('[yellow]History empty.[/yellow]')
@@ -592,6 +594,8 @@ class Chat():
                 highlight=False,
             )
             self.session.renderer.clear_ooc()
+            from src.sd_session import clear_session
+            clear_session(str(self.opts.vector_dir))
         except ValueError:
             console.print('[red]usage: \\rewind N[/red]')
 
@@ -637,6 +641,8 @@ class Chat():
                 shutil.rmtree(path)
         console.print(f'[green]Reset: [/green]{self.chat_branch}', highlight=False)
         self.session.common.save_chat(history)
+        from src.sd_session import clear_session
+        clear_session(str(self.opts.vector_dir))
 
     def _list_branches(self, history: dict) -> None:
         """Print branch names with turn counts and a preview of the last message."""

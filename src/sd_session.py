@@ -158,17 +158,28 @@ def flavor_brief(flavor: str, checkpoint: str) -> str:
 
 
 def merge_prompt(base: str, addition: str) -> str:
-    """Keep the scene; append the new ask. If the agent restated the stack, use that."""
-    prior = (base or '').strip()
-    extra = (addition or '').strip()
+    """Keep unique clauses. Restated scenes do not duplicate the forest."""
+    prior = _clauses(base)
+    extra = _clauses(addition)
     if not extra:
-        return prior
+        return ', '.join(prior)
     if not prior:
-        return extra
-    low_prior = prior.lower()
-    low_extra = extra.lower()
-    if low_prior[:80] in low_extra:
-        return extra
-    if low_extra in low_prior:
-        return prior
-    return f'{prior}, {extra}'
+        return ', '.join(extra)
+    have = [p.lower() for p in prior]
+    for clause in extra:
+        low = clause.lower()
+        if low in have:
+            continue
+        if any(
+            (low in h or h in low)
+            for h in have
+            if min(len(h), len(low)) >= 24
+        ):
+            continue
+        prior.append(clause)
+        have.append(low)
+    return ', '.join(prior)
+
+
+def _clauses(text: str) -> list[str]:
+    return [part.strip() for part in (text or '').split(',') if part.strip()]

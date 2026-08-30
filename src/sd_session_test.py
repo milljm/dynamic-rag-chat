@@ -26,6 +26,19 @@ class SdSessionTest(unittest.TestCase):
         self.assertIn('damp forest', out)
         self.assertIn('soap bubble', out)
 
+    def test_merge_does_not_duplicate_restated_scene(self):
+        forest = (
+            'masterpiece, best quality, a beautiful forest landscape, '
+            'damp with water droplets on vines'
+        )
+        restated = (
+            'masterpiece, best quality, a beautiful forest landscape, '
+            'damp with water droplets on vines, a floating soap bubble'
+        )
+        out = merge_prompt(forest, restated)
+        self.assertEqual(out.lower().count('forest landscape'), 1)
+        self.assertIn('soap bubble', out)
+
     def test_merge_keeps_restated_stack(self):
         forest = 'damp forest, water droplets on vines, close-up'
         restated = (
