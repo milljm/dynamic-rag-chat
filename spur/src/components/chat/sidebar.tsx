@@ -21,6 +21,7 @@ import {
   type LivedArtifact,
 } from "@/lib/chat/artifacts";
 import { isLockedBranch, modeOf, turnCount } from "@/lib/chat/branch-mode";
+import { SLASH_HELP } from "@/lib/chat/commands";
 import { previewCharsForWidth } from "@/lib/chat/preview-chars";
 import { listDocuments, deleteDocument, usesChatPy } from "@/lib/chat/remote";
 import type { GoldDocument } from "@/lib/chat/remote";
