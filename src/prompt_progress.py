@@ -1,19 +1,19 @@
-"""Surface prompt-processing % during the wait-for-first-token.
+"""Surface prompt-processing % only when the backend actually exposes it.
 
-LM Studio's Developer log (``Prompt processing progress: 46.6%``) is not on
-the OpenAI-compat ``/v1/chat/completions`` path we use. Native
-``POST /api/v1/chat`` *does* emit ``prompt_processing.progress``, but that
-API is stateful and cannot take a full assistant history.
+LM Studio's Developer log (``Prompt processing progress: 46.6%``) lives on
+native ``POST /api/v1/chat`` as ``prompt_processing.progress``. That endpoint
+is stateful and cannot take assistant history, so we do **not** switch
+generation to it.
 
-So we keep ChatOpenAI's messages and:
+The OpenAI-compat socket Spur already uses (``/v1/chat/completions``) does
+not document those events. llama.cpp does expose ``GET /slots``.
 
-1. Stream ``/v1/chat/completions`` ourselves and catch llama.cpp
-   ``prompt_progress`` / LM Studio ``prompt_processing.progress`` if they
-   leak through (``return_progress: true`` on local hosts only).
-2. Parse the same ``Prompt processing progress: 46.6%`` text if it shows
-   up as an SSE comment or JSON message.
-3. Poll ``GET /slots`` on the same origin (llama.cpp) as a fallback.
-4. Fall back to LangChain ``llm.stream()`` if the raw POST fails.
+At stream time we probe the configured origin — ``http://llm:1234`` counts,
+not just localhost:
+
+1. ``GET /slots`` (or ``/v1/slots``) returns JSON → poll it while
+   ``llm.stream()`` runs and update ``Processing Prompt… 46.6%``.
+2. Otherwise → leave LangChain alone. Not supported.
 """
 from __future__ import annotations
 
@@ -31,6 +31,18 @@ _PROGRESS_LOG = re.compile(
     r'Prompt processing progress:\s*([0-9]*\.?[0-9]+)\s*%',
     re.I,
 )
+_CLOUD = (
+    'api.openai.com',
+    'api.anthropic.com',
+    'generativelanguage.googleapis.com',
+    'api.x.ai',
+    'openai.azure.com',
+    'api.groq.com',
+    'api.mistral.ai',
+    'openrouter.ai',
+)
+_PROBE: dict[str, bool] = {}
+_PROBE_LOCK = threading.Lock()
 
 
 @dataclass
@@ -125,28 +137,10 @@ def parse_slots_progress(payload: Any) -> float | None:
     return best
 
 
-def delta_text(obj: dict) -> tuple[str, str]:
-    """(content, reasoning) from an OpenAI chat-completion chunk."""
-    choices = obj.get('choices')
-    if not isinstance(choices, list) or not choices:
-        return '', ''
-    choice = choices[0] if isinstance(choices[0], dict) else {}
-    delta = choice.get('delta') or choice.get('message') or {}
-    if not isinstance(delta, dict):
-        return '', ''
-    content = delta.get('content')
-    if content is None:
-        content = ''
-    elif not isinstance(content, str):
-        content = str(content)
-    extra = (
-        delta.get('reasoning_content')
-        or delta.get('reasoning')
-        or ''
-    )
-    if not isinstance(extra, str):
-        extra = str(extra) if extra is not None else ''
-    return content, extra
+def reset_probe_cache() -> None:
+    """Tests: forget GET /slots results."""
+    with _PROBE_LOCK:
+        _PROBE.clear()
 
 
 def _clamp(value: float) -> float:
@@ -168,19 +162,25 @@ def _as_fraction(value: Any) -> float | None:
     return _clamp(number)
 
 
-def _is_local_host(url: str) -> bool:
+def _is_cloud(url: str) -> bool:
     text = (url or '').lower()
-    return any(
-        token in text
-        for token in ('127.0.0.1', 'localhost', '0.0.0.0', ':1234', ':11434')
-    )
+    return any(host in text for host in _CLOUD)
 
 
 def _origin(base_url: str) -> str:
-    """http://host:1234/v1 → http://host:1234."""
-    text = (base_url or '').rstrip('/')
-    if text.endswith('/v1'):
-        return text[:-3]
+    """http://llm:1234/v1/chat/completions → http://llm:1234."""
+    text = (base_url or '').strip().rstrip('/')
+    changed = True
+    while changed and text:
+        changed = False
+        for suffix in (
+            '/chat/completions', '/completions',
+            '/api/v1/models', '/api/v0/models', '/v1/models', '/models', '/v1',
+        ):
+            if text.endswith(suffix):
+                text = text[: -len(suffix)].rstrip('/')
+                changed = True
+                break
     return text
 
 
@@ -190,55 +190,7 @@ def _chat_url(llm: Any) -> str:
         or getattr(llm, 'base_url', None)
         or ''
     )
-    base = str(base).rstrip('/')
-    if not base:
-        return ''
-    if base.endswith('/chat/completions'):
-        return base
-    return f'{base}/chat/completions'
-
-
-def messages_to_openai(messages: Any) -> list[dict]:
-    """LangChain messages → OpenAI dicts."""
-    out: list[dict] = []
-    for msg in messages or []:
-        kind = getattr(msg, 'type', '') or ''
-        role = 'user'
-        if kind in {'system', 'ai', 'assistant', 'tool'}:
-            role = {'ai': 'assistant'}.get(kind, kind)
-        elif msg.__class__.__name__ in {'SystemMessage'}:
-            role = 'system'
-        elif msg.__class__.__name__ in {'AIMessage', 'AIMessageChunk'}:
-            role = 'assistant'
-        elif msg.__class__.__name__ in {'ToolMessage'}:
-            role = 'tool'
-        content = getattr(msg, 'content', msg)
-        out.append({'role': role, 'content': content})
-    return out
-
-
-def _payload_for(llm: Any, messages: Any, with_progress: bool) -> dict:
-    """Request body, preferring ChatOpenAI's own serializer."""
-    getter = getattr(llm, '_get_request_payload', None)
-    payload: dict
-    if callable(getter):
-        try:
-            payload = dict(getter(messages))  # pylint: disable=protected-access
-        except Exception:  # pylint: disable=broad-exception-caught
-            payload = {}
-    else:
-        payload = {}
-    if not payload.get('messages'):
-        payload['messages'] = messages_to_openai(messages)
-    payload['stream'] = True
-    payload.setdefault('model', getattr(llm, 'model_name', None) or getattr(llm, 'model', ''))
-    extra = getattr(llm, 'extra_body', None)
-    if isinstance(extra, dict):
-        for key, value in extra.items():
-            payload.setdefault(key, value)
-    if with_progress and _is_local_host(_chat_url(llm)):
-        payload['return_progress'] = True
-    return payload
+    return str(base).rstrip('/')
 
 
 def _headers(llm: Any) -> dict[str, str]:
@@ -246,53 +198,43 @@ def _headers(llm: Any) -> dict[str, str]:
     return {
         'Authorization': f'Bearer {key}',
         'Content-Type': 'application/json',
-        'Accept': 'text/event-stream',
+        'Accept': 'application/json',
     }
 
 
-def _iter_sse_json(body) -> Iterator[dict]:
-    """Yield parsed objects from an HTTP SSE body."""
-    buf = b''
-    while True:
-        chunk = body.read(256)
-        if not chunk:
-            if buf.strip():
-                obj = _line_json(buf.decode('utf-8', errors='replace'))
-                if obj is not None:
-                    yield obj
-            break
-        buf += chunk
-        while b'\n' in buf:
-            raw, buf = buf.split(b'\n', 1)
-            obj = _line_json(raw.decode('utf-8', errors='replace'))
-            if obj is not None:
-                yield obj
-
-
-def _line_json(line: str) -> dict | None:
-    text = line.strip()
-    if not text:
-        return None
-    frac = parse_progress_text(text)
-    if frac is not None:
-        return {'type': 'prompt_processing.progress', 'progress': frac}
-    if text.startswith(':') or text == 'data: [DONE]':
-        return None
-    if text.lower().startswith('data:'):
-        text = text[5:].strip()
-    if text.lower().startswith('event:'):
-        return None
-    if not text or text == '[DONE]':
-        return None
+def _json_get(url: str, headers: dict) -> Any | None:
+    """GET JSON, or None on 404 / network / non-JSON."""
     try:
-        obj = json.loads(text)
-    except json.JSONDecodeError:
+        req = urllib.request.Request(url, headers=headers, method='GET')
+        with urllib.request.urlopen(req, timeout=0.6) as resp:
+            raw = resp.read().decode('utf-8', errors='replace')
+        return json.loads(raw)
+    except (urllib.error.URLError, json.JSONDecodeError, TimeoutError, OSError):
         return None
-    return obj if isinstance(obj, dict) else None
+    except Exception:  # pylint: disable=broad-exception-caught
+        return None
+
+
+def slots_supported(origin: str, headers: dict) -> bool:
+    """True when GET /slots (or /v1/slots) returns JSON. Cached per origin."""
+    if not origin:
+        return False
+    with _PROBE_LOCK:
+        cached = _PROBE.get(origin)
+        if cached is not None:
+            return cached
+    ok = False
+    for path in ('/slots', '/v1/slots'):
+        if _json_get(f'{origin}{path}', headers) is not None:
+            ok = True
+            break
+    with _PROBE_LOCK:
+        _PROBE[origin] = ok
+    return ok
 
 
 class _Closable:
-    """Lets ``_abort_llm_stream`` close the raw HTTP body."""
+    """Lets ``_abort_llm_stream`` close the LangChain HTTP body."""
 
     def __init__(self, response, inner: Iterator):
         self._response = response
@@ -316,44 +258,19 @@ class _Closable:
 
 def _poll_slots(origin: str, headers: dict, sink: Callable[[float], None],
                 stop: threading.Event) -> None:
-    """Best-effort llama.cpp /slots while the completion is in-flight."""
+    """llama.cpp /slots while the completion is in-flight."""
     urls = [f'{origin}/slots', f'{origin}/v1/slots']
-    seen_ok = False
-    while not stop.wait(0.2 if seen_ok else 0.0):
-        hit = False
+    delay = 0.0
+    while not stop.wait(delay):
+        delay = 0.2
         for url in urls:
-            try:
-                req = urllib.request.Request(url, headers=headers, method='GET')
-                with urllib.request.urlopen(req, timeout=0.8) as resp:
-                    payload = json.loads(resp.read().decode('utf-8', errors='replace'))
-                frac = parse_slots_progress(payload)
-                if frac is not None:
-                    sink(frac)
-                    hit = True
-                    seen_ok = True
-                    break
-            except Exception:  # pylint: disable=broad-exception-caught
+            payload = _json_get(url, headers)
+            if payload is None:
                 continue
-        if not hit and not seen_ok:
-            return
-
-
-def _post_stream(url: str, payload: dict, headers: dict):
-    """POST the completion. Drop return_progress on 400 and retry once."""
-    body = json.dumps(payload).encode('utf-8')
-    req = urllib.request.Request(url, data=body, headers=headers, method='POST')
-    try:
-        return urllib.request.urlopen(req, timeout=600)
-    except urllib.error.HTTPError as exc:
-        try:
-            exc.read()
-        except Exception:  # pylint: disable=broad-exception-caught
-            pass
-        if exc.code in {400, 404, 415, 422} and payload.pop('return_progress', None):
-            return _post_stream(url, payload, headers)
-        return None
-    except Exception:  # pylint: disable=broad-exception-caught
-        return None
+            frac = parse_slots_progress(payload)
+            if frac is not None:
+                sink(frac)
+            break
 
 
 def _maybe_progress(frac: float, last_label: str) -> tuple[str, PromptProgress | None]:
@@ -364,15 +281,8 @@ def _maybe_progress(frac: float, last_label: str) -> tuple[str, PromptProgress |
     return label, PromptProgress(frac)
 
 
-def _token_chunk(content: str, reasoning: str) -> TokenChunk:
-    extra = {'reasoning_content': reasoning} if reasoning else {}
-    return TokenChunk(
-        content=content, reasoning_content=reasoning, additional_kwargs=extra,
-    )
-
-
 def _drain(box: queue.Queue, stop: threading.Event) -> Iterator[Any]:
-    """Merge SSE objects and /slots fractions until the completion ends."""
+    """Merge /slots fractions with LangChain chunks."""
     last_label = ''
     seen_token = False
     try:
@@ -394,58 +304,49 @@ def _drain(box: queue.Queue, stop: threading.Event) -> Iterator[Any]:
                 if item is not None:
                     yield item
                 continue
-            frac = parse_progress(payload)
-            if frac is not None and not seen_token:
-                last_label, item = _maybe_progress(frac, last_label)
-                if item is not None:
-                    yield item
-            content, reasoning = delta_text(payload)
-            if content or reasoning:
-                seen_token = True
-                yield _token_chunk(content, reasoning)
+            seen_token = True
+            yield payload
     finally:
         stop.set()
 
 
-def stream_chat(llm: Any, messages: Any) -> Iterator[Any]:
-    """Yield PromptProgress then TokenChunk (or LangChain chunks on fallback)."""
-    url = _chat_url(llm)
-    if not url:
-        yield from llm.stream(messages)
-        return
-    payload = _payload_for(llm, messages, with_progress=True)
-    headers = _headers(llm)
-    response = _post_stream(url, payload, headers)
-    if response is None:
-        yield from llm.stream(messages)
-        return
-
+def _stream_with_slots(llm: Any, messages: Any, origin: str, headers: dict) -> Iterator[Any]:
+    """LangChain tokens plus /slots progress."""
+    stream = llm.stream(messages)
     box: queue.Queue = queue.Queue()
     stop = threading.Event()
 
     def sink(frac: float) -> None:
         box.put(('progress', frac))
 
-    def read_sse() -> None:
+    def read() -> None:
         try:
-            for obj in _iter_sse_json(response):
-                box.put(('sse', obj))
+            for chunk in stream:
+                box.put(('chunk', chunk))
         except Exception as exc:  # pylint: disable=broad-exception-caught
             box.put(('err', exc))
         finally:
             box.put(('eof', None))
 
-    threading.Thread(target=read_sse, daemon=True).start()
-    if _is_local_host(url):
-        threading.Thread(
-            target=_poll_slots,
-            args=(_origin(url), headers, sink, stop),
-            daemon=True,
-        ).start()
-
-    wrapped = _Closable(response, _drain(box, stop))
+    threading.Thread(target=_poll_slots, args=(origin, headers, sink, stop), daemon=True).start()
+    threading.Thread(target=read, daemon=True).start()
+    wrapped = _Closable(stream, _drain(box, stop))
     try:
         yield from wrapped
     finally:
         stop.set()
         wrapped.close()
+
+
+def stream_chat(llm: Any, messages: Any) -> Iterator[Any]:
+    """Yield PromptProgress then LLM chunks, or just ``llm.stream()``."""
+    url = _chat_url(llm)
+    if not url or _is_cloud(url):
+        yield from llm.stream(messages)
+        return
+    origin = _origin(url)
+    headers = _headers(llm)
+    if not slots_supported(origin, headers):
+        yield from llm.stream(messages)
+        return
+    yield from _stream_with_slots(llm, messages, origin, headers)
