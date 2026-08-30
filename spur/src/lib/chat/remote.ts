@@ -189,11 +189,61 @@ export async function deleteDocument(name: string): Promise<RemoteOp> {
 
 export type ProjectFile = { path: string; chars: number };
 
-export async function listProjectFiles(): Promise<ProjectFile[]> {
+export type ProjectRecord = {
+  id: string;
+  name: string;
+  kind: "scratch" | "imported";
+  path: string;
+  git: boolean;
+};
+
+export type ProjectSnapshot = {
+  active: string;
+  projects: ProjectRecord[];
+  files: ProjectFile[];
+  truncated?: boolean;
+};
+
+const EMPTY_PROJECTS: ProjectSnapshot = {
+  active: "workspace",
+  projects: [],
+  files: [],
+};
+
+function asProjectSnapshot(json: unknown): ProjectSnapshot {
+  const raw = json && typeof json === "object" ? (json as Record<string, unknown>) : {};
+  const files = Array.isArray(raw.files) ? (raw.files as ProjectFile[]) : [];
+  const projects = Array.isArray(raw.projects)
+    ? (raw.projects as ProjectRecord[])
+    : [];
+  return {
+    active: typeof raw.active === "string" ? raw.active : "workspace",
+    projects,
+    files,
+    truncated: Boolean(raw.truncated),
+  };
+}
+
+export async function listProjects(): Promise<ProjectSnapshot> {
   const res = await fetch(url("/api/projects"));
-  if (!res.ok) return [];
-  const json = (await res.json()) as { files?: ProjectFile[] };
-  return Array.isArray(json.files) ? json.files : [];
+  if (!res.ok) return EMPTY_PROJECTS;
+  try {
+    return asProjectSnapshot(await res.json());
+  } catch {
+    return EMPTY_PROJECTS;
+  }
+}
+
+export async function addProjectDir(path: string): Promise<RemoteOp> {
+  return postOp("/api/projects/add", { path });
+}
+
+export async function selectProject(id: string): Promise<RemoteOp> {
+  return postOp("/api/projects/select", { id });
+}
+
+export async function removeProject(id: string): Promise<RemoteOp> {
+  return postOp("/api/projects/remove", { id });
 }
 
 export async function getProjectFile(path: string): Promise<string | null> {

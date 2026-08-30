@@ -29,12 +29,15 @@ import {
   deleteDocument,
   deleteProjectFile,
   getProjectFile,
+  addProjectDir,
   listDocuments,
-  listProjectFiles,
+  listProjects,
+  removeProject,
   runProjectFile,
+  selectProject,
   usesChatPy,
 } from "@/lib/chat/remote";
-import type { GoldDocument, ProjectFile } from "@/lib/chat/remote";
+import type { GoldDocument, ProjectFile, ProjectRecord, ProjectSnapshot } from "@/lib/chat/remote";
 import { useChatStore } from "@/lib/chat/store";
 import type { Branch } from "@/lib/chat/types";
 import { cn } from "@/lib/utils";
@@ -647,6 +650,14 @@ function runnable(path: string): boolean {
   return /\.(py|js|mjs)$/i.test(path);
 }
 
+const SHOW_PROJECT_FILES = 80;
+
+const EMPTY_PROJECTS: ProjectSnapshot = {
+  active: "workspace",
+  projects: [],
+  files: [],
+};
+
 function ProjectFiles({
   currentId,
   messageN,
@@ -657,15 +668,28 @@ function ProjectFiles({
   streaming: boolean;
 }) {
   const [files, setFiles] = useState<ProjectFile[]>([]);
-  const [output, setOutput] = useState<string>("");
+  const [projects, setProjects] = useState<ProjectRecord[]>([]);
+  const [active, setActive] = useState("workspace");
+  const [truncated, setTruncated] = useState(false);
+  const [output, setOutput] = useState("");
+  const [dirPath, setDirPath] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const apply = (snap: ProjectSnapshot) => {
+    setFiles(snap.files);
+    setProjects(snap.projects);
+    setActive(snap.active);
+    setTruncated(Boolean(snap.truncated));
+  };
+
   const refresh = () => {
     if (!usesChatPy()) {
-      setFiles([]);
+      apply(EMPTY_PROJECTS);
       return;
     }
-    listProjectFiles()
-      .then(setFiles)
-      .catch(() => setFiles([]));
+    listProjects()
+      .then(apply)
+      .catch(() => apply(EMPTY_PROJECTS));
   };
   useEffect(() => {
     if (streaming) return;
@@ -679,23 +703,160 @@ function ProjectFiles({
 
   if (!usesChatPy()) return null;
 
+  const current = projects.find((project) => project.id === active);
+  const imported = projects.filter((project) => project.kind === "imported").length;
+  const shown = files.slice(0, SHOW_PROJECT_FILES);
+  const locked = streaming || busy;
+
   return (
     <SidebarSection
       id="projects"
       title="Projects"
       defaultOpen={false}
-      badge={files.length || undefined}
+      badge={files.length || imported || undefined}
     >
       <div className="space-y-2">
+        {projects.length > 0 ? (
+          <ul className="space-y-1">
+            {projects.map((project) => {
+              const isActive = project.id === active;
+              return (
+                <li
+                  key={project.id}
+                  className={cn(
+                    "flex min-w-0 items-center gap-0.5 rounded-sm",
+                    isActive ? "bg-accent" : "hover:bg-accent/70",
+                  )}
+                >
+                  <button
+                    type="button"
+                    disabled={locked || isActive}
+                    onClick={async () => {
+                      setBusy(true);
+                      const result = await selectProject(project.id);
+                      setBusy(false);
+                      if (!result.ok) {
+                        toast.error(result.error || `Could not select ${project.name}`);
+                        return;
+                      }
+                      setOutput("");
+                      refresh();
+                    }}
+                    aria-current={isActive ? "true" : undefined}
+                    className="flex min-w-0 flex-1 items-center gap-1.5 px-2 py-1.5 text-left text-xs"
+                    title={project.path}
+                  >
+                    <span
+                      className={cn(
+                        "size-1.5 shrink-0 rounded-full",
+                        isActive ? "bg-primary" : "bg-muted-foreground/40",
+                      )}
+                    />
+                    {project.git ? (
+                      <GitBranch className="size-3 shrink-0 text-muted-foreground" />
+                    ) : (
+                      <FolderCode className="size-3 shrink-0 text-muted-foreground" />
+                    )}
+                    <span className="min-w-0 flex-1 truncate font-medium">
+                      {project.name}
+                    </span>
+                  </button>
+                  {project.kind === "imported" ? (
+                    <button
+                      type="button"
+                      disabled={locked}
+                      className="relative mr-0.5 size-8 shrink-0 text-muted-foreground after:absolute after:left-1/2 after:top-1/2 after:size-10 after:-translate-x-1/2 after:-translate-y-1/2 hover:text-destructive"
+                      aria-label={`Remove ${project.name}`}
+                      onClick={async () => {
+                        if (
+                          !window.confirm(
+                            `Unregister ${project.name}? Files on disk are not deleted.`,
+                          )
+                        ) {
+                          return;
+                        }
+                        setBusy(true);
+                        const result = await removeProject(project.id);
+                        setBusy(false);
+                        if (!result.ok) {
+                          toast.error(result.error || `Could not remove ${project.name}`);
+                          return;
+                        }
+                        toast.success(`Removed ${project.name}`);
+                        setOutput("");
+                        refresh();
+                      }}
+                    >
+                      <X className="size-3.5" />
+                    </button>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ul>
+        ) : null}
+
+        <form
+          className="space-y-1.5"
+          onSubmit={async (e) => {
+            e.preventDefault();
+            const raw = dirPath.trim();
+            if (!raw || locked) return;
+            setBusy(true);
+            const result = await addProjectDir(raw);
+            setBusy(false);
+            if (!result.ok) {
+              toast.error(result.error || "Could not add that directory");
+              return;
+            }
+            toast.success("Added project dir");
+            setDirPath("");
+            setOutput("");
+            refresh();
+          }}
+        >
+          <label className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+            <FolderCode className="size-3.5" />
+            Add project dir
+          </label>
+          <div className="flex min-w-0 gap-2">
+            <Input
+              value={dirPath}
+              onChange={(e) => setDirPath(e.target.value)}
+              placeholder="~/src/my-repo"
+              aria-label="Project directory"
+              className="min-w-0 font-mono text-xs"
+              disabled={locked}
+            />
+            <Button
+              type="submit"
+              size="icon"
+              aria-label="Add project dir"
+              disabled={locked || !dirPath.trim()}
+            >
+              <Plus />
+            </Button>
+          </div>
+          <p className="text-[10px] leading-relaxed text-muted-foreground/70">
+            Absolute path on this machine. Files stay in place.
+          </p>
+        </form>
+
         {files.length === 0 ? (
           <p className="text-xs text-muted-foreground">
-            Turn on <span className="text-foreground">Coding</span>. Named
-            fences land here;{" "}
-            <code className="font-mono">{"<RUN:file>"}</code> executes them.
+            {current?.kind === "imported" ? (
+              <>No listed files (hidden and vendor dirs are skipped).</>
+            ) : (
+              <>
+                Turn on <span className="text-foreground">Coding</span>. Named
+                fences land here;{" "}
+                <code className="font-mono">{"<RUN:file>"}</code> executes them.
+              </>
+            )}
           </p>
         ) : (
           <ul className="space-y-1">
-            {files.map((file) => (
+            {shown.map((file) => (
               <li
                 key={file.path}
                 className="flex items-center gap-1 rounded-sm bg-secondary px-2 py-1.5 text-xs"
@@ -766,13 +927,20 @@ function ProjectFiles({
             ))}
           </ul>
         )}
+        {files.length > SHOW_PROJECT_FILES ? (
+          <p className="text-[10px] text-muted-foreground/70">
+            Showing {SHOW_PROJECT_FILES} of {files.length}
+            {truncated ? "+" : ""}
+          </p>
+        ) : null}
         {output ? (
           <pre className="max-h-32 overflow-auto rounded-sm bg-background px-2 py-1.5 font-mono text-[10px] leading-relaxed text-muted-foreground">
             {output}
           </pre>
         ) : null}
         <p className="text-[10px] leading-relaxed text-muted-foreground/70">
-          Workspace the coding model can write and run.
+          Workspace the coding model can write and run. Imported dirs stay in
+          place.
         </p>
       </div>
     </SidebarSection>

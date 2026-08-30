@@ -58,13 +58,16 @@ from src.attachment_store import list_attachments
 from src.project_store import (
     MAX_PROJECT_OPS,
     ProjectNeedFeed,
+    add_project,
     delete_file as delete_project_file,
     format_read,
     format_run,
-    list_files as list_project_files,
     persist_named_fences,
     read_file as read_project_file,
+    remove_project,
     run_file as run_project_file,
+    select_project,
+    snapshot as project_snapshot,
     tree_listing,
 )
 from src.chat_utils import (
@@ -937,8 +940,44 @@ async def api_documents_delete(request: Request) -> JSONResponse:
 
 @app.get('/api/projects')
 def api_projects() -> dict[str, Any]:
-    """Coding workspace files under vector_dir/projects/workspace."""
-    return {'files': list_project_files(_vector_dir())}
+    """Coding projects: scratch workspace plus imported dirs."""
+    return project_snapshot(_vector_dir())
+
+
+@app.post('/api/projects/add')
+async def api_projects_add(request: Request) -> JSONResponse:
+    """Register an existing directory in place and select it."""
+    body = await request.json()
+    result = add_project(_vector_dir(), str(body.get('path') or ''))
+    if not result.get('ok'):
+        return JSONResponse(result, status_code=400)
+    return JSONResponse(result)
+
+
+@app.post('/api/projects/select')
+async def api_projects_select(request: Request) -> JSONResponse:
+    """Switch the active coding project."""
+    body = await request.json()
+    ident = str(body.get('id') or '')
+    if not ident:
+        return JSONResponse({'ok': False, 'error': 'Missing id'}, status_code=400)
+    result = select_project(_vector_dir(), ident)
+    if not result.get('ok'):
+        return JSONResponse(result, status_code=400)
+    return JSONResponse(result)
+
+
+@app.post('/api/projects/remove')
+async def api_projects_remove(request: Request) -> JSONResponse:
+    """Unregister an imported dir. Does not delete files on disk."""
+    body = await request.json()
+    ident = str(body.get('id') or '')
+    if not ident:
+        return JSONResponse({'ok': False, 'error': 'Missing id'}, status_code=400)
+    result = remove_project(_vector_dir(), ident)
+    if not result.get('ok'):
+        return JSONResponse(result, status_code=400)
+    return JSONResponse(result)
 
 
 @app.get('/api/projects/file')
@@ -1102,7 +1141,7 @@ def _flush_controls(gold_feed: GoldNeedFeed,
 
 
 def _project_event() -> bytes:
-    return sse({'type': 'project', 'files': list_project_files(_vector_dir())}).encode()
+    return sse({'type': 'project', **project_snapshot(_vector_dir())}).encode()
 
 
 def _apply_project_tag(documents: dict, answer: str, action: str, rel: str) -> str:

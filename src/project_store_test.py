@@ -10,12 +10,20 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from project_store import (  # noqa: E402  # pylint: disable=wrong-import-position
     ProjectNeedFeed,
+    add_project,
     delete_file,
     extract_named_fences,
+    list_files,
+    list_projects,
     persist_named_fences,
+    project_root,
     read_file,
+    remove_project,
     run_file,
     safe_relpath,
+    scratch_root,
+    select_project,
+    snapshot,
     take_project_tag,
     tree_listing,
     write_file,
@@ -55,6 +63,7 @@ class WorkspaceTest(unittest.TestCase):
         self.assertEqual(read_file(self.root, 'src/hi.py'), 'print(1)\n')
         listing = tree_listing(self.root)
         self.assertIn('src/hi.py', listing)
+        self.assertIn('project: workspace', listing)
 
     def test_delete_prunes_empty_dirs(self):
         write_file(self.root, 'src/hi.py', 'x\n')
@@ -97,6 +106,112 @@ class WorkspaceTest(unittest.TestCase):
     def test_run_rejects_escape(self):
         result = run_file(self.root, '../hi.py')
         self.assertEqual(result['code'], 127)
+
+    def test_skips_vendor_and_git(self):
+        write_file(self.root, 'app.py', 'x\n')
+        root = scratch_root(self.root)
+        (root / 'node_modules').mkdir()
+        (root / 'node_modules' / 'left-pad.js').write_text('nope\n', encoding='utf-8')
+        git_obj = root / '.git' / 'objects' / 'ab'
+        git_obj.mkdir(parents=True)
+        (git_obj / 'cdef').write_text('blob\n', encoding='utf-8')
+        paths = {row['path'] for row in list_files(self.root)}
+        self.assertEqual(paths, {'app.py'})
+
+
+class ImportProjectTest(unittest.TestCase):
+    """Register an existing directory in place."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()  # pylint: disable=consider-using-with
+        self.root = self.tmp.name
+        self.addCleanup(self.tmp.cleanup)
+        self.repo = Path(self.root) / 'repos' / 'demo-app'
+        self.repo.mkdir(parents=True)
+        (self.repo / '.git').mkdir()
+        (self.repo / 'main.py').write_text('print("from-repo")\n', encoding='utf-8')
+
+    def test_add_selects_and_lists(self):
+        result = add_project(self.root, str(self.repo))
+        self.assertTrue(result['ok'], result)
+        self.assertEqual(result['active'], 'demo-app')
+        self.assertTrue(result['project']['git'])
+        self.assertEqual(result['project']['kind'], 'imported')
+        self.assertEqual(project_root(self.root).resolve(), self.repo.resolve())
+        paths = {row['path'] for row in result['files']}
+        self.assertIn('main.py', paths)
+        self.assertIn('from-repo', read_file(self.root, 'main.py') or '')
+
+    def test_write_stays_in_imported_dir(self):
+        add_project(self.root, str(self.repo))
+        stored = write_file(self.root, 'src/new.py', 'print(2)\n')
+        self.assertEqual(stored, 'src/new.py')
+        self.assertEqual((self.repo / 'src' / 'new.py').read_text(encoding='utf-8'), 'print(2)\n')
+        self.assertFalse((scratch_root(self.root) / 'src' / 'new.py').exists())
+
+    def test_jail_stays_inside_import(self):
+        add_project(self.root, str(self.repo))
+        self.assertIsNone(write_file(self.root, '../escape.py', 'nope\n'))
+        self.assertFalse((self.repo.parent / 'escape.py').exists())
+        outside = run_file(self.root, '../main.py')
+        self.assertEqual(outside['code'], 127)
+
+    def test_run_uses_imported_cwd(self):
+        add_project(self.root, str(self.repo))
+        result = run_file(self.root, 'main.py')
+        self.assertEqual(result['code'], 0, result)
+        self.assertIn('from-repo', result['stdout'])
+
+    def test_duplicate_path_selects(self):
+        first = add_project(self.root, str(self.repo))
+        write_file(self.root, 'keep.py', '1\n')
+        select_project(self.root, 'workspace')
+        second = add_project(self.root, str(self.repo))
+        self.assertTrue(second['ok'])
+        self.assertEqual(second['active'], first['active'])
+        ids = [p['id'] for p in list_projects(self.root) if p['kind'] == 'imported']
+        self.assertEqual(ids, [first['active']])
+        self.assertIsNotNone(read_file(self.root, 'keep.py'))
+
+    def test_switch_and_remove(self):
+        add_project(self.root, str(self.repo))
+        write_file(self.root, 'only-repo.py', '1\n')
+        switched = select_project(self.root, 'workspace')
+        self.assertTrue(switched['ok'])
+        self.assertEqual(switched['active'], 'workspace')
+        self.assertIsNone(read_file(self.root, 'only-repo.py'))
+        removed = remove_project(self.root, 'demo-app')
+        self.assertTrue(removed['ok'])
+        self.assertEqual(removed['active'], 'workspace')
+        self.assertTrue((self.repo / 'only-repo.py').is_file())
+        ids = [p['id'] for p in list_projects(self.root)]
+        self.assertEqual(ids, ['workspace'])
+
+    def test_cannot_remove_scratch(self):
+        result = remove_project(self.root, 'workspace')
+        self.assertFalse(result['ok'])
+
+    def test_missing_and_root_rejected(self):
+        missing = add_project(self.root, str(Path(self.root) / 'no-such-dir'))
+        self.assertFalse(missing['ok'])
+        self.assertIn('Not a directory', missing['error'])
+        root = add_project(self.root, '/')
+        self.assertFalse(root['ok'])
+        empty = add_project(self.root, '  ')
+        self.assertFalse(empty['ok'])
+
+    def test_id_collision(self):
+        other = Path(self.root) / 'other' / 'demo-app'
+        other.mkdir(parents=True)
+        add_project(self.root, str(self.repo))
+        second = add_project(self.root, str(other))
+        self.assertTrue(second['ok'], second)
+        self.assertEqual(second['active'], 'demo-app-2')
+        snap = snapshot(self.root)
+        self.assertEqual(
+            [p['id'] for p in snap['projects']],
+            ['workspace', 'demo-app', 'demo-app-2'],
+        )
 
 
 class ProjectTagTest(unittest.TestCase):

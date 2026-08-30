@@ -1,11 +1,14 @@
-"""Persistent coding workspace under vector_dir/projects/workspace.
+"""Persistent coding workspace, plus imported project directories.
 
-Named fences land here when Coding is on. ``<RUN:path>`` / ``<READ:path>``
+Default root is ``vector_dir/projects/workspace``. ``add_project`` registers
+an existing directory in place (a git repo stays a git repo). Named fences
+land in the active root when Coding is on. ``<RUN:path>`` / ``<READ:path>``
 are own-line tags (same shape as NEED_GOLD). Execution is argv-only:
 python3 for .py, node for .js — no shell, no path escape.
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
@@ -17,7 +20,16 @@ MAX_FILE_BYTES = 512_000
 MAX_OUTPUT = 32_000
 RUN_TIMEOUT = 20
 MAX_PROJECT_OPS = 4
+MAX_LIST_FILES = 400
+MAX_TREE_LINES = 80
 WORKSPACE = 'workspace'
+SCRATCH_ID = 'workspace'
+REGISTRY = 'registry.json'
+SKIP_DIRS = frozenset({
+    '.git', 'node_modules', '__pycache__', '.venv', 'venv',
+    'dist', '.tox', '.mypy_cache', '.pytest_cache', '.ruff_cache',
+    '.next', '.cache', '.turbo', 'eggs', '.eggs',
+})
 
 _FILE_TOKEN = re.compile(
     r'^(?:\./)?[\w.@+-]+(?:/[\w.@+-]+)*\.[A-Za-z0-9]{1,8}$',
@@ -27,6 +39,7 @@ _RUN_READ = re.compile(
     r'^[ \t]*<(RUN|READ):\s*([^>\n]+?)\s*>[ \t]*$',
     re.I,
 )
+_SLUG = re.compile(r'[^a-z0-9]+')
 _PLACEHOLDERS = frozenset({
     'filename', 'file', 'name', 'path', 'example',
     'script', 'yourfile', 'your-file', 'your_file',
@@ -38,9 +51,80 @@ _INTERPRETERS = {
 }
 
 
-def project_root(vector_dir: str) -> Path:
-    """``vector_dir/projects/workspace``."""
+def scratch_root(vector_dir: str) -> Path:
+    """``vector_dir/projects/workspace`` — the default scratch project."""
     return Path(vector_dir) / 'projects' / WORKSPACE
+
+
+def project_root(vector_dir: str) -> Path:
+    """Active project's root (scratch workspace or an imported dir)."""
+    return Path(_active_record(vector_dir)['path'])
+
+
+def list_projects(vector_dir: str) -> list[dict[str, Any]]:
+    """Registered projects; scratch first."""
+    return list(_load_registry(vector_dir)['projects'])
+
+
+def snapshot(vector_dir: str) -> dict[str, Any]:
+    """Sidebar payload: active id, projects, files."""
+    data = _load_registry(vector_dir)
+    files = list_files(vector_dir)
+    return {
+        'active': data['active'],
+        'projects': data['projects'],
+        'files': files,
+        'truncated': len(files) >= MAX_LIST_FILES,
+    }
+
+
+def add_project(vector_dir: str, raw_path: str) -> dict[str, Any]:
+    """Register an existing directory in place. Selects it."""
+    dest, err = _existing_dir(raw_path)
+    if err:
+        return {'ok': False, 'error': err}
+    data = _load_registry(vector_dir)
+    for rec in data['projects']:
+        if _same_path(rec.get('path') or '', dest):
+            data['active'] = rec['id']
+            _save_registry(vector_dir, data)
+            return _result(vector_dir, rec)
+    rec = _imported_record(dest, {p['id'] for p in data['projects']})
+    data['projects'].append(rec)
+    data['active'] = rec['id']
+    _save_registry(vector_dir, data)
+    return _result(vector_dir, rec)
+
+
+def select_project(vector_dir: str, ident: str) -> dict[str, Any]:
+    """Switch the active project. Writes and runs follow."""
+    want = (ident or '').strip()
+    data = _load_registry(vector_dir)
+    rec = next((p for p in data['projects'] if p['id'] == want), None)
+    if rec is None:
+        return {'ok': False, 'error': f'No such project: {want}'}
+    if rec['kind'] == 'imported' and not Path(rec['path']).is_dir():
+        return {'ok': False, 'error': f'Not a directory: {rec["path"]}'}
+    data['active'] = rec['id']
+    _save_registry(vector_dir, data)
+    return _result(vector_dir, rec)
+
+
+def remove_project(vector_dir: str, ident: str) -> dict[str, Any]:
+    """Drop a registered import. Does not delete files on disk."""
+    want = (ident or '').strip()
+    if want == SCRATCH_ID:
+        return {'ok': False, 'error': 'Cannot remove the workspace'}
+    data = _load_registry(vector_dir)
+    kept = [p for p in data['projects'] if p['id'] != want]
+    if len(kept) == len(data['projects']):
+        return {'ok': False, 'error': f'No such project: {want}'}
+    data['projects'] = kept
+    if data['active'] == want:
+        data['active'] = SCRATCH_ID
+    _save_registry(vector_dir, data)
+    rec = next(p for p in kept if p['id'] == data['active'])
+    return _result(vector_dir, rec)
 
 
 def is_filename(raw: str) -> bool:
@@ -69,7 +153,7 @@ def safe_relpath(raw: str) -> str | None:
 
 
 def resolve(vector_dir: str, rel: str) -> Path | None:
-    """Absolute path inside the workspace, or None."""
+    """Absolute path inside the active project, or None."""
     name = safe_relpath(rel)
     if not name:
         return None
@@ -81,29 +165,58 @@ def resolve(vector_dir: str, rel: str) -> Path | None:
 
 
 def list_files(vector_dir: str) -> list[dict]:
-    """[{path, chars}] sorted by path."""
+    """[{path, chars}] sorted by path. Skips hidden / vendor dirs."""
     root = project_root(vector_dir)
     if not root.is_dir():
         return []
+    try:
+        root = root.resolve()
+    except OSError:
+        return []
     out: list[dict] = []
-    for path in sorted(root.rglob('*')):
-        if not path.is_file() or path.name.startswith('.'):
-            continue
-        rel = path.relative_to(root).as_posix()
-        try:
-            chars = path.stat().st_size
-        except OSError:
-            chars = 0
-        out.append({'path': rel, 'chars': chars})
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [
+            name for name in dirnames
+            if name not in SKIP_DIRS and not name.startswith('.')
+        ]
+        dirnames.sort()
+        for name in sorted(filenames):
+            if name.startswith('.'):
+                continue
+            path = Path(dirpath) / name
+            if not path.is_file():
+                continue
+            rel = path.relative_to(root).as_posix()
+            try:
+                chars = path.stat().st_size
+            except OSError:
+                chars = 0
+            out.append({'path': rel, 'chars': chars})
+            if len(out) >= MAX_LIST_FILES:
+                out.sort(key=lambda row: row['path'])
+                return out
+    out.sort(key=lambda row: row['path'])
     return out
 
 
 def tree_listing(vector_dir: str) -> str:
     """Human listing for the prompt, or ``(empty workspace)``."""
+    rec = _active_record(vector_dir)
     rows = list_files(vector_dir)
+    header = f'project: {rec["name"]}\nroot: {rec["path"]}'
     if not rows:
-        return '(empty workspace)'
-    lines = [f'- {row["path"]} ({row["chars"]} bytes)' for row in rows]
+        empty = (
+            '(empty workspace)' if rec['kind'] == 'scratch'
+            else '(empty project)'
+        )
+        return f'{header}\n{empty}'
+    lines = [header]
+    shown = rows[:MAX_TREE_LINES]
+    lines.extend(f'- {row["path"]} ({row["chars"]} bytes)' for row in shown)
+    extra = len(rows) - len(shown)
+    if extra > 0:
+        more = f'{extra}+' if len(rows) >= MAX_LIST_FILES else str(extra)
+        lines.append(f'({more} more files)')
     return '\n'.join(lines)
 
 
@@ -132,7 +245,7 @@ def write_file(vector_dir: str, rel: str, text: str) -> str | None:
 
 
 def delete_file(vector_dir: str, rel: str) -> bool:
-    """Unlink a workspace file. True if something was removed."""
+    """Unlink a project file. True if something was removed."""
     dest = resolve(vector_dir, rel)
     if dest is None or not dest.is_file():
         return False
@@ -140,7 +253,7 @@ def delete_file(vector_dir: str, rel: str) -> bool:
         dest.unlink()
     except OSError:
         return False
-    root = project_root(vector_dir)
+    root = project_root(vector_dir).resolve()
     parent = dest.parent
     while parent != root and parent.is_dir() and not any(parent.iterdir()):
         try:
@@ -182,7 +295,7 @@ def extract_named_fences(text: str) -> list[dict[str, str]]:
 
 
 def persist_named_fences(vector_dir: str, text: str) -> list[str]:
-    """Write named fences into the workspace. Return stored paths."""
+    """Write named fences into the active project. Return stored paths."""
     written: list[str] = []
     for art in extract_named_fences(text):
         stored = write_file(vector_dir, art['file'], art['text'])
@@ -216,7 +329,7 @@ def interpreter_for(rel: str) -> str | None:
 
 
 def run_file(vector_dir: str, rel: str) -> dict[str, Any]:
-    """Run a workspace file. Never a shell. cwd is the workspace root."""
+    """Run a project file. Never a shell. cwd is the active project root."""
     name = safe_relpath(rel)
     dest = resolve(vector_dir, rel) if name else None
     if not name or dest is None or not dest.is_file():
@@ -387,3 +500,137 @@ def _run_result(path: str, stdout: str, stderr: str, code: int, cmd: str) -> dic
         'code': code,
         'cmd': cmd,
     }
+
+
+def _registry_file(vector_dir: str) -> Path:
+    return Path(vector_dir) / 'projects' / REGISTRY
+
+
+def _scratch_record(vector_dir: str) -> dict[str, Any]:
+    path = scratch_root(vector_dir)
+    try:
+        path = path.resolve()
+    except OSError:
+        pass
+    return {
+        'id': SCRATCH_ID,
+        'name': WORKSPACE,
+        'kind': 'scratch',
+        'path': str(path),
+        'git': False,
+    }
+
+
+def _load_registry(vector_dir: str) -> dict[str, Any]:
+    path = _registry_file(vector_dir)
+    loaded: Any = None
+    if path.is_file():
+        try:
+            loaded = json.loads(path.read_text(encoding='utf-8'))
+        except (OSError, json.JSONDecodeError, TypeError, ValueError):
+            loaded = None
+    if not isinstance(loaded, dict):
+        loaded = {'active': SCRATCH_ID, 'projects': []}
+    return _normalize_registry(vector_dir, loaded)
+
+
+def _normalize_registry(vector_dir: str, data: dict) -> dict[str, Any]:
+    scratch = _scratch_record(vector_dir)
+    imported: list[dict[str, Any]] = []
+    seen_paths = {scratch['path']}
+    seen_ids = {SCRATCH_ID}
+    for rec in data.get('projects') or []:
+        if not isinstance(rec, dict):
+            continue
+        ident = str(rec.get('id') or '').strip()
+        raw = str(rec.get('path') or '').strip()
+        if rec.get('kind') == 'scratch' or ident == SCRATCH_ID:
+            continue
+        if not ident or not raw or ident in seen_ids:
+            continue
+        try:
+            dest = Path(raw).resolve()
+        except (OSError, RuntimeError):
+            dest = Path(raw)
+        key = str(dest)
+        if key in seen_paths:
+            continue
+        seen_paths.add(key)
+        seen_ids.add(ident)
+        imported.append({
+            'id': ident,
+            'name': str(rec.get('name') or dest.name or ident),
+            'kind': 'imported',
+            'path': key,
+            'git': (dest / '.git').exists(),
+        })
+    active = str(data.get('active') or SCRATCH_ID)
+    if active not in seen_ids:
+        active = SCRATCH_ID
+    return {'active': active, 'projects': [scratch, *imported]}
+
+
+def _save_registry(vector_dir: str, data: dict) -> None:
+    path = _registry_file(vector_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = json.dumps(_normalize_registry(vector_dir, data), indent=2) + '\n'
+    tmp = path.with_name(f'.{REGISTRY}.tmp')
+    tmp.write_text(payload, encoding='utf-8')
+    tmp.replace(path)
+
+
+def _active_record(vector_dir: str) -> dict[str, Any]:
+    data = _load_registry(vector_dir)
+    rec = next((p for p in data['projects'] if p['id'] == data['active']), None)
+    return rec or data['projects'][0]
+
+
+def _existing_dir(raw: str) -> tuple[Path | None, str | None]:
+    text = (raw or '').strip().strip('"\'')
+    if not text:
+        return None, 'Missing path'
+    try:
+        dest = Path(os.path.expanduser(text)).resolve()
+    except (OSError, RuntimeError):
+        return None, 'Could not resolve path'
+    if dest == Path(dest.anchor):
+        return None, 'Refusing to use the filesystem root'
+    if not dest.is_dir():
+        return None, f'Not a directory: {dest}'
+    return dest, None
+
+
+def _same_path(stored: str, dest: Path) -> bool:
+    try:
+        return Path(stored).resolve() == dest
+    except (OSError, RuntimeError):
+        return False
+
+
+def _imported_record(dest: Path, used: set[str]) -> dict[str, Any]:
+    ident = _unique_id(dest.name, used)
+    return {
+        'id': ident,
+        'name': dest.name or ident,
+        'kind': 'imported',
+        'path': str(dest),
+        'git': (dest / '.git').exists(),
+    }
+
+
+def _unique_id(name: str, used: set[str]) -> str:
+    base = _SLUG.sub('-', (name or '').lower()).strip('-')[:40] or 'project'
+    if base not in used:
+        return base
+    n = 2
+    while f'{base}-{n}' in used:
+        n += 1
+    return f'{base}-{n}'
+
+
+def _result(vector_dir: str, rec: dict[str, Any]) -> dict[str, Any]:
+    snap = snapshot(vector_dir)
+    snap['ok'] = True
+    snap['error'] = None
+    snap['project'] = rec
+    return snap
