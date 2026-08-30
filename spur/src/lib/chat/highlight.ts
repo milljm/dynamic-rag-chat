@@ -65,7 +65,8 @@ function escapeHtml(text: string): string {
   return text
     .replace(/&/g, "&")
     .replace(/</g, "<")
-    .replace(/>/g, ">");
+    .replace(/>/g, ">")
+    .replace(/"/g, """);
 }
 
 export function highlightCode(code: string, langRaw: string): string {
