@@ -69,7 +69,10 @@ class PromptManager():
         """Spine + event fragments. Resume turns do not see the NEED_GOLD cookbook."""
         spine = self.get_prompt(f'{self.plot_prompt_file}_system.md')
         human = self.get_prompt(f'{self.plot_prompt_file}_human.md')
-        resume = bool(str(documents.get('gold_resume') or '').strip())
+        resume = bool(
+            str(documents.get('gold_resume') or '').strip()
+            or str(documents.get('project_resume') or '').strip()
+        )
         has_index = bool(documents.get('has_documents_index'))
         has_images = bool(
             documents.get('has_images') or documents.get('dynamic_images')
@@ -97,6 +100,10 @@ class PromptManager():
                 getattr(self.args, 'vector_dir', '') or ''
         ):
             extra = f'{self.plot_prompt_file}_sd_last.md'
+            if os.path.exists(extra):
+                parts.append(self.get_prompt(extra))
+        if documents.get('use_coding') and not resume:
+            extra = f'{self.plot_prompt_file}_coding.md'
             if os.path.exists(extra):
                 parts.append(self.get_prompt(extra))
         return '\n'.join(parts), human

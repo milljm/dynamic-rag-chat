@@ -71,6 +71,7 @@ export function seedSnapshot(): ChatSnapshot {
     pendingAttachments: [],
     forceAgent: false,
     forceSd: false,
+    forceCoding: false,
     sdEnabled: false,
     needsSetup: false,
     pendingOoc: "",

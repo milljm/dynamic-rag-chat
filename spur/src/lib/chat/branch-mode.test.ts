@@ -273,6 +273,7 @@ test("migrate remaps default to story without dropping user branches", () => {
     pendingAttachments: [],
     forceAgent: true,
     forceSd: false,
+    forceCoding: false,
     sdEnabled: false,
     needsSetup: false,
     pendingOoc: "",

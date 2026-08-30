@@ -55,6 +55,18 @@ from chat import (
 from src.think_tags import ThinkFeed
 from src.gold_fetch import GoldNeedFeed, MAX_GOLD_FETCHES, recall_status
 from src.attachment_store import list_attachments
+from src.project_store import (
+    MAX_PROJECT_OPS,
+    ProjectNeedFeed,
+    delete_file as delete_project_file,
+    format_read,
+    format_run,
+    list_files as list_project_files,
+    persist_named_fences,
+    read_file as read_project_file,
+    run_file as run_project_file,
+    tree_listing,
+)
 from src.chat_utils import (
     HISTORY_META_KEYS,
     CommonUtils,
@@ -923,6 +935,48 @@ async def api_documents_delete(request: Request) -> JSONResponse:
     return JSONResponse({'ok': True, 'error': None, 'message': f'Deleted {name}'})
 
 
+@app.get('/api/projects')
+def api_projects() -> dict[str, Any]:
+    """Coding workspace files under vector_dir/projects/workspace."""
+    return {'files': list_project_files(_vector_dir())}
+
+
+@app.get('/api/projects/file')
+def api_project_file(path: str = '') -> JSONResponse:
+    """UTF-8 body of one workspace file."""
+    text = read_project_file(_vector_dir(), path)
+    if text is None:
+        return JSONResponse({'ok': False, 'error': 'Not found'}, status_code=404)
+    return JSONResponse({'ok': True, 'path': path, 'text': text})
+
+
+@app.post('/api/projects/delete')
+async def api_projects_delete(request: Request) -> JSONResponse:
+    """Remove a workspace file."""
+    body = await request.json()
+    rel = str(body.get('path') or '')
+    if not rel:
+        return JSONResponse({'ok': False, 'error': 'Missing path', 'message': 'Missing path'})
+    ok = delete_project_file(_vector_dir(), rel)
+    if not ok:
+        return JSONResponse({
+            'ok': False, 'error': f'Could not delete {rel}',
+            'message': f'Could not delete {rel}',
+        })
+    return JSONResponse({'ok': True, 'error': None, 'message': f'Deleted {rel}'})
+
+
+@app.post('/api/projects/run')
+async def api_projects_run(request: Request) -> JSONResponse:
+    """Run a workspace .py / .js file (argv only, cwd = workspace)."""
+    body = await request.json()
+    rel = str(body.get('path') or '')
+    if not rel:
+        return JSONResponse({'ok': False, 'error': 'Missing path'})
+    result = run_project_file(_vector_dir(), rel)
+    return JSONResponse({'ok': result.get('code') == 0, **result})
+
+
 @app.get('/api/generated/{name}')
 def api_generated(name: str):
     """PNG written by the Stable Diffusion agent."""
@@ -935,6 +989,7 @@ def api_generated(name: str):
 
 def _prepare_chat_documents(chat, body: dict) -> tuple[dict, list]:
     """Run prepare_turn / no-context and stamp uploads, includes, agent flags."""
+    # pylint: disable=too-many-branches
     prompt = str(body.get('text') or '')
     parsed = parse_user_input(prompt)
     if body.get('noContext'):
@@ -992,6 +1047,11 @@ def _prepare_chat_documents(chat, body: dict) -> tuple[dict, list]:
         documents['in_line_commands'] = 'Meta: [image]'
     elif chat.opts.assistant_mode:
         clear_session(str(chat.opts.vector_dir))
+    force_coding = bool(body.get('useCoding')) or parsed.command == 'coding'
+    if force_coding and chat.opts.assistant_mode:
+        documents['use_coding'] = True
+        if not documents.get('in_line_commands'):
+            documents['in_line_commands'] = 'Meta: [coding]'
     if body.get('illustrateScene') and not chat.opts.assistant_mode:
         documents['illustrate_scene'] = True
         documents['use_sd'] = True
@@ -1016,6 +1076,53 @@ def _reset_renderer_think(renderer) -> None:
         stream_state.think_ns = ''
 
 
+def _feed_controls(gold_feed: GoldNeedFeed, project_feed: ProjectNeedFeed | None,
+                   chunk: str) -> tuple[str, bool, bool]:
+    """Emit-safe text plus whether a gold / project tag completed."""
+    emit, hit_g = gold_feed.feed(chunk)
+    hit_p = False
+    if project_feed is not None and emit:
+        emit, hit_p = project_feed.feed(emit)
+    return emit, hit_g, hit_p
+
+
+def _flush_controls(gold_feed: GoldNeedFeed,
+                    project_feed: ProjectNeedFeed | None) -> tuple[str, bool]:
+    """Flush both feeds. Project tags wait if gold already committed."""
+    leftover = gold_feed.flush()
+    if project_feed is None or gold_feed.filename:
+        return leftover, False
+    hit_p = False
+    if leftover:
+        leftover, hit_p = project_feed.feed(leftover)
+    if not hit_p:
+        leftover += project_feed.flush()
+        hit_p = bool(project_feed.path)
+    return leftover, hit_p
+
+
+def _project_event() -> bytes:
+    return sse({'type': 'project', 'files': list_project_files(_vector_dir())}).encode()
+
+
+def _apply_project_tag(documents: dict, answer: str, action: str, rel: str) -> str:
+    """Persist fences, run/read, stamp resume fields. Return status line."""
+    vector = _vector_dir()
+    persist_named_fences(vector, answer)
+    documents['use_coding'] = True
+    documents['project_resume'] = answer
+    documents['project_index'] = tree_listing(vector)
+    if action == 'read':
+        text = read_project_file(vector, rel)
+        documents['project_result'] = (
+            format_read(rel, text) if text is not None
+            else f'=== PROJECT_READ {rel} ===\n(missing)'
+        )
+        return f'Reading {rel}…'
+    documents['project_result'] = format_run(run_project_file(vector, rel))
+    return f'Running {rel}…'
+
+
 def _iter_sse_chunks(
     renderer, packed, documents: dict, stats: dict,
     route: str = '', context: int = 0, meta=None,
@@ -1023,8 +1130,10 @@ def _iter_sse_chunks(
     """Yield token/reasoning/status/usage SSE frames for one LLM stream.
 
     If the model emits <NEED_GOLD:file>, fetch that gold file and resume
-    in this same turn (assistant mode, capped).
+    in this same turn (assistant mode, capped). Coding turns also honour
+    <RUN:> / <READ:> against the Projects workspace.
     """
+    # pylint: disable=too-many-branches,too-many-statements
     _reset_renderer_think(renderer)
     started = time.time()
     first = True
@@ -1034,6 +1143,7 @@ def _iter_sse_chunks(
     reasoning = ''
     model = getattr(renderer.llm, 'model_name', '')
     fetches = 0
+    project_ops = 0
     recalled: list[str] = []
     assistant = bool(getattr(renderer.opts, 'assistant_mode', False))
 
@@ -1044,19 +1154,21 @@ def _iter_sse_chunks(
     while True:
         parser = ThinkFeed()
         gold_feed = GoldNeedFeed()
+        project_feed = (
+            ProjectNeedFeed() if documents.get('use_coding') else None
+        )
         last_gold_channel = 'visible'
         _reset_renderer_think(renderer)
         chunks = renderer.stream_response(packed)
         announced_reason = False
         announced_stream = False
+        hit_project = False
         try:
             for chunk in chunks:
                 if first:
                     ttft = time.time() - started
                     first = False
                 visible, thought = parser.feed_chunk(chunk)
-                # Null-token reasoners (gpt-oss): first chunks are blank
-                # content. Don't yell Streaming until a visible token.
                 if (
                     getattr(parser, 'shadow_think', False)
                     and not announced_reason
@@ -1074,13 +1186,19 @@ def _iter_sse_chunks(
                             'Reasoning…', model or '', route or '',
                             context or 0, recalled,
                         )
-                    emit_t, hit_t = gold_feed.feed(thought)
+                    emit_t, hit_t, hit_pt = _feed_controls(
+                        gold_feed, project_feed, thought,
+                    )
                     if emit_t:
                         bump(len(emit_t.split()))
                         reasoning += emit_t
                         yield sse({'type': 'reasoning', 'content': emit_t}).encode()
                     if hit_t:
                         last_gold_channel = 'thought'
+                        break
+                    if hit_pt:
+                        last_gold_channel = 'thought'
+                        hit_project = True
                         break
                 if visible:
                     if not announced_stream:
@@ -1089,13 +1207,19 @@ def _iter_sse_chunks(
                             'Streaming…', model or '', route or '',
                             context or 0, recalled,
                         )
-                    emit_v, hit_v = gold_feed.feed(visible)
+                    emit_v, hit_v, hit_pv = _feed_controls(
+                        gold_feed, project_feed, visible,
+                    )
                     if emit_v:
                         bump(renderer.response_count(emit_v))
                         answer += emit_v
                         yield sse({'type': 'token', 'content': emit_v}).encode()
                     if hit_v:
                         last_gold_channel = 'visible'
+                        break
+                    if hit_pv:
+                        last_gold_channel = 'visible'
+                        hit_project = True
                         break
         finally:
             closer = getattr(chunks, 'close', None)
@@ -1104,8 +1228,8 @@ def _iter_sse_chunks(
                     closer()
                 except Exception:  # pylint: disable=broad-exception-caught
                     pass
-        leftover = gold_feed.flush()
-        if leftover and not gold_feed.filename:
+        leftover, hit_p_flush = _flush_controls(gold_feed, project_feed)
+        if leftover:
             if last_gold_channel == 'thought':
                 bump(len(leftover.split()))
                 reasoning += leftover
@@ -1114,27 +1238,57 @@ def _iter_sse_chunks(
                 bump(renderer.response_count(leftover))
                 answer += leftover
                 yield sse({'type': 'token', 'content': leftover}).encode()
+        if hit_p_flush:
+            hit_project = True
         fname = gold_feed.filename
-        if (not fname or not assistant or fetches >= MAX_GOLD_FETCHES
-                or meta is None):
-            break
-        if not renderer.state.context.fetch_gold_file(documents, fname):
-            break
-        fetches += 1
-        recalled.append(fname)
-        documents['gold_resume'] = answer
-        yield _status_sse(recall_status(recalled), recalled=recalled)
-        yield b':\n\n'
-        packed = renderer.get_messages(meta, documents)
-        model = getattr(renderer.llm, 'model_name', '') or model
-        context = renderer.packed_prompt_tokens(packed)
-        documents['prompt_tokens'] = context
-        first = True
-        yield _status_sse(
-            'Processing Prompt…', model or '', route or '', context or 0,
-            recalled,
-        )
-        yield b':\n\n'
+        if (fname and assistant and fetches < MAX_GOLD_FETCHES
+                and meta is not None
+                and renderer.state.context.fetch_gold_file(documents, fname)):
+            fetches += 1
+            recalled.append(fname)
+            documents['gold_resume'] = answer
+            yield _status_sse(recall_status(recalled), recalled=recalled)
+            yield b':\n\n'
+            packed = renderer.get_messages(meta, documents)
+            model = getattr(renderer.llm, 'model_name', '') or model
+            context = renderer.packed_prompt_tokens(packed)
+            documents['prompt_tokens'] = context
+            first = True
+            yield _status_sse(
+                'Processing Prompt…', model or '', route or '', context or 0,
+                recalled,
+            )
+            yield b':\n\n'
+            continue
+        if (hit_project and project_feed and project_feed.path
+                and assistant and project_ops < MAX_PROJECT_OPS
+                and meta is not None):
+            status = _apply_project_tag(
+                documents, answer, project_feed.action or 'run',
+                project_feed.path,
+            )
+            project_ops += 1
+            yield _project_event()
+            yield _status_sse(
+                status, model or '', route or '', context or 0, recalled,
+            )
+            yield b':\n\n'
+            packed = renderer.get_messages(meta, documents)
+            model = getattr(renderer.llm, 'model_name', '') or model
+            context = renderer.packed_prompt_tokens(packed)
+            documents['prompt_tokens'] = context
+            first = True
+            yield _status_sse(
+                'Processing Prompt…', model or '', route or '', context or 0,
+                recalled,
+            )
+            yield b':\n\n'
+            continue
+        break
+
+    if documents.get('use_coding') and answer:
+        persist_named_fences(_vector_dir(), answer)
+        yield _project_event()
 
     gen = time.time() - started
     stats.update({

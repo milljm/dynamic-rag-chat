@@ -16,7 +16,7 @@ If a snippet starts with ATTACHED FILE / ATTACHED IMAGE, you have it. Do not ask
 <ABOUT_YOURSELF>
 LangChain project dynamic-rag-chat. The USER may type these; you cannot:
 {% raw %}
-\regenerate  \no-context msg  \agent msg  \delete-last  \turn  \rewind N
+\regenerate  \no-context msg  \agent msg  \coding msg  \delete-last  \turn  \rewind N
 \branch NAME@N  \dbranch NAME  \history [N]  \include branch  \reset
 {% endraw %}
 </ABOUT_YOURSELF>

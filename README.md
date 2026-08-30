@@ -23,6 +23,7 @@ Light mode (washed dust / sand). Code fences have a **theme dropdown** — pick 
 - **URL scrape** — wrap a link in double braces and the page text joins the turn:
   `{{https://example.com/article}}`
 - **Web agent** — `\agent` or the Agent toggle. Live search, then the answering model.
+- **Coding / Projects** — `\coding` or the Coding toggle (assistant). Named fences persist in a workspace sidebar; `<RUN:file.py>` executes Python or Node. Image and Coding are exclusive.
 - **Stable Diffusion** — Settings → Automatic1111 URL. **Image** on in assistant (toggle + New ↻). In story, Image is a one-click still of the current beat. No follow-up LLM after the PNG.
 - **Model routes** — casual, coder, vision, agent… fill in only what you run. Three models is enough (generator, pre-conditioner, embeddings).
 - **Branches** — fork, switch, rewind. `story` and `assistant` are protected.
@@ -137,6 +138,7 @@ Same in Spur, Streamlit, and the terminal.
 \regenerate                 regenerate last turn
 \no-context msg             query with no RAG / history context
 \agent msg                  force web-search agent
+\coding msg                 write/run files in the Projects workspace
 \image msg                  force Stable Diffusion (Automatic1111)
 \delete-last                drop the last user+assistant pair
 \turn                       print current turn count
@@ -196,6 +198,8 @@ Each **branch** owns `{branch}_user_documents` and `{branch}_ai_documents`. Stor
 | Spur **Documents** widget | — | list + delete |
 | Filename in the query | — | inject the whole file |
 | `<NEED_GOLD:filename>` mid-reply | — | fetch, resume same turn (cap 2) |
+
+**Projects** (Coding toggle / `\coding`): `vector_dir/projects/workspace/`. Named fences persist there. Own-line `<RUN:file.py>` or `<READ:file.py>` mid-reply (cap 4). Python and Node only; cwd is the workspace.
 
 Chunking is parent/child:
 

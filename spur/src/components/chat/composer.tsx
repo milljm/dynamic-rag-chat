@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { ArrowUp, Palette, Paperclip, RefreshCw, RotateCcw, Square, X } from "lucide-react";
+import { ArrowUp, Code, Palette, Paperclip, RefreshCw, RotateCcw, Square, X } from "lucide-react";
 import { toast } from "sonner";
 import { lastUserMessage, modeOf, turnCount } from "@/lib/chat/branch-mode";
 import { postOp } from "@/lib/chat/remote";
@@ -30,6 +30,8 @@ export function Composer({
   const setForceAgent = useChatStore((s) => s.setForceAgent);
   const forceSd = useChatStore((s) => s.forceSd);
   const setForceSd = useChatStore((s) => s.setForceSd);
+  const forceCoding = useChatStore((s) => s.forceCoding);
+  const setForceCoding = useChatStore((s) => s.setForceCoding);
   const sdEnabled = useChatStore((s) => s.sdEnabled);
   const currentId = useChatStore((s) => s.currentId);
   const branch = useChatStore((s) => s.branches[s.currentId]);
@@ -45,6 +47,7 @@ export function Composer({
     !streaming && (value.trim().length > 0 || pending.length > 0);
   const agentOn = mode === "assistant" && forceAgent;
   const imageOn = mode === "assistant" && forceSd;
+  const codingOn = mode === "assistant" && forceCoding;
   const storyImage = mode === "story";
   const hasBeat = (branch?.messages ?? [])
     .some((m) => m.role === "assistant" && Boolean(m.content?.trim()));
@@ -195,6 +198,27 @@ export function Composer({
               </button>
               <button
                 type="button"
+                aria-pressed={codingOn}
+                disabled={mode !== "assistant" || streaming}
+                title={
+                  mode === "assistant"
+                    ? "Write and run files in Projects"
+                    : "Coding is locked to assistant mode"
+                }
+                onClick={() => setForceCoding(!forceCoding)}
+                className={cn(
+                  "inline-flex h-8 items-center gap-1.5 rounded-sm px-2.5 text-xs font-medium transition-colors",
+                  codingOn
+                    ? "bg-primary text-primary-foreground"
+                    : "text-muted-foreground hover:bg-accent hover:text-foreground",
+                  mode !== "assistant" && "opacity-40",
+                )}
+              >
+                <Code className="size-3.5" />
+                Coding
+              </button>
+              <button
+                type="button"
                 aria-pressed={storyImage ? undefined : imageOn}
                 disabled={
                   streaming ||
@@ -290,6 +314,7 @@ export function Composer({
         <p className="mt-2 text-center font-mono text-xs tabular-nums text-muted-foreground">
           turn {turns} · {currentId} · {mode}
           {agentOn ? " · agent" : ""}
+          {codingOn ? " · coding" : ""}
         </p>
       </div>
     </div>

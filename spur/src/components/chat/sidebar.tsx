@@ -2,12 +2,14 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   BookOpen,
   Bot,
+  Download,
   FileText,
+  FolderCode,
   GitBranch,
   Lock,
   PanelLeftClose,
+  Play,
   Plus,
-  Download,
   RotateCcw,
   Trash2,
   Undo2,
@@ -23,8 +25,16 @@ import {
 import { isLockedBranch, modeOf, turnCount } from "@/lib/chat/branch-mode";
 import { SLASH_HELP } from "@/lib/chat/commands";
 import { previewCharsForWidth } from "@/lib/chat/preview-chars";
-import { listDocuments, deleteDocument, usesChatPy } from "@/lib/chat/remote";
-import type { GoldDocument } from "@/lib/chat/remote";
+import {
+  deleteDocument,
+  deleteProjectFile,
+  getProjectFile,
+  listDocuments,
+  listProjectFiles,
+  runProjectFile,
+  usesChatPy,
+} from "@/lib/chat/remote";
+import type { GoldDocument, ProjectFile } from "@/lib/chat/remote";
 import { useChatStore } from "@/lib/chat/store";
 import type { Branch } from "@/lib/chat/types";
 import { cn } from "@/lib/utils";
@@ -240,6 +250,11 @@ export function Sidebar({
         <HistoryTools />
         <SlashHelp />
         <GoldDocuments
+          currentId={currentId}
+          messageN={current?.messages.length ?? 0}
+          streaming={streaming}
+        />
+        <ProjectFiles
           currentId={currentId}
           messageN={current?.messages.length ?? 0}
           streaming={streaming}
@@ -623,6 +638,142 @@ function GoldDocuments({
       <p className="text-[10px] leading-relaxed text-muted-foreground/70">
         Files available for recall by the AI.
       </p>
+      </div>
+    </SidebarSection>
+  );
+}
+
+function runnable(path: string): boolean {
+  return /\.(py|js|mjs)$/i.test(path);
+}
+
+function ProjectFiles({
+  currentId,
+  messageN,
+  streaming,
+}: {
+  currentId: string;
+  messageN: number;
+  streaming: boolean;
+}) {
+  const [files, setFiles] = useState<ProjectFile[]>([]);
+  const [output, setOutput] = useState<string>("");
+  const refresh = () => {
+    if (!usesChatPy()) {
+      setFiles([]);
+      return;
+    }
+    listProjectFiles()
+      .then(setFiles)
+      .catch(() => setFiles([]));
+  };
+  useEffect(() => {
+    if (streaming) return;
+    refresh();
+  }, [currentId, messageN, streaming]);
+  useEffect(() => {
+    const onProj = () => refresh();
+    window.addEventListener("spur-project", onProj);
+    return () => window.removeEventListener("spur-project", onProj);
+  }, []);
+
+  if (!usesChatPy()) return null;
+
+  return (
+    <SidebarSection
+      id="projects"
+      title="Projects"
+      defaultOpen={false}
+      badge={files.length || undefined}
+    >
+      <div className="space-y-2">
+        {files.length === 0 ? (
+          <p className="text-xs text-muted-foreground">
+            Turn on <span className="text-foreground">Coding</span>. Named
+            fences land here;{" "}
+            <code className="font-mono">{"<RUN:file>"}</code> executes them.
+          </p>
+        ) : (
+          <ul className="space-y-1">
+            {files.map((file) => (
+              <li
+                key={file.path}
+                className="flex items-center gap-1 rounded-sm bg-secondary px-2 py-1.5 text-xs"
+              >
+                <FolderCode className="size-3 shrink-0 text-muted-foreground" />
+                <span className="min-w-0 flex-1 truncate font-mono" title={file.path}>
+                  {file.path}
+                </span>
+                <span className="font-mono text-[10px] tabular-nums text-muted-foreground/50">
+                  {fmtChars(file.chars)}
+                </span>
+                {runnable(file.path) ? (
+                  <button
+                    type="button"
+                    className="relative size-8 text-muted-foreground after:absolute after:left-1/2 after:top-1/2 after:size-10 after:-translate-x-1/2 after:-translate-y-1/2 hover:text-foreground"
+                    aria-label={`Run ${file.path}`}
+                    onClick={async () => {
+                      const result = await runProjectFile(file.path);
+                      const body = (
+                        result.stdout ||
+                        result.stderr ||
+                        result.error ||
+                        `exit ${result.code}`
+                      ).trim();
+                      setOutput(`$ ${result.cmd || file.path}\n${body}`);
+                      if (result.ok) toast.success(`Ran ${file.path}`);
+                      else toast.error(result.stderr || result.error || "Run failed");
+                    }}
+                  >
+                    <Play className="size-3.5" />
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  className="relative size-8 text-muted-foreground after:absolute after:left-1/2 after:top-1/2 after:size-10 after:-translate-x-1/2 after:-translate-y-1/2 hover:text-foreground"
+                  aria-label={`Download ${file.path}`}
+                  onClick={async () => {
+                    const text = await getProjectFile(file.path);
+                    if (text == null) {
+                      toast.error(`Could not read ${file.path}`);
+                      return;
+                    }
+                    downloadTextFile(file.path.split("/").pop() || file.path, text);
+                  }}
+                >
+                  <Download className="size-3.5" />
+                </button>
+                <button
+                  type="button"
+                  className="relative size-8 text-muted-foreground after:absolute after:left-1/2 after:top-1/2 after:size-10 after:-translate-x-1/2 after:-translate-y-1/2 hover:text-destructive"
+                  aria-label={`Delete ${file.path}`}
+                  onClick={async () => {
+                    if (!window.confirm(`Remove ${file.path} from the workspace?`)) {
+                      return;
+                    }
+                    const result = await deleteProjectFile(file.path);
+                    if (!result.ok) {
+                      toast.error(result.error || `Could not delete ${file.path}`);
+                      return;
+                    }
+                    toast.success(`Deleted ${file.path}`);
+                    refresh();
+                  }}
+                >
+                  <Trash2 className="size-3.5" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        {output ? (
+          <pre className="max-h-32 overflow-auto rounded-sm bg-background px-2 py-1.5 font-mono text-[10px] leading-relaxed text-muted-foreground">
+            {output}
+          </pre>
+        ) : null}
+        <p className="text-[10px] leading-relaxed text-muted-foreground/70">
+          Workspace the coding model can write and run.
+        </p>
       </div>
     </SidebarSection>
   );

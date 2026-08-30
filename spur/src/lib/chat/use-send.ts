@@ -34,6 +34,7 @@ export function useSend() {
       regenerate?: boolean;
       agent?: boolean;
       image?: boolean;
+      coding?: boolean;
       illustrateScene?: boolean;
       noContext?: boolean;
       rare?: string[];
@@ -58,6 +59,7 @@ export function useSend() {
       const mode = modeOf(branch);
       const agent = Boolean(opts.agent) && mode === "assistant";
       const image = Boolean(opts.image) && mode === "assistant";
+      const coding = Boolean(opts.coding) && mode === "assistant";
       const noContext = Boolean(opts.noContext);
       const ooc = Boolean(opts.ooc);
       const includes = parseIncludes(opts.text);
@@ -90,10 +92,11 @@ export function useSend() {
       }
 
       const flags: TurnFlags | undefined =
-        agent || noContext || ooc || opts.includeBranch || image
+        agent || noContext || ooc || opts.includeBranch || image || coding
           ? {
               agent,
               image,
+              coding,
               noContext,
               ooc,
               includeBranch: opts.includeBranch,
@@ -128,7 +131,9 @@ export function useSend() {
           ? "Stable Diffusion…"
           : agent
             ? "Agent Web Search…"
-            : "Processing Prompt…",
+            : coding
+              ? "Coding…"
+              : "Processing Prompt…",
         createdAt: Date.now(),
       };
       store.appendMessage(assistantMsg, [], originId);
@@ -319,11 +324,16 @@ export function useSend() {
               ? "Usage: \\agent your question"
               : parsed.image
                 ? "Usage: \\image what to draw"
-                : "Usage: \\no-context your question",
+                : parsed.coding
+                  ? "Usage: \\coding what to build"
+                  : "Usage: \\no-context your question",
           );
           return;
         }
-        if ((parsed.agent || parsed.image) && modeOf(branch) !== "assistant") {
+        if (
+          (parsed.agent || parsed.image || parsed.coding) &&
+          modeOf(branch) !== "assistant"
+        ) {
           toast.message("Only available in assistant mode.");
           return;
         }
@@ -331,6 +341,7 @@ export function useSend() {
           text: parsed.text,
           agent: parsed.agent,
           image: parsed.image,
+          coding: parsed.coding,
           noContext: parsed.noContext,
           rare: parsed.rare,
           ooc: parsed.ooc,
@@ -342,6 +353,7 @@ export function useSend() {
         text: parsed.text,
         agent: store.forceAgent,
         image: store.forceSd,
+        coding: store.forceCoding,
         noContext: false,
         rare: parsed.rare,
         ooc: parsed.ooc,
@@ -366,6 +378,7 @@ export function useSend() {
       regenerate: true,
       agent: Boolean(flags?.agent || store.forceAgent),
       image: Boolean(flags?.image || store.forceSd),
+      coding: Boolean(flags?.coding || store.forceCoding),
       noContext: Boolean(flags?.noContext),
       includeBranch: flags?.includeBranch,
       ooc: Boolean(flags?.ooc),
@@ -471,6 +484,7 @@ function handleLocalCommand(
         regenerate: true,
         agent: Boolean(flags?.agent || store.forceAgent),
         image: Boolean(flags?.image || store.forceSd),
+        coding: Boolean(flags?.coding || store.forceCoding),
         noContext: Boolean(flags?.noContext),
         includeBranch: flags?.includeBranch,
         ooc: Boolean(flags?.ooc),
@@ -487,6 +501,7 @@ type GenerateOpts = {
   regenerate?: boolean;
   agent?: boolean;
   image?: boolean;
+  coding?: boolean;
   illustrateScene?: boolean;
   noContext?: boolean;
   rare?: string[];
@@ -512,16 +527,18 @@ async function generateViaChatPy(
   const useSd =
     Boolean(opts.image) &&
     (mode === "assistant" || Boolean(opts.illustrateScene));
+  const coding = Boolean(opts.coding) && mode === "assistant";
   const noContext = Boolean(opts.noContext);
   const pending = opts.regenerate
     ? lastUserMessage(useChatStore.getState().branches[originId]?.messages ?? [])
         ?.attachments ?? []
     : store.pendingAttachments;
   const flags: TurnFlags | undefined =
-    agent || useSd || noContext || opts.ooc || opts.includeBranch
+    agent || useSd || coding || noContext || opts.ooc || opts.includeBranch
       ? {
           agent,
           image: useSd,
+          coding,
           noContext,
           ooc: opts.ooc,
           includeBranch: opts.includeBranch,
@@ -557,7 +574,9 @@ async function generateViaChatPy(
         ? "Stable Diffusion…"
         : agent
           ? "Agent Web Search…"
-          : "RAG Processing…",
+          : coding
+            ? "Coding…"
+            : "RAG Processing…",
       createdAt: Date.now(),
     },
     [],
@@ -602,6 +621,7 @@ async function generateViaChatPy(
         regenerate: Boolean(opts.regenerate),
         useAgent: agent,
         useSd,
+        useCoding: coding,
         illustrateScene: Boolean(opts.illustrateScene),
         noContext,
         rare: opts.rare,
@@ -622,6 +642,8 @@ async function generateViaChatPy(
       (event) => {
         if (event.type === "documents") {
           window.dispatchEvent(new Event("spur-documents"));
+        } else if (event.type === "project") {
+          window.dispatchEvent(new Event("spur-project"));
         } else if (event.type === "status") {
           if (event.model) model = event.model;
           if (event.route) route = event.route;

@@ -185,6 +185,13 @@ class Orchestration():
 
         return False
 
+    def requires_coding(self, documents: dict | None = None) -> bool:
+        """True when the Coding toggle / \\coding is on this turn."""
+        documents = documents or {}
+        if not self.args.assistant_mode:
+            return False
+        return bool(documents.get('use_coding'))
+
     @staticmethod
     def _extract_mode(meta_tags: list[RAGTag],
                       documents: dict | None = None)->str:
@@ -213,6 +220,9 @@ class Orchestration():
 
         if self._requires_vision(documents):
             return self.get_model('vision')
+
+        if self.requires_coding(documents):
+            return self.get_model('coding')
 
         assistant_mode = self._extract_mode(meta_tags, documents)
         if self.args.debug:
@@ -243,6 +253,8 @@ class Orchestration():
             return 'agent'
         if self._requires_vision(documents):
             return 'vision'
+        if self.requires_coding(documents):
+            return 'coding'
         return self._extract_mode(meta_tags, documents)
 
     def get_rout_name(self, meta_tags: list[RAGTag],

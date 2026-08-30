@@ -25,6 +25,7 @@ export type StreamMetrics = {
 export type TurnFlags = {
   agent?: boolean;
   image?: boolean;
+  coding?: boolean;
   noContext?: boolean;
   ooc?: boolean;
   includeBranch?: string;
@@ -73,6 +74,7 @@ export type ChatSnapshot = {
   pendingAttachments: Attachment[];
   forceAgent: boolean;
   forceSd: boolean;
+  forceCoding: boolean;
   sdEnabled: boolean;
   needsSetup: boolean;
   pendingOoc: string;

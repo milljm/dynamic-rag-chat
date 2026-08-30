@@ -45,6 +45,21 @@ A live lookup failed. Tell the user you could not fetch current information. Do 
 {{gold_resume}}
 </GOLD_RESUME>
 {% endif %}
+{% if use_coding %}
+<PROJECT_FILES - WORKSPACE TREE. WRITE WITH NAMED FENCES. RUN/READ WITH OWN-LINE TAGS>
+{{project_index}}
+</PROJECT_FILES>
+{% endif %}
+{% if project_resume %}
+<PROJECT_RESUME - THE USER ALREADY SAW THIS. DO NOT REPEAT IT. RESULT IS IN PROJECT_RESULT. CONTINUE.>
+{{project_resume}}
+</PROJECT_RESUME>
+{% endif %}
+{% if project_result %}
+<PROJECT_RESULT>
+{{project_result}}
+</PROJECT_RESULT>
+{% endif %}
 <CHAT_HISTORY - FLOW AND TONE. SUPERSEDES AI_RAG FOR FACTS>
 {{chat_history}}
 </CHAT_HISTORY>

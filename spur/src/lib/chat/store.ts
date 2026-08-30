@@ -11,6 +11,7 @@ import {
   applyResetBranch,
   applyRewind,
   applySetForceAgent,
+  applySetForceCoding,
   applySetForceSd,
   applySetMode,
   applySwitch,
@@ -41,6 +42,7 @@ type ChatActions = {
   setMode: (mode: Mode) => boolean;
   setForceAgent: (enabled: boolean) => void;
   setForceSd: (enabled: boolean) => void;
+  setForceCoding: (enabled: boolean) => void;
   createBranch: (
     raw: string,
   ) => { ok: true; id: string } | { ok: false; error: string };
@@ -112,6 +114,7 @@ export const useChatStore = create<ChatStore>()(
 
       setForceAgent: (enabled) => set((s) => applySetForceAgent(s, enabled)),
       setForceSd: (enabled) => set((s) => applySetForceSd(s, enabled)),
+      setForceCoding: (enabled) => set((s) => applySetForceCoding(s, enabled)),
 
       createBranch: (raw) => {
         const parsed = parseBranchInput(raw);
@@ -283,6 +286,7 @@ export const useChatStore = create<ChatStore>()(
             pendingAttachments: current.pendingAttachments,
             forceAgent: false,
             forceSd: false,
+            forceCoding: false,
             sdEnabled: current.sdEnabled ?? false,
             needsSetup: current.needsSetup ?? false,
             pendingOoc: current.pendingOoc ?? "",

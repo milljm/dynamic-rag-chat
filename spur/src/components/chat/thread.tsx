@@ -3,6 +3,7 @@ import {
   ArrowDown,
   Bot,
   BookOpen,
+  Code,
   GitBranch,
   Globe,
   Lock,
@@ -209,7 +210,9 @@ function EmptyState({
         ) : (
           <>
             Use <span className="font-mono text-foreground">\agent</span> for
-            live search, or switch to the{" "}
+            live search,{" "}
+            <span className="font-mono text-foreground">\coding</span> for a
+            project workspace, or switch to the{" "}
             <span className="text-foreground">story</span> branch to write.
           </>
         )}
@@ -274,6 +277,7 @@ function MessageBubble({
         )}
         {(message.flags?.agent ||
           message.flags?.image ||
+          message.flags?.coding ||
           message.flags?.noContext ||
           message.flags?.includeBranch ||
           message.flags?.ooc) && (
@@ -282,6 +286,12 @@ function MessageBubble({
               <>
                 <Globe className="size-3" />
                 Agent
+              </>
+            )}
+            {message.flags.coding && (
+              <>
+                <Code className="size-3" />
+                Coding
               </>
             )}
             {message.flags.image && (
@@ -438,7 +448,10 @@ function StatusLine({
     );
   }
   const showModel =
-    Boolean(model) && /^(Streaming|Processing Prompt|Reasoning)/i.test(label);
+    Boolean(model) &&
+    /^(Streaming|Processing Prompt|Reasoning|Running|Reading|Coding)/i.test(
+      label,
+    );
   return (
     <p className="text-sm text-muted-foreground">
       <span className="shimmer-text">{label}</span>

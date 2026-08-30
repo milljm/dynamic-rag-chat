@@ -40,6 +40,16 @@ from .sd_session import (
 from .think_tags import ThinkFeed, chunk_text, split_think
 from .sd_tools import make_sd_tools, seed_last_generated
 from .gold_fetch import MAX_GOLD_FETCHES, take_need_gold, recall_status
+from .project_store import (
+    MAX_PROJECT_OPS,
+    format_read,
+    format_run,
+    persist_named_fences,
+    read_file,
+    run_file,
+    take_project_tag,
+    tree_listing,
+)
 
 
 def _abort_llm_stream(stream) -> None:
@@ -827,9 +837,15 @@ class RenderWindow(PromptManager):
 
         if hasattr(self.state, 'context'):
             self.state.context.fill_documents_index(documents)
+        if documents.get('use_coding'):
+            documents['project_index'] = tree_listing(self.opts.vector_dir)
         documents.setdefault('documents_index', '')
         documents.setdefault('has_documents_index', False)
         documents.setdefault('gold_resume', '')
+        documents.setdefault('use_coding', False)
+        documents.setdefault('project_index', '(empty workspace)')
+        documents.setdefault('project_resume', '')
+        documents.setdefault('project_result', '')
         documents.setdefault('attached_files_note', '')
         documents.setdefault('dynamic_files', '')
         documents.setdefault('include_branch', '')
@@ -1089,6 +1105,47 @@ class RenderWindow(PromptManager):
             assembled = (visible.rstrip() + '\n' + more).strip()
         return assembled
 
+    def _resume_project_ops(
+        self, assembled: str, documents: dict, meta_data, messages,
+        footer_meta, color, live, inference_start, first_token_at,
+    ) -> str:
+        """Persist named fences; honour <RUN:> / <READ:> and continue."""
+        del messages
+        if not documents.get('use_coding') or not self.opts.assistant_mode:
+            return assembled
+        vector = str(self.opts.vector_dir)
+        ops = 0
+        while ops < MAX_PROJECT_OPS:
+            persist_named_fences(vector, assembled)
+            visible, action, rel = take_project_tag(assembled)
+            assembled = visible
+            if not rel:
+                break
+            if action == 'read':
+                text = read_file(vector, rel)
+                documents['project_result'] = (
+                    format_read(rel, text) if text is not None
+                    else f'=== PROJECT_READ {rel} ===\n(missing)'
+                )
+                status = f'Reading {rel}…'
+            else:
+                documents['project_result'] = format_run(run_file(vector, rel))
+                status = f'Running {rel}…'
+            documents['project_resume'] = visible
+            documents['project_index'] = tree_listing(vector)
+            self.renderable.response = Text(status, style=f'color({color}')
+            self.render_chat(live)
+            packed = self.get_messages(meta_data, documents)
+            more, later = self._consume_model_stream(
+                packed, documents, footer_meta, color, live, inference_start,
+            )
+            if later and not first_token_at:
+                first_token_at = later
+            assembled = (visible.rstrip() + '\n' + more).strip()
+            ops += 1
+        persist_named_fences(vector, assembled)
+        return assembled
+
     def _run_polisher(self, documents, meta_data, footer_meta, color, live,
                       inference_start, first_token_at, current_response) -> str:
         """Optional polish passes; returns the last pass text."""
@@ -1185,6 +1242,10 @@ class RenderWindow(PromptManager):
                     inference_start,
                 )
                 current_response = self._resume_gold_fetches(
+                    current_response, documents, meta_data, messages,
+                    footer_meta, color, live, inference_start, first_token_at,
+                )
+                current_response = self._resume_project_ops(
                     current_response, documents, meta_data, messages,
                     footer_meta, color, live, inference_start, first_token_at,
                 )

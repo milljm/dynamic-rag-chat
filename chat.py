@@ -101,6 +101,7 @@ HELP_TEXT = (
     '\t\\regenerate                  - regenerate last turn\n'
     '\t\\no-context msg              - perform a query with no context\n'
     '\t\\agent msg                   - force agent (web search)\n'
+    '\t\\coding msg                  - write/run files in the Projects workspace\n'
     '\t\\image msg                   - force Stable Diffusion (Automatic1111)\n'
     '\t\\delete-last                 - delete last message from history\n'
     '\t\\turn                        - show turn/status\n'
@@ -795,7 +796,7 @@ class Chat():
         if cmd in skip_and_done:
             skip_and_done[cmd]()
             return parsed, True
-        if cmd in ('no-context', 'include', 'agent', 'image'):
+        if cmd in ('no-context', 'include', 'agent', 'image', 'coding'):
             if not self.opts.assistant_mode:
                 console.print('[red]Only available while in assistant mode.[/red]')
                 return parsed, True
@@ -811,7 +812,7 @@ class Chat():
     def _prepare_turn_documents(self, parsed, history: dict, raw: str):
         """Build the documents dict for this user turn, or None on failure."""
         meta_data = []
-        if parsed.command in ('no-context', 'agent', 'image'):
+        if parsed.command in ('no-context', 'agent', 'image', 'coding'):
             if parsed.command == 'no-context':
                 documents = self.no_context(parsed.args or parsed.clean_text)
             else:
@@ -842,6 +843,8 @@ class Chat():
             documents['sd_ran'] = False
         elif self.opts.assistant_mode:
             clear_session(str(self.opts.vector_dir))
+        if parsed.command == 'coding':
+            documents['use_coding'] = True
         if parsed.includes:
             inc_docs = self.load_content_as_context(
                 ' '.join(f'{{{{{x}}}}}' for x in parsed.includes),

@@ -186,3 +186,54 @@ export async function listDocuments(): Promise<GoldDocument[]> {
 export async function deleteDocument(name: string): Promise<RemoteOp> {
   return postOp("/api/documents/delete", { name });
 }
+
+export type ProjectFile = { path: string; chars: number };
+
+export async function listProjectFiles(): Promise<ProjectFile[]> {
+  const res = await fetch(url("/api/projects"));
+  if (!res.ok) return [];
+  const json = (await res.json()) as { files?: ProjectFile[] };
+  return Array.isArray(json.files) ? json.files : [];
+}
+
+export async function getProjectFile(path: string): Promise<string | null> {
+  const res = await fetch(
+    url(`/api/projects/file?path=${encodeURIComponent(path)}`),
+  );
+  if (!res.ok) return null;
+  const json = (await res.json()) as { text?: string };
+  return typeof json.text === "string" ? json.text : null;
+}
+
+export async function deleteProjectFile(path: string): Promise<RemoteOp> {
+  return postOp("/api/projects/delete", { path });
+}
+
+export async function runProjectFile(path: string): Promise<{
+  ok: boolean;
+  path?: string;
+  stdout?: string;
+  stderr?: string;
+  code?: number;
+  cmd?: string;
+  error?: string;
+}> {
+  const res = await fetch(url("/api/projects/run"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path }),
+  });
+  try {
+    return (await res.json()) as {
+      ok: boolean;
+      path?: string;
+      stdout?: string;
+      stderr?: string;
+      code?: number;
+      cmd?: string;
+      error?: string;
+    };
+  } catch {
+    return { ok: false, error: `Run failed (${res.status})` };
+  }
+}
