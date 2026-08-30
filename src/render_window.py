@@ -1,5 +1,6 @@
 """ module responsible for rendering output to the screen """
 from dataclasses import dataclass, field
+import os
 import time
 import re
 import traceback
@@ -28,6 +29,7 @@ from .context_manager import ContextManager # For Type Hinting
 from .chat_utils import CommonUtils, ChatOptions, RAGTag # For Type Hinting
 from .model_orchestrator import Orchestration, MAX_AGENT_CALLS
 from .agent_tools import DuckDuckGoSearchTool
+from .sd_tools import make_sd_tools
 from .think_tags import ThinkFeed, chunk_text, split_think
 from .gold_fetch import MAX_GOLD_FETCHES, take_need_gold, recall_status
 
@@ -157,6 +159,7 @@ class RenderWindow(PromptManager):
         self.ooc_response = ''
         self.llm = None
         self.status_hook = None
+        self.image_hook = None
 
         # populate dataclasses, setup
         self._load_states(current_dir, context, args)
@@ -475,6 +478,12 @@ class RenderWindow(PromptManager):
         if callable(hook):
             hook(message)
 
+    def _emit_image(self, rec: dict) -> None:
+        """Push a generated PNG to Spur while the SD agent is still running."""
+        hook = getattr(self, 'image_hook', None)
+        if callable(hook):
+            hook(rec)
+
     def _invoke_web_agent(self, documents: dict, polish: bool, meta_data) -> list:
         """Run AgentExecutor once, then recurse so a follow-up search can happen."""
         if int(documents.get('agent_calls', 0)) >= MAX_AGENT_CALLS:
@@ -540,6 +549,74 @@ class RenderWindow(PromptManager):
                     style=f'color({self.state.color})',
                     highlight=False,
                 )
+        return self.get_messages(meta_data, documents, polish=polish)
+
+    def _invoke_sd_agent(self, documents: dict, polish: bool, meta_data) -> list:
+        """Run txt2img / img2img / ImageMagick, then recurse to the answerer."""
+        documents['sd_ran'] = True
+        documents.setdefault('original_user_query', documents['user_query'])
+        documents.setdefault('dynamic_files', '')
+        documents.setdefault('generated_images', [])
+        folder = os.path.join(str(self.opts.vector_dir), 'generated')
+        tools = make_sd_tools(
+            self.opts.sd_server,
+            folder,
+            documents['generated_images'],
+            status=self._status,
+            emit_image=self._emit_image,
+        )
+        prompt = ChatPromptTemplate.from_messages([
+            ('system', (
+                'You create images for the user with txt2img. '
+                'Write a detailed visual prompt (subject, medium, lighting, camera). '
+                'After a result you MAY imagemagick or img2img once or twice. '
+                'Then stop. A later model will talk to the user. '
+                'Keep tool chatter short. Do not mention Automatic1111 or pipelines.'
+            )),
+            ('user', '{input}'),
+            MessagesPlaceholder(variable_name='agent_scratchpad'),
+        ])
+        agent = create_openai_tools_agent(self.llm, tools, prompt)
+        agent_executor = AgentExecutor(
+            agent=agent, tools=tools, verbose=False, max_iterations=6,
+        )
+        self._status('Stable Diffusion…')
+        try:
+            self.console.print(
+                'Stable Diffusion (ctl-c to cancel)...',
+                style=f'color({self.state.color})',
+                highlight=False,
+            )
+            result = agent_executor.invoke({
+                'input': documents['original_user_query'],
+            })
+            documents['dynamic_files'] += f'\n=== IMAGE_GEN ===\n{result}\n\n'
+        except KeyboardInterrupt:
+            documents['dynamic_files'] += '\n=== IMAGE_GEN ===\nUSER CANCELED\n\n'
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            self.console.print(
+                f'Stable Diffusion error: {exc}',
+                style=f'color({self.state.color})',
+                highlight=False,
+            )
+            documents['dynamic_files'] += (
+                '\n=== IMAGE_GEN ===\n'
+                'ERROR: image generation failed. Tell the user you could not make the picture. '
+                'Do not mention tools or pipelines.\n\n'
+            )
+        vision = self.orchestrator.get_model('vision')
+        urls = [
+            rec['dataUrl'] for rec in documents.get('generated_images') or []
+            if rec.get('dataUrl')
+        ]
+        if urls and vision is not None and vision.model_name != 'None':
+            documents.setdefault('dynamic_images', [])
+            documents['dynamic_images'].extend(urls[-3:])
+        names = [rec.get('name', '') for rec in documents.get('generated_images') or []]
+        if names:
+            documents['dynamic_files'] += (
+                '\nThe picture is on screen as ' + ', '.join(names[-3:]) + '.\n'
+            )
         return self.get_messages(meta_data, documents, polish=polish)
 
     def get_messages(self,
@@ -653,6 +730,8 @@ class RenderWindow(PromptManager):
                           highlight=False)
 
         documents.setdefault('agent_error', '<AGENT_ERROR: FALSE>')
+        if self.orchestrator.requires_sd(documents):
+            return self._invoke_sd_agent(documents, polish, meta_data)
         if self.orchestrator.requires_agent(meta_data, documents):
             return self._invoke_web_agent(documents, polish, meta_data)
         self.common.write_debug(f'live_stream-{self.llm.model_name}', messages)

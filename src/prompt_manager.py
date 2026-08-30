@@ -89,6 +89,10 @@ class PromptManager():
             extra = f'{self.plot_prompt_file}_search.md'
             if os.path.exists(extra):
                 parts.append(self.get_prompt(extra))
+        if documents.get('generated_images') or documents.get('sd_ran'):
+            extra = f'{self.plot_prompt_file}_sd.md'
+            if os.path.exists(extra):
+                parts.append(self.get_prompt(extra))
         return '\n'.join(parts), human
 
     def compose_nostory_tag(self, documents: dict) -> str:

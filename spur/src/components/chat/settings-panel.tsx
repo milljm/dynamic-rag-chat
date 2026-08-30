@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import {
   fetchSettings,
   pingSettings,
+  pingSd,
   saveSettings,
   ROUTE_ROWS,
   type ModelInfo,
@@ -142,8 +143,10 @@ function SettingsPanel({
   const [models, setModels] = useState<string[]>([]);
   const [details, setDetails] = useState<ModelInfo[]>([]);
   const [pingNote, setPingNote] = useState("");
+  const [sdNote, setSdNote] = useState("");
   const [saving, setSaving] = useState(false);
   const [pinging, setPinging] = useState(false);
+  const [sdPinging, setSdPinging] = useState(false);
 
   function patch(key: SettingsKey, value: string) {
     setValues((prev) => (prev ? { ...prev, [key]: value } : prev));
@@ -240,6 +243,23 @@ function SettingsPanel({
     }
   }
 
+  async function onSdPing() {
+    if (!values?.sd_server) return;
+    setSdPinging(true);
+    try {
+      const ping = await pingSd(values.sd_server);
+      if (ping.ok) {
+        setSdNote(`${ping.models.length} checkpoints`);
+        toast.success(`Automatic1111 — ${ping.models.length} checkpoints`);
+      } else {
+        setSdNote(ping.error || "unreachable");
+        toast.error(ping.error || "Stable Diffusion did not answer");
+      }
+    } finally {
+      setSdPinging(false);
+    }
+  }
+
   async function onSave() {
     if (!values) return;
     if (streaming) {
@@ -333,6 +353,38 @@ function SettingsPanel({
                   </Button>
                   <span className="text-[11px] text-muted-foreground">
                     {pingNote}
+                  </span>
+                </div>
+              </section>
+
+              <section className="grid gap-3">
+                <h3 className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                  Stable Diffusion
+                </h3>
+                <Field
+                  label="Automatic1111"
+                  hint="http://host:7860 with --api. Blank disables."
+                >
+                  <Input
+                    value={values.sd_server}
+                    onChange={(e) => patch("sd_server", e.target.value)}
+                    placeholder="http://127.0.0.1:7860"
+                    autoComplete="off"
+                    spellCheck={false}
+                  />
+                </Field>
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    disabled={sdPinging || !values.sd_server}
+                    onClick={() => void onSdPing()}
+                  >
+                    {sdPinging ? "Pinging…" : "Ping"}
+                  </Button>
+                  <span className="text-[11px] text-muted-foreground">
+                    {sdNote}
                   </span>
                 </div>
               </section>

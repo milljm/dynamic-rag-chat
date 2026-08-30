@@ -36,7 +36,7 @@ from typing import Any, AsyncIterator, Iterator
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from rich.console import Console
 
@@ -68,6 +68,7 @@ from src.settings_yaml import (  # noqa: E402
     load_file as load_settings_file,
     save_file as save_settings_file,
 )
+from src.sd_client import ping_sd  # noqa: E402
 
 LOCKED_BRANCHES = frozenset({'assistant', 'story'})
 # Metadata keys in the history file — not message lists.
@@ -132,6 +133,7 @@ def _opts_snapshot(opts: ChatOptions) -> dict[str, str]:
         'entity_llm': blank(opts.entity_llm),
         'entity_server': blank(opts.entity_host),
         'tavily_key': blank(opts.tavily_key),
+        'sd_server': blank(getattr(opts, 'sd_server', '')),
     }
 
 
@@ -167,6 +169,19 @@ def sse(obj: dict[str, Any]) -> str:
     # of the stream.
     payload = json.dumps(obj).replace('<', '\\u003c').replace('>', '\\u003e')
     return f'data: {payload}\n\n'
+
+
+def _hook_sse(kind: str, payload: Any) -> bytes:
+    """status_hook / image_hook frames from the SD or web agent thread."""
+    if kind == 'image' and isinstance(payload, dict):
+        return sse({
+            'type': 'image',
+            'name': payload.get('name') or 'image.png',
+            'mime': payload.get('mime') or 'image/png',
+            'dataUrl': payload.get('dataUrl') or '',
+            'size': int(payload.get('size') or 0),
+        }).encode()
+    return sse({'type': 'status', 'message': str(payload)}).encode()
 
 
 async def _aiter_sync(factory) -> AsyncIterator[bytes]:
@@ -683,6 +698,9 @@ def persist_turn(
         extra['reasoning'] = reasoning
     if metrics:
         extra['metrics'] = metrics
+    generated = documents.get('generated_images') or []
+    if generated:
+        extra['attachments'] = _slim_attachments(_vector_dir(), generated)
     if msgs and msgs[-1].get('role') == 'assistant':
         # save_history runs sanitize_response which strips ``` fences.
         # Restore the streamed answer so reload still highlights.
@@ -849,6 +867,16 @@ async def api_documents_delete(request: Request) -> JSONResponse:
     return JSONResponse({'ok': True, 'error': None, 'message': f'Deleted {name}'})
 
 
+@app.get('/api/generated/{name}')
+def api_generated(name: str):
+    """PNG written by the Stable Diffusion agent."""
+    safe = os.path.basename(name)
+    path = os.path.join(_vector_dir(), 'generated', safe)
+    if not safe or not os.path.isfile(path):
+        return JSONResponse({'ok': False, 'error': 'Not found'}, status_code=404)
+    return FileResponse(path, media_type='image/png', filename=safe)
+
+
 def _prepare_chat_documents(chat, body: dict) -> tuple[dict, list]:
     """Run prepare_turn / no-context and stamp uploads, includes, agent flags."""
     prompt = str(body.get('text') or '')
@@ -901,6 +929,11 @@ def _prepare_chat_documents(chat, body: dict) -> tuple[dict, list]:
         documents['use_agent'] = True
         documents['agent_ran'] = False
         documents['in_line_commands'] = 'Meta: [agent]'
+    force_sd = bool(body.get('useSd')) or parsed.command == 'image'
+    if force_sd and chat.opts.assistant_mode:
+        documents['use_sd'] = True
+        documents['sd_ran'] = False
+        documents['in_line_commands'] = 'Meta: [image]'
     if body.get('rare'):
         documents['system_addendum'] = (
             'Story controls for this turn: ' + ', '.join(body['rare'])
@@ -1049,8 +1082,9 @@ async def api_chat(request: Request) -> StreamingResponse:
         global _streams
         with _stream_lock:
             _streams += 1
-        notes: queue.Queue[str] = queue.Queue()
-        renderer.status_hook = notes.put
+        notes: queue.Queue[tuple[str, Any]] = queue.Queue()
+        renderer.status_hook = lambda msg: notes.put(('status', msg))
+        renderer.image_hook = lambda rec: notes.put(('image', rec))
         try:
             _sync_chat_object(chat)
             if body.get('regenerate'):
@@ -1076,18 +1110,18 @@ async def api_chat(request: Request) -> StreamingResponse:
             pack_task = asyncio.create_task(asyncio.to_thread(_pack))
             while not pack_task.done():
                 try:
-                    msg = notes.get_nowait()
+                    kind, payload = notes.get_nowait()
                 except queue.Empty:
                     await asyncio.sleep(0.05)
                     continue
-                yield sse({'type': 'status', 'message': msg}).encode()
+                yield _hook_sse(kind, payload)
             packed = await pack_task
             while True:
                 try:
-                    msg = notes.get_nowait()
+                    kind, payload = notes.get_nowait()
                 except queue.Empty:
                     break
-                yield sse({'type': 'status', 'message': msg}).encode()
+                yield _hook_sse(kind, payload)
 
             model = getattr(renderer.llm, 'model_name', '') or ''
             route = (renderer.orchestrator.name_of(renderer.llm)
@@ -1132,6 +1166,7 @@ async def api_chat(request: Request) -> StreamingResponse:
             yield sse({'type': 'error', 'error': str(exc)}).encode()
         finally:
             renderer.status_hook = None
+            renderer.image_hook = None
             with _stream_lock:
                 _streams -= 1
     return StreamingResponse(
@@ -1225,9 +1260,12 @@ async def api_settings_save(request: Request) -> JSONResponse:
 async def api_settings_ping(request: Request) -> JSONResponse:
     """List models on an OpenAI-compatible server (LM Studio / Ollama)."""
     body = await request.json()
-    host = blank(body.get('host') or body.get('llm_server'))
+    host = blank(body.get('host') or body.get('llm_server') or body.get('sd_server'))
     api_key = blank(body.get('api_key')) or 'none'
-    result = list_models(host, api_key)
+    if body.get('kind') == 'sd':
+        result = ping_sd(host)
+    else:
+        result = list_models(host, api_key)
     return JSONResponse(result, status_code=200 if result.get('ok') else 502)
 
 

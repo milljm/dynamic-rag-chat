@@ -95,6 +95,7 @@ That is the whole product: targeted context, not a bigger window.
   Summarize {{https://example.com/article}}
   ```
 - **Agents** — pre-processor can request a web search (threshold via `--distrust-confidence`), or force it with `\agent …`. The agent may re-search once more (cap 2) if the first dump looks thin.
+- **Stable Diffusion** — Settings → Automatic1111 URL (`--sd-server`). “draw me a …” or `\image …` runs txt2img, optional ImageMagick / img2img, then the vision model talks about the picture. Needs `--api` on A1111. Assistant mode only.
 - **Think tags** — MiniMax `<mm:think>`, `<think>`, and null-token reasoners are split out of the visible stream. Spur has a Reasoning disclosure.
 - **Debug** — `--debug` / `--prompts-debug` dumps prompts, tags, and RAG payloads
 
@@ -107,6 +108,7 @@ Same slash commands in Spur, Streamlit, and the terminal.
 \regenerate                 regenerate last turn
 \no-context msg             query with no RAG / history context
 \agent msg                  force web-search agent
+\image msg                  force Stable Diffusion (Automatic1111)
 \delete-last                drop the last user+assistant pair
 \turn                       print current turn count
 \rewind N                   keep turns 1..N

@@ -2,6 +2,7 @@
 import re
 from langchain_openai import ChatOpenAI
 from .chat_utils import ChatOptions, RAGTag # For Type Hinting
+from .sd_client import sd_enabled
 
 MAX_AGENT_CALLS = 2
 # Tagger often scores these 1.0 anyway; force a search when the query is live.
@@ -11,6 +12,13 @@ _LIVE_QUERY = re.compile(
     r'|weather\b|current\s+events?'
     r'|right\s+now|as\s+of\b|just\s+released'
     r'|latest\s+(version|release|news|price))'
+)
+_IMAGE_QUERY = re.compile(
+    r'(?ix)'
+    r'\b(draw|paint|sketch|illustrate|render|imagine|generate|create|make)\b'
+    r'.{0,80}\b(image|picture|pic\b|photo|illustration|portrait|logo|icon|wallpaper|artwork|poster)\b'
+    r'|\b(image|picture|illustration|portrait|logo)\s+of\b'
+    r'|\b(txt2img|img2img|stable\s+diffusion)\b'
 )
 
 class Orchestration():
@@ -129,6 +137,28 @@ class Orchestration():
             return True
         return False
 
+    def requires_sd(self, documents: dict | None = None) -> bool:
+        """True when this turn should run the Automatic1111 image agent."""
+        documents = documents or {}
+        if not self.args.assistant_mode or not sd_enabled(getattr(self.args, 'sd_server', '')):
+            return False
+        if documents.get('sd_ran'):
+            return False
+        if documents.get('use_sd'):
+            return True
+        query = str(documents.get('user_query') or '')
+        return bool(_IMAGE_QUERY.search(query))
+
+    def sd_llm(self):
+        """Vision if set (can see the result), else the tool agent, else general."""
+        vision = self.__llm.get('vision')
+        if vision is not None and vision.model_name != 'None':
+            return vision
+        agent = self.__llm.get('agent')
+        if agent is not None and agent.model_name != 'None':
+            return agent
+        return self.__llm['general']
+
     def requires_agent(self, meta_tags: list[RAGTag], documents)->bool:
         """True when this turn should run AgentExecutor (capped at 2)."""
         if not self.args.assistant_mode or self.__llm['agent'].model_name == 'None':
@@ -147,6 +177,8 @@ class Orchestration():
         # Explicit: \agent, Spur Agent toggle, or pre-processor search_internet
         if documents.get('use_agent'):
             return True
+        if self.requires_sd(documents):
+            return False
         query = str(documents.get('user_query') or '')
         if _LIVE_QUERY.search(query) and not (
                 documents.get('has_images') or documents.get('dynamic_images')
@@ -179,6 +211,8 @@ class Orchestration():
 
     def _route_assistant(self, meta_tags, documents)->ChatOpenAI:
         """Pick agent / vision / tagged assistant model."""
+        if self.requires_sd(documents):
+            return self.sd_llm()
         if self.requires_agent(meta_tags, documents):
             return self.get_model('agent')
 
@@ -206,6 +240,8 @@ class Orchestration():
             if documents.get('explicit', False):
                 return 'nsfw'
             return 'story'
+        if self.requires_sd(documents):
+            return 'sd'
         if self.requires_agent(meta_tags, documents):
             return 'agent'
         if self._requires_vision(documents):

@@ -13,7 +13,7 @@ import { chatPyOrigin, usesChatPy } from "./remote";
 import { ragFromPending, useChatStore } from "./store";
 import { streamChat, streamSse } from "./stream";
 import { feedThink } from "./think";
-import type { Message, RagChunk, StreamMetrics, TurnFlags } from "./types";
+import type { Attachment, Message, RagChunk, StreamMetrics, TurnFlags } from "./types";
 
 function estimateTokens(text: string): number {
   return Math.max(1, Math.round(text.length / 4));
@@ -33,6 +33,7 @@ export function useSend() {
       text: string;
       regenerate?: boolean;
       agent?: boolean;
+      image?: boolean;
       noContext?: boolean;
       rare?: string[];
       ooc?: boolean;
@@ -304,17 +305,20 @@ export function useSend() {
           toast.message(
             parsed.agent
               ? "Usage: \\agent your question"
-              : "Usage: \\no-context your question",
+              : parsed.image
+                ? "Usage: \\image what to draw"
+                : "Usage: \\no-context your question",
           );
           return;
         }
-        if (parsed.agent && modeOf(branch) !== "assistant") {
-          toast.message("Agent is only available in assistant mode.");
+        if ((parsed.agent || parsed.image) && modeOf(branch) !== "assistant") {
+          toast.message("Only available in assistant mode.");
           return;
         }
         await generate({
           text: parsed.text,
           agent: parsed.agent,
+          image: parsed.image,
           noContext: parsed.noContext,
           rare: parsed.rare,
           ooc: parsed.ooc,
@@ -445,6 +449,7 @@ type GenerateOpts = {
   text: string;
   regenerate?: boolean;
   agent?: boolean;
+  image?: boolean;
   noContext?: boolean;
   rare?: string[];
   ooc?: boolean;
@@ -466,6 +471,7 @@ async function generateViaChatPy(
 
   const mode = modeOf(branch);
   const agent = Boolean(opts.agent) && mode === "assistant";
+  const useSd = Boolean(opts.image) && mode === "assistant";
   const noContext = Boolean(opts.noContext);
   const pending = opts.regenerate
     ? lastUserMessage(useChatStore.getState().branches[originId]?.messages ?? [])
@@ -534,6 +540,7 @@ async function generateViaChatPy(
   let context = 0;
   let recalling = false;
   let recalled: string[] = [];
+  let attachments: Attachment[] = [];
 
   const ac = new AbortController();
   abortRef.current = ac;
@@ -549,6 +556,7 @@ async function generateViaChatPy(
         text: opts.text,
         regenerate: Boolean(opts.regenerate),
         useAgent: agent,
+        useSd,
         noContext,
         rare: opts.rare,
         includeBranch: opts.includeBranch,
@@ -616,6 +624,21 @@ async function generateViaChatPy(
                   streamingContext: context || undefined,
                 }),
           });
+        } else if (event.type === "image") {
+          if (event.dataUrl) {
+            attachments = [
+              ...attachments.filter((a) => a.name !== event.name),
+              {
+                id: crypto.randomUUID(),
+                name: event.name || "image.png",
+                mime: event.mime || "image/png",
+                kind: "image" as const,
+                dataUrl: event.dataUrl,
+                size: event.size || 0,
+              },
+            ];
+            patch({ attachments });
+          }
         } else if (event.type === "usage") {
           promptTokens = event.promptTokens;
           completionTokens = event.completionTokens;
@@ -652,6 +675,7 @@ async function generateViaChatPy(
           ttft,
         },
         recalled: recalled.length ? recalled : undefined,
+        attachments: attachments.length ? attachments : undefined,
         status: undefined,
       },
       originId,

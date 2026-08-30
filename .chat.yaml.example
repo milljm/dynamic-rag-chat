@@ -199,6 +199,8 @@
    tavily_key: YOUR_TAVILY_KEY          # Your assigned API key from Tavily (deep web search)
                                         # Leave empty if not using Tavily
 
+   sd_server: http://127.0.0.1:7860     # Automatic1111 with --api. Blank disables image gen.
+
    # ---------------------------------------------------------------------------
    # UI / UX
    # ---------------------------------------------------------------------------

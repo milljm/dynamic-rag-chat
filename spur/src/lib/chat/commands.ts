@@ -14,6 +14,7 @@ export type SlashResult =
   | {
       kind: "inline";
       agent: boolean;
+      image: boolean;
       noContext: boolean;
       text: string;
       rare: string[];
@@ -77,11 +78,12 @@ export function parseComposerInput(raw: string): SlashResult {
   const rest = lines.slice(1).join("\n").trim();
   const body = [argLine, rest].filter(Boolean).join("\n");
 
-  if (cmd === "agent" || cmd === "no-context") {
+  if (cmd === "agent" || cmd === "no-context" || cmd === "image") {
     const { text, rare } = stripRare(body);
     return {
       kind: "inline",
       agent: cmd === "agent",
+      image: cmd === "image",
       noContext: cmd === "no-context",
       text,
       rare,
@@ -135,6 +137,7 @@ export const SLASH_HELP = [
   { cmd: "\\delete-last", hint: "Drop the last user/assistant turn" },
   { cmd: "\\rewind N", hint: "Keep only the first N turns" },
   { cmd: "\\agent msg", hint: "Force web search, then answer" },
+  { cmd: "\\image msg", hint: "Force Stable Diffusion (Automatic1111)" },
   { cmd: "\\no-context msg", hint: "Skip retrieval this turn" },
   { cmd: "\\include NAME msg", hint: "Attach another branch as context" },
   { cmd: "\\history N", hint: "Show the last N user inputs" },

@@ -136,6 +136,14 @@ class SettingsYamlTest(unittest.TestCase):
         self.assertEqual(read_values(out)['tavily_key'], 'tvly-test')
         self.assertEqual(read_values(upsert_keys(out, {'tavily_key': ''}))['tavily_key'], '')
 
+    def test_sd_server_roundtrip(self):
+        out = upsert_keys(SAMPLE, {'sd_server': 'http://192.168.1.9:7860'})
+        self.assertIn('sd_server: http://192.168.1.9:7860', out)
+        self.assertEqual(
+            read_values(out)['sd_server'], 'http://192.168.1.9:7860',
+        )
+
+
 
 if __name__ == '__main__':
     unittest.main()
