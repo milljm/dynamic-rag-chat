@@ -82,17 +82,7 @@ class RAG():
         self.common = common
         self.opts = args
         self.retriever_id = 0
-
-        # hack for now, until Ollama supports v1/embeddings?
-        if self.opts.emb_host.find(':11434') != -1:
-            # https://someaddress.com/v1 --> someaddress:11434
-            ugh = re.findall(r'([\w+\.-]+:[0-9]+)', self.opts.emb_host)[0]
-            self.embeddings = OllamaEmbeddings(base_url=ugh, model=self.opts.embeddings)
-        else:
-            self.embeddings = OpenAIEmbeddings(base_url=self.opts.emb_host,
-                                               model=self.opts.embeddings,
-                                               api_key=self.opts.api_key,
-                                               check_embedding_ctx_length=False)
+        self.embeddings = self._make_embeddings()
 
         p_chunk_size = 1000
         p_chunk_overlap = 500
@@ -112,6 +102,32 @@ class RAG():
         self.child_splitter = RecursiveCharacterTextSplitter(chunk_size=c_chunk_size,
                                                              chunk_overlap=c_chunk_overlap,
                                                              separators=c_separators)
+
+    def _make_embeddings(self):
+        """Ollama vs OpenAI embeddings. None until Settings has a server + model."""
+        host = str(getattr(self.opts, 'emb_host', None) or '')
+        model = getattr(self.opts, 'embeddings', None)
+        if not host or not model:
+            return None
+        try:
+            if ':11434' in host:
+                # https://someaddress.com/v1 --> someaddress:11434
+                found = re.findall(r'([\w+\.-]+:[0-9]+)', host)
+                if not found:
+                    return None
+                return OllamaEmbeddings(base_url=found[0], model=model)
+            return OpenAIEmbeddings(
+                base_url=host,
+                model=model,
+                api_key=self.opts.api_key,
+                check_embedding_ctx_length=False,
+            )
+        except Exception:  # pylint: disable=broad-exception-caught
+            return None
+
+    def _embeddings_ready(self) -> bool:
+        """False until Settings fills in an embedding server."""
+        return self.embeddings is not None
 
     @staticmethod
     def _normalize_collection_name(name: str,
@@ -376,7 +392,7 @@ class RAG():
         List tags are stored as comma-joined strings, so Chroma `$in` never
         matches a single name. Filter those in Python instead.
         """
-        if self.opts.matches == 0:
+        if not self._embeddings_ready() or self.opts.matches == 0:
             return []
         field, values = self._filter_spec(metadatas)
         k = self.opts.matches
@@ -406,6 +422,8 @@ class RAG():
         """ store data into the RAG with optional metadata tagged with it """
         if not collection:
             collection = self.common.attributes.collections['ai']
+        if not self._embeddings_ready():
+            return
         # Remove metadata tagging information from data
         data = self.common.sanitize_response(data, strip=True)
         if tags_metadata is None:

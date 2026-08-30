@@ -36,6 +36,8 @@ type RemoteBranch = {
 export type RemoteSession = {
   currentId: string;
   branches: Record<string, RemoteBranch>;
+  needsSetup?: boolean;
+  sdEnabled?: boolean;
 };
 
 export function coerceContent(value: unknown): string {

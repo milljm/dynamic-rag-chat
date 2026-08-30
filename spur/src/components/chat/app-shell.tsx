@@ -11,9 +11,9 @@ import { Composer } from "./composer";
 import { Sidebar } from "./sidebar";
 import { Thread } from "./thread";
 
-const SIDEBAR_MIN = 240;
+const SIDEBAR_MIN = 350;
 const SIDEBAR_MAX = 560;
-const SIDEBAR_DEFAULT = 320;
+const SIDEBAR_DEFAULT = 350;
 
 export function AppShell() {
   const ready = useHydrateChat();
@@ -49,7 +49,7 @@ export function AppShell() {
             overflow: "hidden",
           }}
         >
-          <div className="h-full" style={{ width: sidebar.width }}>
+          <div className="h-full min-w-0 overflow-hidden" style={{ width: sidebar.width }}>
             <Sidebar streaming={streaming} onCollapse={() => sidebar.setOpen(false)} />
           </div>
           {sidebar.open && (

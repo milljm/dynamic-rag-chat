@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Settings2, X } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -6,12 +6,13 @@ import {
   pingSettings,
   pingSd,
   saveSettings,
-  ROUTE_ROWS,
+  ROUTE_GROUPS,
   type ModelInfo,
   type SettingsKey,
   type SettingsValues,
 } from "@/lib/chat/settings";
 import { usesChatPy } from "@/lib/chat/remote";
+import { useChatStore } from "@/lib/chat/store";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -23,7 +24,7 @@ const fieldLabelClass =
   "text-[11px] font-medium uppercase tracking-wide text-muted-foreground";
 
 const modelLabelClass =
-  "font-display text-[13px] font-semibold uppercase tracking-[0.32em] text-route";
+  "font-display text-[11px] font-semibold uppercase tracking-[0.32em] text-route";
 
 function Field({
   label,
@@ -116,7 +117,15 @@ function ModelSelect({
 }
 
 export function SettingsButton({ streaming }: { streaming: boolean }) {
+  const needsSetup = useChatStore((s) => s.needsSetup);
   const [open, setOpen] = useState(false);
+  const openedOnce = useRef(false);
+  useEffect(() => {
+    if (needsSetup && !openedOnce.current) {
+      openedOnce.current = true;
+      setOpen(true);
+    }
+  }, [needsSetup]);
   if (!usesChatPy()) return null;
   return (
     <>
@@ -310,6 +319,7 @@ function SettingsPanel({
       setValues({ ...result.effective, ...result.values });
       setEffective(result.effective);
       toast.success(result.message || "Saved. Next turn uses these models.");
+      await useChatStore.getState().hydrateFromServer();
       onClose();
     } catch (err) {
       toast.error(String(err));
@@ -434,7 +444,20 @@ function SettingsPanel({
                   generation pass.
                 </p>
                 <div className="mt-3 grid gap-4">
-                  {ROUTE_ROWS.map((row) => (
+                  {ROUTE_GROUPS.map((group, gi) => (
+                    <div
+                      key={group.title}
+                      className={
+                        gi > 0
+                          ? "mt-1 border-t border-border pt-4"
+                          : undefined
+                      }
+                    >
+                      <h4 className="mb-3 text-[11px] font-medium text-muted-foreground">
+                        {group.title}
+                      </h4>
+                      <div className="grid gap-4">
+                  {group.rows.map((row) => (
                     <div key={row.id} className="grid gap-1.5">
                       <span className={modelLabelClass}>
                         {row.label}
@@ -473,6 +496,9 @@ function SettingsPanel({
                           />
                         </Field>
                       ) : null}
+                    </div>
+                  ))}
+                      </div>
                     </div>
                   ))}
                 </div>

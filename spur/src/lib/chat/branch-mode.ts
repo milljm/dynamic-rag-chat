@@ -421,6 +421,8 @@ export function emptySnapshot(): ChatSnapshot {
     pendingAttachments: [],
     forceAgent: false,
     forceSd: false,
+    sdEnabled: false,
+    needsSetup: false,
     pendingOoc: "",
     branches: {
       story: lockedBranch("story", now),
@@ -475,6 +477,8 @@ export function migrateSnapshot(raw: ChatSnapshot): ChatSnapshot {
     pendingAttachments: raw.pendingAttachments ?? [],
     forceAgent: false,
     forceSd: false,
+    sdEnabled: raw.sdEnabled ?? false,
+    needsSetup: raw.needsSetup ?? false,
     pendingOoc: "",
   };
 }

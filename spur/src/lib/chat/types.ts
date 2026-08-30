@@ -73,5 +73,7 @@ export type ChatSnapshot = {
   pendingAttachments: Attachment[];
   forceAgent: boolean;
   forceSd: boolean;
+  sdEnabled: boolean;
+  needsSetup: boolean;
   pendingOoc: string;
 };

@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   BookOpen,
   Bot,
@@ -22,6 +22,7 @@ import {
 } from "@/lib/chat/artifacts";
 import { isLockedBranch, modeOf, turnCount } from "@/lib/chat/branch-mode";
 import { SLASH_HELP } from "@/lib/chat/commands";
+import { previewCharsForWidth } from "@/lib/chat/preview-chars";
 import { listDocuments, deleteDocument, usesChatPy } from "@/lib/chat/remote";
 import type { GoldDocument } from "@/lib/chat/remote";
 import { useChatStore } from "@/lib/chat/store";
@@ -116,6 +117,20 @@ export function Sidebar({
   const deleteBranch = useChatStore((s) => s.deleteBranch);
   const current = branches[currentId];
   const files = artifactsFromMessages(current?.messages ?? []);
+  const asideRef = useRef<HTMLElement>(null);
+  const [barWidth, setBarWidth] = useState(350);
+  const previewChars = previewCharsForWidth(barWidth);
+
+  useEffect(() => {
+    const el = asideRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect.width;
+      if (w && w > 0) setBarWidth(w);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   const list = Object.values(branches).sort((a, b) => {
     if (a.id === currentId) return -1;
@@ -128,8 +143,9 @@ export function Sidebar({
 
   return (
     <aside
+      ref={asideRef}
       className={cn(
-        "flex h-full min-h-0 w-full flex-col bg-card paper text-card-foreground",
+        "flex h-full min-h-0 min-w-0 w-full flex-col overflow-hidden bg-card paper text-card-foreground",
         className,
       )}
     >
@@ -158,7 +174,7 @@ export function Sidebar({
 
       <Separator />
 
-      <ScrollArea className="min-h-0 flex-1">
+      <ScrollArea className="min-h-0 min-w-0 flex-1">
         <SidebarSection id="mode" title="Mode" defaultOpen>
           {current && (
             <ModeToggle
@@ -179,11 +195,12 @@ export function Sidebar({
           badge={list.length}
           bodyClassName="px-2"
         >
-          <ul className="space-y-1">
+          <ul className="min-w-0 space-y-1">
             {list.map((branch) => (
               <BranchRow
                 key={branch.id}
                 branch={branch}
+                previewChars={previewChars}
                 active={branch.id === currentId}
                 onSwitch={() => {
                   const ok = switchBranch(branch.id);
@@ -244,24 +261,26 @@ export function Sidebar({
 function BranchRow({
   branch,
   active,
+  previewChars,
   onSwitch,
   onDelete,
 }: {
   branch: Branch;
   active: boolean;
+  previewChars: number;
   onSwitch: () => void;
   onDelete: () => void;
 }) {
   const turns = turnCount(branch.messages);
   const mode = modeOf(branch);
-  const preview = lastAssistantPreview(branch);
+  const preview = lastAssistantPreview(branch, previewChars);
   const locked = isLockedBranch(branch.id);
   const canDelete = !active && !locked;
 
   return (
     <li
       className={cn(
-        "flex items-stretch gap-0.5 rounded-md transition-[background-color,box-shadow] duration-150",
+        "flex min-w-0 items-stretch gap-0.5 overflow-hidden rounded-md transition-[background-color,box-shadow] duration-150",
         active ? "bg-accent shadow-[var(--shadow-border)]" : "hover:bg-accent/70",
       )}
     >
@@ -295,7 +314,7 @@ function BranchRow({
             <span className="font-mono tabular-nums">· {turns} turns</span>
           </span>
           {preview && (
-            <span className="mt-1 block truncate text-xs text-muted-foreground/80">
+            <span className="mt-1 block min-w-0 max-w-full truncate text-xs text-muted-foreground/80">
               {preview}
             </span>
           )}
@@ -315,13 +334,13 @@ function BranchRow({
   );
 }
 
-function lastAssistantPreview(branch: Branch): string {
+function lastAssistantPreview(branch: Branch, maxChars: number): string {
   const last = [...branch.messages]
     .reverse()
     .find((m) => m.role === "assistant" && m.content);
   if (!last) return "";
   const flat = last.content.replace(/\s+/g, " ").trim();
-  return flat.length > 42 ? `${flat.slice(0, 42)}…` : flat;
+  return flat.length > maxChars ? `${flat.slice(0, maxChars)}…` : flat;
 }
 
 function CreateBranchForm({
@@ -344,12 +363,13 @@ function CreateBranchForm({
         <GitBranch className="size-3.5" />
         New branch
       </label>
-      <div className="flex gap-2">
+      <div className="flex min-w-0 gap-2">
         <Input
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="alt-ending or testing@5"
           aria-label="Branch name"
+          className="min-w-0"
         />
         <Button type="submit" size="icon" aria-label="Create branch">
           <Plus />
