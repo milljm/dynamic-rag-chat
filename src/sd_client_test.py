@@ -10,6 +10,7 @@ from sd_client import (  # noqa: E402
     magick_argv,
     normalize_sd_url,
     sd_enabled,
+    wants_sd,
     _txt2img_payload,
 )
 
@@ -54,6 +55,13 @@ class SdClientTest(unittest.TestCase):
         self.assertIn('Hello world', magick_argv('caption', 'Hello world'))
         with self.assertRaises(ValueError):
             magick_argv('caption', 'rm -rf / ; hi')
+
+    def test_followup_make_it_darker(self):
+        self.assertFalse(wants_sd('Now make it darker', has_last=False))
+        self.assertTrue(wants_sd('Now make it darker', has_last=True))
+        self.assertTrue(wants_sd('draw me a red fox'))
+        self.assertTrue(wants_sd('generate an image of a fox'))
+        self.assertFalse(wants_sd('what is a fox'))
 
 
 if __name__ == '__main__':

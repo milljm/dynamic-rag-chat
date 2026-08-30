@@ -20,6 +20,55 @@ MAGICK_OPS = (
     'negate', 'modulate', 'brightness', 'border', 'caption',
 )
 
+# Fresh generate / explicit image request.
+IMAGE_QUERY = re.compile(
+    r'(?ix)'
+    r'\b(draw|paint|sketch|illustrate|render)\s+(me\s+)?(a|an|the|some)\b'
+    r'|\b(draw|paint|sketch|illustrate|render|imagine|generate|create|make)\b'
+    r'.{0,80}\b(image|picture|pic\b|photo|illustration|portrait|logo|icon|wallpaper|artwork|poster)\b'
+    r'|\b(image|picture|illustration|portrait|logo)\s+of\b'
+    r'|\b(txt2img|img2img|stable\s+diffusion)\b'
+    r'|\b(redraw|re-?generate|re-?draw)\b'
+    r'|\b(the|that|this)\s+(image|picture|photo|drawing)\b'
+    r'|\b(add|put)\b.{0,40}\b(border|caption|text|frame)\b'
+)
+# Follow-up tweaks — only when a last PNG exists.
+IMAGE_EDIT = re.compile(
+    r'(?ix)'
+    r'\b(now\s+)?(make|render|paint|do)\s+(it|that|this|the)\b'
+    r'|\b(darker|brighter|warmer|cooler|redder|bluer|softer|sharper|moodier)\b'
+    r'|\b(more|less)\s+(contrast|saturation|shadows?|highlights?|vignette)\b'
+    r'|\b(add|put|give)\s+(a\s+)?(border|caption|text|frame|watermark)\b'
+    r'|\b(crop|resize|rotate|flip|grayscale)\b'
+    r'|\b(tweak|adjust|fix|change|edit)\s+(it|that|this)\b'
+)
+MAGICK_QUERY = re.compile(
+    r'(?ix)'
+    r'\b(border|caption|watermark|label|resize|rotate|flip|'
+    r'grayscale|black\s*and\s*white|blur|sharpen|vignette)\b'
+)
+
+
+def wants_sd(query: str, has_last: bool = False) -> bool:
+    """True when this user text should hit the Automatic1111 agent."""
+    text = query or ''
+    if IMAGE_QUERY.search(text):
+        return True
+    if has_last and IMAGE_EDIT.search(text):
+        return True
+    return False
+
+
+def has_generated_images(vector_dir: str) -> bool:
+    """True when vector_dir/generated has at least one picture."""
+    folder = os.path.join(str(vector_dir or ''), 'generated')
+    if not os.path.isdir(folder):
+        return False
+    for name in os.listdir(folder):
+        if name.lower().endswith(('.png', '.jpg', '.jpeg', '.webp')):
+            return True
+    return False
+
 
 def sd_enabled(host: str | None) -> bool:
     """True when a Stable Diffusion server URL is configured."""

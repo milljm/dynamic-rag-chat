@@ -87,12 +87,12 @@ def make_sd_tools(
     status: Callable[[str], None] | None = None,
     emit_image: Callable[[dict], None] | None = None,
     checkpoint: str = '',
+    allow_magick: bool = False,
 ) -> list:
     """txt2img / img2img once per turn; ImageMagick is cheap follow-up."""
     sd_calls = {'n': 0}
     once_msg = (
-        'Already generated once this turn. Use imagemagick for a cheap edit '
-        '(border, caption, resize, rotate), then stop. The user will ask '
+        'Already generated once this turn. Stop. The user will ask '
         'for another generate on the next turn.'
     )
 
@@ -123,10 +123,7 @@ def make_sd_tools(
         )
         rec = _write_png(folder, blob, stem='txt2img')
         _emit(rec)
-        return (
-            f'Generated {rec["name"]} ({width}x{height}). '
-            'You may imagemagick (border/caption/resize). Do not generate again.'
-        )
+        return f'Generated {rec["name"]} ({width}x{height}). Stop. Do not edit it this turn.'
 
     def do_img2img(
         prompt: str,
@@ -149,10 +146,7 @@ def make_sd_tools(
         )
         out = _write_png(folder, blob, stem='img2img')
         _emit(out)
-        return (
-            f'Re-drew {rec["name"]} → {out["name"]} (denoise {denoising}). '
-            'You may imagemagick. Do not generate again.'
-        )
+        return f'Re-drew {rec["name"]} → {out["name"]}. Stop. Do not generate again.'
 
     def do_magick(
         operation: str,
@@ -180,29 +174,34 @@ def make_sd_tools(
         _emit(out)
         return f'{operation} on {rec["name"]} → {out["name"]}.'
 
-    return [
+    tools = [
         StructuredTool.from_function(
             func=do_txt2img,
             name='txt2img',
             description=(
-                'ONE new image this turn via Stable Diffusion. '
-                'Do not call again. Use imagemagick after, or stop.'
+                'ONE new image this turn via Stable Diffusion. Then stop. '
+                'Do not call imagemagick unless the user asked for a border/caption/resize.'
             ),
         ),
         StructuredTool.from_function(
             func=do_img2img,
             name='img2img',
             description=(
-                'ONE redraw of the last picture this turn (user asked for a change). '
-                'Not for "improving" a fresh txt2img. imagemagick after if needed.'
-            ),
-        ),
-        StructuredTool.from_function(
-            func=do_magick,
-            name='imagemagick',
-            description=(
-                'Cheap edits: resize (1024x1024), rotate, blur, sharpen, grayscale, '
-                'negate, modulate, brightness, border (16), caption (short text).'
+                'ONE redraw of the last picture (user asked for a change like darker). '
+                'Not for improving a fresh txt2img. Then stop.'
             ),
         ),
     ]
+    if allow_magick:
+        tools.append(
+            StructuredTool.from_function(
+                func=do_magick,
+                name='imagemagick',
+                description=(
+                    'ONLY if the user asked: resize, rotate, blur, sharpen, grayscale, '
+                    'negate, modulate, brightness, border (16), caption (short text). '
+                    'Do not add a border on your own.'
+                ),
+            ),
+        )
+    return tools

@@ -2,7 +2,7 @@
 import re
 from langchain_openai import ChatOpenAI
 from .chat_utils import ChatOptions, RAGTag # For Type Hinting
-from .sd_client import sd_enabled
+from .sd_client import has_generated_images, sd_enabled, wants_sd
 
 MAX_AGENT_CALLS = 2
 # Tagger often scores these 1.0 anyway; force a search when the query is live.
@@ -12,16 +12,6 @@ _LIVE_QUERY = re.compile(
     r'|weather\b|current\s+events?'
     r'|right\s+now|as\s+of\b|just\s+released'
     r'|latest\s+(version|release|news|price))'
-)
-_IMAGE_QUERY = re.compile(
-    r'(?ix)'
-    r'\b(draw|paint|sketch|illustrate|render|imagine|generate|create|make)\b'
-    r'.{0,80}\b(image|picture|pic\b|photo|illustration|portrait|logo|icon|wallpaper|artwork|poster)\b'
-    r'|\b(image|picture|illustration|portrait|logo)\s+of\b'
-    r'|\b(txt2img|img2img|stable\s+diffusion)\b'
-    r'|\b(redraw|re-?generate|re-?draw)\b'
-    r'|\b(the|that|this)\s+(image|picture|photo|drawing)\b'
-    r'|\b(add|put)\b.{0,40}\b(border|caption|text|frame)\b'
 )
 
 class Orchestration():
@@ -150,7 +140,8 @@ class Orchestration():
         if documents.get('use_sd'):
             return True
         query = str(documents.get('user_query') or '')
-        return bool(_IMAGE_QUERY.search(query))
+        has_last = has_generated_images(getattr(self.args, 'vector_dir', '') or '')
+        return wants_sd(query, has_last=has_last)
 
     def sd_llm(self):
         """Vision if set (can see the result), else the tool agent, else general."""

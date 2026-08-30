@@ -470,10 +470,11 @@ function SettingsPanel({
                     </div>
                   ))}
                 </div>
-                <details className="mt-4 border-t border-border pt-3">
-                  <summary className="cursor-pointer text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                    Stable Diffusion
-                  </summary>
+              </details>
+              <details className="border-t border-border pt-3">
+                <summary className="cursor-pointer text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                  Stable Diffusion
+                </summary>
                   <div className="mt-3 grid gap-3">
                     <Field
                       label="Automatic1111"
@@ -515,7 +516,6 @@ function SettingsPanel({
                     </div>
                   </div>
                 </details>
-              </details>
             </div>
           )}
         </div>

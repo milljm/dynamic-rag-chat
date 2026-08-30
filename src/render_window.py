@@ -29,8 +29,9 @@ from .context_manager import ContextManager # For Type Hinting
 from .chat_utils import CommonUtils, ChatOptions, RAGTag # For Type Hinting
 from .model_orchestrator import Orchestration, MAX_AGENT_CALLS
 from .agent_tools import DuckDuckGoSearchTool
-from .sd_tools import make_sd_tools, seed_last_generated
+from .sd_client import MAGICK_QUERY
 from .think_tags import ThinkFeed, chunk_text, split_think
+from .sd_tools import make_sd_tools, seed_last_generated
 from .gold_fetch import MAX_GOLD_FETCHES, take_need_gold, recall_status
 
 
@@ -561,6 +562,8 @@ class RenderWindow(PromptManager):
         store = list(prior)
         documents['generated_images'] = store
         last_name = prior[-1]['name'] if prior else ''
+        query = str(documents.get('original_user_query') or '')
+        allow_magick = bool(MAGICK_QUERY.search(query))
         tools = make_sd_tools(
             self.opts.sd_server,
             folder,
@@ -568,22 +571,26 @@ class RenderWindow(PromptManager):
             status=self._status,
             emit_image=self._emit_image,
             checkpoint=getattr(self.opts, 'sd_model', '') or '',
+            allow_magick=allow_magick,
         )
         last_hint = (
             f'The last picture on disk is {last_name}. '
-            'If the user wants a change, img2img that once. '
+            'If the user wants a change (darker, etc), img2img that once. '
             if last_name else
             'No previous picture. Use txt2img once.'
+        )
+        magick_hint = (
+            'The user asked for a cheap edit — you may imagemagick (border/caption/resize). '
+            if allow_magick else
+            'Do not call imagemagick. Do not add a border.'
         )
         prompt = ChatPromptTemplate.from_messages([
             ('system', (
                 'You create or edit one image this turn, then stop.\n'
                 '- New picture → txt2img once (detailed visual prompt).\n'
-                '- Change to the last picture → img2img once.\n'
-                '- Cheap tweak (border, caption, resize, rotate) → imagemagick. '
-                'You may magick after the one generate.\n'
-                'Never call txt2img or img2img a second time to "improve" it. '
-                'The user will ask next turn if they want another generate.\n'
+                '- Change to the last picture (darker, mood, content) → img2img once.\n'
+                f'{magick_hint}\n'
+                'Never generate a second time to "improve" it.\n'
                 f'{last_hint}'
                 'Keep tool chatter short. Do not mention Automatic1111 or pipelines.'
             )),
