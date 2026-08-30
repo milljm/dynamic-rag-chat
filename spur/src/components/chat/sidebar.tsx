@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   BookOpen,
   Bot,
@@ -21,7 +21,7 @@ import {
   type LivedArtifact,
 } from "@/lib/chat/artifacts";
 import { isLockedBranch, modeOf, turnCount } from "@/lib/chat/branch-mode";
-import { SLASH_HELP } from "@/lib/chat/commands";
+import { previewCharsForWidth } from "@/lib/chat/preview-chars";
 import { listDocuments, deleteDocument, usesChatPy } from "@/lib/chat/remote";
 import type { GoldDocument } from "@/lib/chat/remote";
 import { useChatStore } from "@/lib/chat/store";
@@ -116,6 +116,20 @@ export function Sidebar({
   const deleteBranch = useChatStore((s) => s.deleteBranch);
   const current = branches[currentId];
   const files = artifactsFromMessages(current?.messages ?? []);
+  const asideRef = useRef<HTMLElement>(null);
+  const [barWidth, setBarWidth] = useState(350);
+  const previewChars = previewCharsForWidth(barWidth);
+
+  useEffect(() => {
+    const el = asideRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect.width;
+      if (w && w > 0) setBarWidth(w);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   const list = Object.values(branches).sort((a, b) => {
     if (a.id === currentId) return -1;
@@ -128,6 +142,7 @@ export function Sidebar({
 
   return (
     <aside
+      ref={asideRef}
       className={cn(
         "flex h-full min-h-0 w-full flex-col bg-card paper text-card-foreground",
         className,
@@ -184,6 +199,7 @@ export function Sidebar({
               <BranchRow
                 key={branch.id}
                 branch={branch}
+                previewChars={previewChars}
                 active={branch.id === currentId}
                 onSwitch={() => {
                   const ok = switchBranch(branch.id);
@@ -244,17 +260,19 @@ export function Sidebar({
 function BranchRow({
   branch,
   active,
+  previewChars,
   onSwitch,
   onDelete,
 }: {
   branch: Branch;
   active: boolean;
+  previewChars: number;
   onSwitch: () => void;
   onDelete: () => void;
 }) {
   const turns = turnCount(branch.messages);
   const mode = modeOf(branch);
-  const preview = lastAssistantPreview(branch);
+  const preview = lastAssistantPreview(branch, previewChars);
   const locked = isLockedBranch(branch.id);
   const canDelete = !active && !locked;
 
@@ -315,13 +333,13 @@ function BranchRow({
   );
 }
 
-function lastAssistantPreview(branch: Branch): string {
+function lastAssistantPreview(branch: Branch, maxChars: number): string {
   const last = [...branch.messages]
     .reverse()
     .find((m) => m.role === "assistant" && m.content);
   if (!last) return "";
   const flat = last.content.replace(/\s+/g, " ").trim();
-  return flat.length > 52 ? `${flat.slice(0, 52)}…` : flat;
+  return flat.length > maxChars ? `${flat.slice(0, maxChars)}…` : flat;
 }
 
 function CreateBranchForm({
