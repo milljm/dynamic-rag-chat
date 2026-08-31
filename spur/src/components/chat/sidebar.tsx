@@ -849,8 +849,10 @@ function ProjectFiles({
             ) : (
               <>
                 Turn on <span className="text-foreground">Coding</span>. Named
-                fences land here;{" "}
-                <code className="font-mono">{"<RUN:file>"}</code> executes them.
+                fences land here. Write workers under{" "}
+                <span className="font-mono text-foreground">agents/</span>;{" "}
+                <code className="font-mono">{"<RUN:file.py args>"}</code>{" "}
+                executes them.
               </>
             )}
           </p>
@@ -939,8 +941,8 @@ function ProjectFiles({
           </pre>
         ) : null}
         <p className="text-[10px] leading-relaxed text-muted-foreground/70">
-          Workspace the coding model can write and run. Imported dirs stay in
-          place.
+          Local workers the coding model writes and runs. Imported dirs stay
+          in place.
         </p>
       </div>
     </SidebarSection>

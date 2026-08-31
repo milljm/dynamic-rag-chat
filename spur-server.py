@@ -1007,12 +1007,14 @@ async def api_projects_delete(request: Request) -> JSONResponse:
 
 @app.post('/api/projects/run')
 async def api_projects_run(request: Request) -> JSONResponse:
-    """Run a workspace .py / .js file (argv only, cwd = workspace)."""
+    """Run a project .py / .js file (argv only, cwd = active project)."""
     body = await request.json()
     rel = str(body.get('path') or '')
     if not rel:
         return JSONResponse({'ok': False, 'error': 'Missing path'})
-    result = run_project_file(_vector_dir(), rel)
+    extra = body.get('args') or []
+    args = [str(item) for item in extra] if isinstance(extra, list) else []
+    result = run_project_file(_vector_dir(), rel, args)
     return JSONResponse({'ok': result.get('code') == 0, **result})
 
 
@@ -1144,21 +1146,25 @@ def _project_event() -> bytes:
     return sse({'type': 'project', **project_snapshot(_vector_dir())}).encode()
 
 
-def _apply_project_tag(documents: dict, answer: str, action: str, rel: str) -> str:
+def _apply_project_tag(
+    documents: dict, answer: str, action: str, rel: str,
+    args: list[str] | None = None,
+) -> str:
     """Persist fences, run/read, stamp resume fields. Return status line."""
     vector = _vector_dir()
     persist_named_fences(vector, answer)
     documents['use_coding'] = True
     documents['project_resume'] = answer
-    documents['project_index'] = tree_listing(vector)
     if action == 'read':
         text = read_project_file(vector, rel)
         documents['project_result'] = (
             format_read(rel, text) if text is not None
             else f'=== PROJECT_READ {rel} ===\n(missing)'
         )
+        documents['project_index'] = tree_listing(vector)
         return f'Reading {rel}…'
-    documents['project_result'] = format_run(run_project_file(vector, rel))
+    documents['project_result'] = format_run(run_project_file(vector, rel, args))
+    documents['project_index'] = tree_listing(vector)
     return f'Running {rel}…'
 
 
@@ -1304,7 +1310,7 @@ def _iter_sse_chunks(
                 and meta is not None):
             status = _apply_project_tag(
                 documents, answer, project_feed.action or 'run',
-                project_feed.path,
+                project_feed.path, project_feed.args,
             )
             project_ops += 1
             yield _project_event()

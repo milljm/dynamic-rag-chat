@@ -202,7 +202,7 @@ export function Composer({
                 disabled={mode !== "assistant" || streaming}
                 title={
                   mode === "assistant"
-                    ? "Write and run files in Projects"
+                    ? "Write and run local workers in Projects"
                     : "Coding is locked to assistant mode"
                 }
                 onClick={() => setForceCoding(!forceCoding)}

@@ -99,6 +99,32 @@ class WorkspaceTest(unittest.TestCase):
         self.assertEqual(result['code'], 0, result)
         self.assertIn('hello-project', result['stdout'])
 
+    def test_run_args(self):
+        write_file(self.root, 'echo.py', 'import sys\nprint(sys.argv[1])\n')
+        result = run_file(self.root, 'echo.py', ['hello world'])
+        self.assertEqual(result['code'], 0, result)
+        self.assertEqual(result['stdout'].strip(), 'hello world')
+
+    def test_run_args_are_literal(self):
+        write_file(self.root, 'echo.py', 'import sys\nprint(sys.argv[1])\n')
+        result = run_file(self.root, 'echo.py', ['hello; rm -rf /'])
+        self.assertEqual(result['code'], 0, result)
+        self.assertEqual(result['stdout'].strip(), 'hello; rm -rf /')
+
+    def test_worker_writes_files(self):
+        write_file(
+            self.root,
+            'agents/make.py',
+            'from pathlib import Path\n'
+            'Path("src").mkdir(exist_ok=True)\n'
+            'Path("src/out.py").write_text("print(1)\\n")\n'
+            'print("ok")\n',
+        )
+        result = run_file(self.root, 'agents/make.py')
+        self.assertEqual(result['code'], 0, result)
+        self.assertIn('ok', result['stdout'])
+        self.assertEqual(read_file(self.root, 'src/out.py'), 'print(1)\n')
+
     def test_run_missing(self):
         result = run_file(self.root, 'nope.py')
         self.assertNotEqual(result['code'], 0)
@@ -218,22 +244,34 @@ class ProjectTagTest(unittest.TestCase):
     """Own-line RUN/READ, talk is ignored."""
 
     def test_strips_run(self):
-        vis, action, name = take_project_tag('done.\n<RUN:src/hello.py>\n')
+        vis, action, name, args = take_project_tag('done.\n<RUN:src/hello.py>\n')
         self.assertEqual(action, 'run')
         self.assertEqual(name, 'src/hello.py')
+        self.assertEqual(args, [])
         self.assertEqual(vis, 'done.')
+
+    def test_strips_run_args(self):
+        vis, action, name, args = take_project_tag(
+            'ok.\n<RUN:agents/do.py --name "my app">\n',
+        )
+        self.assertEqual(action, 'run')
+        self.assertEqual(name, 'agents/do.py')
+        self.assertEqual(args, ['--name', 'my app'])
+        self.assertEqual(vis, 'ok.')
 
     def test_inline_is_talk(self):
         text = 'emit tags like `<RUN:src/hello.py>` and keep talking'
-        vis, action, name = take_project_tag(text)
+        vis, action, name, args = take_project_tag(text)
         self.assertIsNone(action)
         self.assertIsNone(name)
+        self.assertEqual(args, [])
         self.assertEqual(vis, text)
 
     def test_placeholder_ignored(self):
-        vis, action, name = take_project_tag('<RUN:filename.py>')
+        vis, action, name, args = take_project_tag('<RUN:filename.py>')
         self.assertIsNone(name)
         self.assertIsNone(action)
+        self.assertEqual(args, [])
         self.assertIn('filename.py', vis)
 
     def test_feed_split_tag(self):
@@ -246,11 +284,20 @@ class ProjectTagTest(unittest.TestCase):
         self.assertEqual(b, '')
         self.assertEqual(feed.action, 'run')
         self.assertEqual(feed.path, 'app.js')
+        self.assertEqual(feed.args, [])
+
+    def test_feed_run_args(self):
+        feed = ProjectNeedFeed()
+        _, hit = feed.feed('<RUN:agents/do.py --x foo>\n')
+        self.assertTrue(hit)
+        self.assertEqual(feed.path, 'agents/do.py')
+        self.assertEqual(feed.args, ['--x', 'foo'])
 
     def test_read_tag(self):
-        _, action, name = take_project_tag('<READ:notes.md>')
+        _, action, name, args = take_project_tag('<READ:notes.md>')
         self.assertEqual(action, 'read')
         self.assertEqual(name, 'notes.md')
+        self.assertEqual(args, [])
 
 
 if __name__ == '__main__':

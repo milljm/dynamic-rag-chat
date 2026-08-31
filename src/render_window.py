@@ -1117,7 +1117,7 @@ class RenderWindow(PromptManager):
         ops = 0
         while ops < MAX_PROJECT_OPS:
             persist_named_fences(vector, assembled)
-            visible, action, rel = take_project_tag(assembled)
+            visible, action, rel, args = take_project_tag(assembled)
             assembled = visible
             if not rel:
                 break
@@ -1129,7 +1129,7 @@ class RenderWindow(PromptManager):
                 )
                 status = f'Reading {rel}…'
             else:
-                documents['project_result'] = format_run(run_file(vector, rel))
+                documents['project_result'] = format_run(run_file(vector, rel, args))
                 status = f'Running {rel}…'
             documents['project_resume'] = visible
             documents['project_index'] = tree_listing(vector)

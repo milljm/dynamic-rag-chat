@@ -101,7 +101,7 @@ HELP_TEXT = (
     '\t\\regenerate                  - regenerate last turn\n'
     '\t\\no-context msg              - perform a query with no context\n'
     '\t\\agent msg                   - force agent (web search)\n'
-    '\t\\coding msg                  - write/run files in the Projects workspace\n'
+    '\t\\coding msg                  - write/run local workers in the Projects workspace\n'
     '\t\\image msg                   - force Stable Diffusion (Automatic1111)\n'
     '\t\\delete-last                 - delete last message from history\n'
     '\t\\turn                        - show turn/status\n'

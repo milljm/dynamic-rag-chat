@@ -23,7 +23,7 @@ Light mode (washed dust / sand). Code fences have a **theme dropdown** — pick 
 - **URL scrape** — wrap a link in double braces and the page text joins the turn:
   `{{https://example.com/article}}`
 - **Web agent** — `\agent` or the Agent toggle. Live search, then the answering model.
-- **Coding / Projects** — `\coding` or the Coding toggle (assistant). Named fences persist in a workspace sidebar. Add an existing git repo via **Add project dir**. `<RUN:file.py>` executes Python or Node. Image and Coding are exclusive.
+- **Coding / Projects** — `\coding` or the Coding toggle (assistant). Named fences persist in a workspace sidebar. Add an existing git repo via **Add project dir**. The model can write local workers under `agents/` and `<RUN:file.py args>` them (Python or Node, no shell). Image and Coding are exclusive.
 - **Stable Diffusion** — Settings → Automatic1111 URL. **Image** on in assistant (toggle + New ↻). In story, Image is a one-click still of the current beat. No follow-up LLM after the PNG.
 - **Model routes** — casual, coder, vision, agent… fill in only what you run. Three models is enough (generator, pre-conditioner, embeddings).
 - **Branches** — fork, switch, rewind. `story` and `assistant` are protected.
@@ -138,7 +138,7 @@ Same in Spur, Streamlit, and the terminal.
 \regenerate                 regenerate last turn
 \no-context msg             query with no RAG / history context
 \agent msg                  force web-search agent
-\coding msg                 write/run files in the Projects workspace
+\coding msg                 write/run local workers in the Projects workspace
 \image msg                  force Stable Diffusion (Automatic1111)
 \delete-last                drop the last user+assistant pair
 \turn                       print current turn count
@@ -199,7 +199,7 @@ Each **branch** owns `{branch}_user_documents` and `{branch}_ai_documents`. Stor
 | Filename in the query | — | inject the whole file |
 | `<NEED_GOLD:filename>` mid-reply | — | fetch, resume same turn (cap 2) |
 
-**Projects** (Coding toggle / `\coding`): default `vector_dir/projects/workspace/`. **Add project dir** registers an existing directory in place (a git repo stays a git repo). Named fences persist in the active project. Own-line `<RUN:file.py>` or `<READ:file.py>` mid-reply (cap 4). Python and Node only; cwd is the project root.
+**Projects** (Coding toggle / `\coding`): default `vector_dir/projects/workspace/`. **Add project dir** registers an existing directory in place (a git repo stays a git repo). Named fences persist in the active project. Own-line `<RUN:file.py args>` or `<READ:file.py>` mid-reply (cap 8). Python and Node only; cwd is the project root. Workers under `agents/` are ordinary scripts the model writes and runs — they can create files; they must exit.
 
 Chunking is parent/child:
 

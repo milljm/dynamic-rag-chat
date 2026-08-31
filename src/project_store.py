@@ -2,15 +2,17 @@
 
 Default root is ``vector_dir/projects/workspace``. ``add_project`` registers
 an existing directory in place (a git repo stays a git repo). Named fences
-land in the active root when Coding is on. ``<RUN:path>`` / ``<READ:path>``
-are own-line tags (same shape as NEED_GOLD). Execution is argv-only:
-python3 for .py, node for .js — no shell, no path escape.
+land in the active root when Coding is on. ``<RUN:path args>`` /
+``<READ:path>`` are own-line tags (same shape as NEED_GOLD). Execution is
+argv-only: python3 for .py, node for .js — no shell, no path escape.
+Workers under ``agents/`` are ordinary scripts the model writes and runs.
 """
 from __future__ import annotations
 
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 from pathlib import Path
@@ -18,8 +20,10 @@ from typing import Any
 
 MAX_FILE_BYTES = 512_000
 MAX_OUTPUT = 32_000
-RUN_TIMEOUT = 20
-MAX_PROJECT_OPS = 4
+RUN_TIMEOUT = 45
+MAX_PROJECT_OPS = 8
+MAX_RUN_ARGS = 16
+MAX_ARG_LEN = 200
 MAX_LIST_FILES = 400
 MAX_TREE_LINES = 80
 WORKSPACE = 'workspace'
@@ -328,25 +332,34 @@ def interpreter_for(rel: str) -> str | None:
     return None
 
 
-def run_file(vector_dir: str, rel: str) -> dict[str, Any]:
+def run_file(
+    vector_dir: str,
+    rel: str,
+    args: list[str] | None = None,
+) -> dict[str, Any]:
     """Run a project file. Never a shell. cwd is the active project root."""
     name = safe_relpath(rel)
     dest = resolve(vector_dir, rel) if name else None
+    extra = _clean_args(args)
     if not name or dest is None or not dest.is_file():
         return _run_result(name or rel, '', f'No such file: {rel}', 127, '')
     exe = interpreter_for(name)
     if not exe:
         return _run_result(name, '', f'Cannot run {name} (need python3 or node).', 127, '')
     root = project_root(vector_dir).resolve()
+    argv = [exe, name, *extra]
     env = {
         'PATH': os.environ.get('PATH', '/usr/bin'),
         'HOME': str(root),
         'PYTHONUNBUFFERED': '1',
+        'PYTHONPATH': str(root),
+        'NODE_PATH': str(root),
         'LANG': 'C.UTF-8',
     }
+    displayed = _cmd_str(argv)
     try:
         proc = subprocess.run(  # noqa: S603  # argv list, no shell
-            [exe, name],
+            argv,
             cwd=str(root),
             capture_output=True,
             text=True,
@@ -357,15 +370,15 @@ def run_file(vector_dir: str, rel: str) -> dict[str, Any]:
     except subprocess.TimeoutExpired as exc:
         out = _clip(getattr(exc, 'stdout', None) or '')
         err = _clip((getattr(exc, 'stderr', None) or '') + f'\n(timed out after {RUN_TIMEOUT}s)')
-        return _run_result(name, out, err, 124, f'{exe} {name}')
+        return _run_result(name, out, err, 124, displayed)
     except OSError as exc:
-        return _run_result(name, '', str(exc), 127, f'{exe} {name}')
+        return _run_result(name, '', str(exc), 127, displayed)
     return _run_result(
         name,
         _clip(proc.stdout or ''),
         _clip(proc.stderr or ''),
         int(proc.returncode),
-        f'{exe} {name}',
+        displayed,
     )
 
 
@@ -392,18 +405,18 @@ def format_read(rel: str, text: str) -> str:
     return f'=== PROJECT_READ {rel} ===\n{text}'
 
 
-def take_project_tag(text: str) -> tuple[str, str | None, str | None]:
-    """Split ``(visible, action, path)``. Action is run/read or None."""
+def take_project_tag(text: str) -> tuple[str, str | None, str | None, list[str]]:
+    """Split ``(visible, action, path, args)``. Action is run/read or None."""
     if not text:
-        return '', None, None
+        return '', None, None, []
     lines = text.split('\n')
     for i, line in enumerate(lines):
-        action, name = _own_line_tag(line)
+        action, name, args = _own_line_tag(line)
         if not name:
             continue
         visible = '\n'.join(lines[:i] + lines[i + 1:]).rstrip()
-        return visible, action, name
-    return text, None, None
+        return visible, action, name, args
+    return text, None, None, []
 
 
 class ProjectNeedFeed:
@@ -413,6 +426,7 @@ class ProjectNeedFeed:
         self.buf = ''
         self.action: str | None = None
         self.path: str | None = None
+        self.args: list[str] = []
 
     def feed(self, chunk: str) -> tuple[str, bool]:
         """Return (safe_to_emit, tag_complete)."""
@@ -430,10 +444,11 @@ class ProjectNeedFeed:
                 return ''.join(out), False
             line = self.buf[:nl]
             rest = self.buf[nl + 1:]
-            action, name = _own_line_tag(line)
+            action, name, args = _own_line_tag(line)
             if name:
                 self.action = action
                 self.path = name
+                self.args = args
                 self.buf = ''
                 return ''.join(out), True
             out.append(line + '\n')
@@ -445,26 +460,69 @@ class ProjectNeedFeed:
         self.buf = ''
         if self.path:
             return ''
-        action, name = _own_line_tag(leftover)
+        action, name, args = _own_line_tag(leftover)
         if name:
             self.action = action
             self.path = name
+            self.args = args
             return ''
         return leftover
 
 
-def _own_line_tag(line: str) -> tuple[str | None, str | None]:
+def _own_line_tag(line: str) -> tuple[str | None, str | None, list[str]]:
     match = _RUN_READ.match(line or '')
     if not match:
-        return None, None
+        return None, None, []
     action = match.group(1).lower()
-    name = safe_relpath(match.group(2))
+    raw = match.group(2)
+    if action == 'read':
+        name = safe_relpath(raw)
+        args: list[str] = []
+    else:
+        name, args = _parse_run(raw)
     if not name:
-        return None, None
+        return None, None, []
     stem = Path(name).stem.lower()
     if stem in _PLACEHOLDERS:
-        return None, None
-    return action, name
+        return None, None, []
+    return action, name, args
+
+
+def _parse_run(raw: str) -> tuple[str | None, list[str]]:
+    text = (raw or '').strip()
+    if not text:
+        return None, []
+    try:
+        parts = shlex.split(text, posix=True)
+    except ValueError:
+        return None, []
+    if not parts:
+        return None, []
+    name = safe_relpath(parts[0])
+    if not name:
+        return None, []
+    extra = parts[1:]
+    if len(extra) > MAX_RUN_ARGS:
+        return None, []
+    if any('\x00' in part or len(part) > MAX_ARG_LEN for part in extra):
+        return None, []
+    return name, extra
+
+
+def _clean_args(args: list[str] | None) -> list[str]:
+    out: list[str] = []
+    for raw in args or ():
+        text = str(raw)
+        if not text or '\x00' in text or len(text) > MAX_ARG_LEN:
+            continue
+        out.append(text)
+        if len(out) >= MAX_RUN_ARGS:
+            break
+    return out
+
+
+def _cmd_str(parts: list[str]) -> str:
+    return ' '.join(shlex.quote(part) for part in parts)
 
 
 def _might_become_tag(line: str) -> bool:
