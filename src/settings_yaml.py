@@ -206,6 +206,9 @@ def parse_models_payload(payload: Any, url: str = '') -> dict[str, Any]:
             ident = item.get('key') or item.get('id') or item.get('display_name')
             if not ident:
                 continue
+            other = item.get('id') or item.get('display_name')
+            if other:
+                ident = prefer_model_id(str(ident), str(other))
             instances = item.get('loaded_instances')
             loaded = bool(instances) if isinstance(instances, list) else None
             details.append({'id': str(ident), 'loaded': loaded})
@@ -232,6 +235,7 @@ def parse_models_payload(payload: Any, url: str = '') -> dict[str, Any]:
         for item in payload:
             if isinstance(item, str) and item:
                 details.append({'id': item, 'loaded': None})
+    details = dedupe_details(details)
     names = [row['id'] for row in details]
     loaded_ids = [row['id'] for row in details if row.get('loaded')]
     return {
@@ -246,6 +250,82 @@ def parse_models_payload(payload: Any, url: str = '') -> dict[str, Any]:
     }
 
 
+def prefer_model_id(first: str, second: str) -> str:
+    """Prefer mixed-case (OpenAI ``/v1/models`` spelling) over lowercase."""
+    if not first:
+        return second
+    if not second:
+        return first
+    if first == second:
+        return first
+    first_folded = first == first.lower()
+    second_folded = second == second.lower()
+    if first_folded != second_folded:
+        return first if second_folded else second
+    first_up = sum(1 for ch in first if 'A' <= ch <= 'Z')
+    second_up = sum(1 for ch in second if 'A' <= ch <= 'Z')
+    return second if second_up > first_up else first
+
+
+def _merge_loaded(first: Any, second: Any) -> Any:
+    if first is True or second is True:
+        return True
+    if first is False or second is False:
+        return False
+    return first if first is not None else second
+
+
+def dedupe_details(details: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Collapse case-insensitive duplicate model ids, keeping mixed-case."""
+    by_key: dict[str, dict[str, Any]] = {}
+    order: list[str] = []
+    for row in details:
+        ident = str(row.get('id') or '').strip()
+        if not ident:
+            continue
+        key = ident.lower()
+        prev = by_key.get(key)
+        if prev is None:
+            by_key[key] = {'id': ident, 'loaded': row.get('loaded')}
+            order.append(key)
+            continue
+        prev['id'] = prefer_model_id(prev['id'], ident)
+        prev['loaded'] = _merge_loaded(prev.get('loaded'), row.get('loaded'))
+    return [by_key[key] for key in order]
+
+
+def overlay_openai_ids(native: dict[str, Any], openai: dict[str, Any]) -> dict[str, Any]:
+    """Rewrite LM Studio keys with ``/v1/models`` spelling when they match."""
+    by_key: dict[str, dict[str, Any]] = {}
+    order: list[str] = []
+    for row in native.get('details') or []:
+        ident = str(row.get('id') or '').strip()
+        if not ident:
+            continue
+        key = ident.lower()
+        if key not in by_key:
+            order.append(key)
+        by_key[key] = {'id': ident, 'loaded': row.get('loaded')}
+    for ident in openai.get('models') or []:
+        text = str(ident).strip()
+        if not text:
+            continue
+        key = text.lower()
+        if key in by_key:
+            by_key[key]['id'] = text
+        else:
+            by_key[key] = {'id': text, 'loaded': None}
+            order.append(key)
+    details = [by_key[key] for key in order]
+    names = [row['id'] for row in details]
+    loaded_ids = [row['id'] for row in details if row.get('loaded')]
+    merged = dict(native)
+    merged['models'] = names
+    merged['details'] = details
+    merged['loaded'] = loaded_ids
+    return merged
+
+
 def list_models(host: str, api_key: str = 'none', timeout: float = 3.0) -> dict[str, Any]:
     """List models; prefer LM Studio native so we can mark what is loaded."""
     urls = list_model_urls(host)
@@ -256,6 +336,7 @@ def list_models(host: str, api_key: str = 'none', timeout: float = 3.0) -> dict[
         }
     headers = {'Authorization': f'Bearer {blank(api_key) or "none"}'}
     last_error = 'No response'
+    native = None
     for address in urls:
         try:
             req = urllib.request.Request(address, headers=headers, method='GET')
@@ -263,15 +344,23 @@ def list_models(host: str, api_key: str = 'none', timeout: float = 3.0) -> dict[
                 body = resp.read().decode('utf-8', errors='replace')
             payload = json.loads(body)
             parsed = parse_models_payload(payload, address)
-            if parsed['models']:
-                return parsed
-            last_error = f'{address} returned no models'
+            if not parsed['models']:
+                last_error = f'{address} returned no models'
+                continue
+            if str(parsed.get('source') or '').startswith('lmstudio'):
+                native = parsed
+                continue
+            if native is not None:
+                return overlay_openai_ids(native, parsed)
+            return parsed
         except urllib.error.HTTPError as exc:
             last_error = f'{exc.code} {exc.reason}'
         except urllib.error.URLError as exc:
             last_error = str(getattr(exc, 'reason', exc))
         except (TimeoutError, json.JSONDecodeError, OSError) as exc:
             last_error = str(exc)
+    if native is not None:
+        return native
     return {
         'ok': False, 'error': last_error, 'models': [],
         'details': [], 'loaded': [], 'knows_loaded': False,

@@ -1,4 +1,14 @@
 import { chatPyOrigin } from "./remote";
+import { uniqueHosts } from "./settings-hosts";
+
+export {
+  canonicalModelId,
+  dedupeModelRows,
+  hostForRole,
+  normalizeHost,
+  preferModelId,
+  uniqueHosts,
+} from "./settings-hosts";
 
 function url(path: string): string {
   return `${chatPyOrigin()}${path}`;
@@ -69,6 +79,15 @@ export const ROUTE_GROUPS: {
 ];
 
 export const ROUTE_ROWS = ROUTE_GROUPS.flatMap((g) => g.rows);
+
+const ROLE_SERVER_KEYS = SETTINGS_KEYS.filter(
+  (key): key is SettingsKey => key.endsWith("_server") && key !== "sd_server",
+);
+
+/** Unique model-server URLs from a settings form (skips Stable Diffusion). */
+export function uniqueRoleHosts(values: SettingsValues): string[] {
+  return uniqueHosts(ROLE_SERVER_KEYS.map((key) => values[key]));
+}
 
 export type SettingsPayload = {
   ok: boolean;

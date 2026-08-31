@@ -14,7 +14,9 @@ from settings_yaml import (  # noqa: E402
     list_models,
     load_file,
     models_urls,
+    overlay_openai_ids,
     parse_models_payload,
+    prefer_model_id,
     read_values,
     save_file,
     upsert_key,
@@ -124,6 +126,48 @@ class SettingsYamlTest(unittest.TestCase):
         self.assertEqual(parsed['source'], 'openai')
         self.assertFalse(parsed['knows_loaded'])
         self.assertEqual(parsed['models'], ['gpt-4o', 'gpt-4.1'])
+
+    def test_prefer_mixed_case_over_lowercase(self):
+        self.assertEqual(
+            prefer_model_id('minimax-m2.7-configi-mlx', 'MiniMax-M2.7-ConfigI-MLX'),
+            'MiniMax-M2.7-ConfigI-MLX',
+        )
+        self.assertEqual(
+            prefer_model_id('MiniMax-M2.7-ConfigI-MLX', 'minimax-m2.7-configi-mlx'),
+            'MiniMax-M2.7-ConfigI-MLX',
+        )
+
+    def test_parse_dedupes_case_variants(self):
+        parsed = parse_models_payload({
+            'data': [
+                {'id': 'minimax-m2.7-configi-mlx'},
+                {'id': 'MiniMax-M2.7-ConfigI-MLX'},
+            ],
+        })
+        self.assertEqual(parsed['models'], ['MiniMax-M2.7-ConfigI-MLX'])
+
+    def test_overlay_openai_ids_rewrites_lowercase_keys(self):
+        native = parse_models_payload({
+            'models': [
+                {'key': 'minimax-m2.7-configi-mlx', 'loaded_instances': [{'id': 'x'}]},
+            ],
+        })
+        openai = parse_models_payload({
+            'data': [{'id': 'MiniMax-M2.7-ConfigI-MLX'}],
+        })
+        merged = overlay_openai_ids(native, openai)
+        self.assertEqual(merged['models'], ['MiniMax-M2.7-ConfigI-MLX'])
+        self.assertEqual(merged['loaded'], ['MiniMax-M2.7-ConfigI-MLX'])
+
+    def test_lmstudio_v1_prefers_mixed_case_id(self):
+        parsed = parse_models_payload({
+            'models': [{
+                'key': 'minimax-m2.7-configi-mlx',
+                'id': 'MiniMax-M2.7-ConfigI-MLX',
+                'loaded_instances': [],
+            }],
+        })
+        self.assertEqual(parsed['models'], ['MiniMax-M2.7-ConfigI-MLX'])
 
 
     def test_list_models_empty_host(self):

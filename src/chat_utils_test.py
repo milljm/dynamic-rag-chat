@@ -81,6 +81,25 @@ class ChatOptionsYamlTest(unittest.TestCase):
         self.assertEqual(opts.agent_llm, 'None')
         self.assertEqual(opts.model, 'minimax-m3')
 
+    def test_specialized_server_survives_model_inherit(self):
+        opts = ChatOptions._build('.', {  # pylint: disable=protected-access
+            'llm_server': 'http://main:1234/v1',
+            'model': 'big-model',
+            'coder_server': 'http://coder:1234/v1',
+        })
+        self.assertEqual(opts.coder_llm, 'big-model')
+        self.assertEqual(opts.coder_host, 'http://coder:1234/v1')
+        self.assertEqual(opts.host, 'http://main:1234/v1')
+
+    def test_blank_specialized_server_inherits_main(self):
+        opts = ChatOptions._build('.', {  # pylint: disable=protected-access
+            'llm_server': 'http://main:1234/v1',
+            'model': 'big-model',
+            'coder_llm': 'coder-model',
+        })
+        self.assertEqual(opts.coder_llm, 'coder-model')
+        self.assertEqual(opts.coder_host, 'http://main:1234/v1')
+
 
 if __name__ == '__main__':
     unittest.main()

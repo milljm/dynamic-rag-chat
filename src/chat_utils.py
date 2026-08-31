@@ -327,20 +327,22 @@ class ChatOptions:
         for field_name in host_fields:
             if not getattr(self, field_name):
                 object.__setattr__(self, field_name, self.host)
-        # Set Orchestration models to default model if not set
-        mode_fields = {
-            'casual': ('casual_llm', 'casual_host'),
-            'coder': ('coder_llm', 'coder_host'),
-            'structured': ('structured_llm', 'structured_host'),
-            'general': ('general_llm', 'general_host'),
-            'nsfw': ('nsfw_llm', 'nsfw_host'),
-            }
-        for _, (llm_field, host_field) in mode_fields.items():
+        # Set Orchestration models to default model if not set.
+        # Keep an explicit specialized server even when the model inherits —
+        # overwriting the host used to send the generator model to the
+        # generator's server, which broke multi-server setups.
+        mode_fields = (
+            'casual_llm',
+            'coder_llm',
+            'structured_llm',
+            'general_llm',
+            'nsfw_llm',
+        )
+        for llm_field in mode_fields:
             value = getattr(self, llm_field)
 
             if not value or str(value).strip().lower() in {'', 'none', 'not_set'}:
                 object.__setattr__(self, llm_field, self.model)
-                object.__setattr__(self, host_field, self.host)
 
     _ALIASES = {
         # YAML/config wording        # ChatOptions field
