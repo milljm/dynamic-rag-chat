@@ -28,7 +28,7 @@ from .prompt_manager import PromptManager
 from .context_manager import ContextManager # For Type Hinting
 from .chat_utils import CommonUtils, ChatOptions, RAGTag # For Type Hinting
 from .model_orchestrator import Orchestration, MAX_AGENT_CALLS
-from .agent_tools import DuckDuckGoSearchTool
+from .agent_tools import DuckDuckGoSearchTool, StockPriceTool
 from .sd_client import MAGICK_QUERY, has_generated_images, is_new_scene, ping_sd, vision_thumb_data_url
 from .sd_session import (
     checkpoint_flavor,
@@ -40,6 +40,11 @@ from .sd_session import (
 from .think_tags import ThinkFeed, chunk_text, split_think
 from .sd_tools import make_sd_tools, seed_last_generated
 from .gold_fetch import MAX_GOLD_FETCHES, take_need_gold, recall_status
+
+# Regex to detect stock-related queries for status display
+_STOCK_QUERY = re.compile(
+    r'(?i)(stock\s*(price|quote)?|share\s*price|ticker\b|market\s*data)',
+)
 
 
 def _abort_llm_stream(stream) -> None:
@@ -176,10 +181,13 @@ class RenderWindow(PromptManager):
         # Agent Prompt
         self.agent_prompt = ChatPromptTemplate.from_messages([
             ('system', ("You are a helpful research assistant. Today\'s date is "
-                        f'{datetime.today().strftime("%B %d, %Y")}. Use web search to find '
-                        'accurate, up-to-date information. If this is a follow-up search, '
-                        'run a new query that fills the gaps — do not repeat the first '
-                        'search verbatim unless the first results were empty.'))
+                        f'{datetime.today().strftime("%B %d, %Y")}.\n\n'
+                        'AVAILABLE TOOLS:\n'
+                        '- stock_price: Use for stock/share/ticker price queries (FREE, fast)\n'
+                        '- web search: Use for everything else\n\n'
+                        'PRIORITY: If the user asks about stock prices, ALWAYS use '
+                        'stock_price tool first. Only fall back to web search for '
+                        'other queries or if stock data is unavailable.'))
             ,
             ('user', '{input}'),
             MessagesPlaceholder(variable_name='agent_scratchpad'),
@@ -199,9 +207,9 @@ class RenderWindow(PromptManager):
         self.namepulse_thread = Thread(target=self.animate_namepulse)
         key = (self.opts.tavily_key or '').strip().lower()
         self.agent_tools = (
-                [TavilySearch(tavily_api_key=self.opts.tavily_key)]
+                [TavilySearch(tavily_api_key=self.opts.tavily_key), StockPriceTool()]
                 if key and key != 'none'
-                else [DuckDuckGoSearchTool()]
+                else [DuckDuckGoSearchTool(), StockPriceTool()]
             )
 
     def _load_states(self, current_dir, context, args):
@@ -487,6 +495,15 @@ class RenderWindow(PromptManager):
         if callable(hook):
             hook(message)  # pylint: disable=not-callable  #checking for callable above
 
+    def _search_tool_name(self) -> str:
+        """Return the name of the primary web search tool for status display."""
+        key = (self.opts.tavily_key or '').strip().lower()
+        return 'tavily' if (key and key != 'none') else 'duckduckgo'
+
+    def _stock_query_tool_name(self) -> str:
+        """Return the tool name for stock queries (yfinance)."""
+        return 'yfinance'
+
     def _emit_image(self, rec: dict) -> None:
         """Push a generated PNG to Spur while the SD agent is still running."""
         hook = getattr(self, 'image_hook', None)
@@ -515,7 +532,13 @@ class RenderWindow(PromptManager):
             or documents['original_user_query']
         )
         label = f'({call_n}/{MAX_AGENT_CALLS})'
-        self._status('Agent Web Search…')
+        # Detect if this is a stock query to show the appropriate tool
+        tool_name = (
+            self._stock_query_tool_name()
+            if _STOCK_QUERY.search(agent_input)
+            else self._search_tool_name()
+        )
+        self._status(f'Agent [{tool_name}]…')
         try:
             self.console.print(
                 f'Agent Tool Web Search {label} (ctl-c to cancel)...',
