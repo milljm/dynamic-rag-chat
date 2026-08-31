@@ -1,7 +1,14 @@
 import { chatPyOrigin } from "./remote";
-import { hostForRole, normalizeHost, uniqueHosts } from "./settings-hosts";
+import { uniqueHosts } from "./settings-hosts";
 
-export { hostForRole, normalizeHost, uniqueHosts };
+export {
+  canonicalModelId,
+  dedupeModelRows,
+  hostForRole,
+  normalizeHost,
+  preferModelId,
+  uniqueHosts,
+} from "./settings-hosts";
 
 function url(path: string): string {
   return `${chatPyOrigin()}${path}`;

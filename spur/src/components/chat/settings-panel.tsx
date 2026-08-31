@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { Settings2, X } from "lucide-react";
 import { toast } from "sonner";
 import {
+  canonicalModelId,
+  dedupeModelRows,
   fetchSettings,
   hostForRole,
   normalizeHost,
@@ -45,10 +47,10 @@ const EMPTY_CATALOG: Catalog = {
 };
 
 function catalogFromPing(ping: PingResult): Catalog {
-  const rows = (
+  const rows = dedupeModelRows(
     ping.details?.length
       ? ping.details
-      : ping.models.map((id) => ({ id, loaded: null as boolean | null }))
+      : ping.models.map((id) => ({ id, loaded: null as boolean | null })),
   )
     .slice()
     .sort((a, b) => {
@@ -107,13 +109,20 @@ function ModelSelect({
   emptyLabel?: string;
   required?: boolean;
 }) {
-  const info: ModelInfo[] = details.length
+  const raw: ModelInfo[] = details.length
     ? details
     : models.map((id) => ({ id, loaded: null }));
+  const info = dedupeModelRows(raw);
   const ids = info.map((row) => row.id);
-  if (value && !ids.includes(value)) {
-    info.unshift({ id: value, loaded: null });
+  const selectValue = canonicalModelId(value, ids);
+  if (selectValue && !ids.some((id) => id.toLowerCase() === selectValue.toLowerCase())) {
+    info.unshift({ id: selectValue, loaded: null });
   }
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
+  useEffect(() => {
+    if (selectValue && selectValue !== value) onChangeRef.current(selectValue);
+  }, [selectValue, value]);
   if (info.length === 0) {
     return (
       <Input
@@ -135,7 +144,7 @@ function ModelSelect({
   return (
     <select
       className={cn(fieldClass, "appearance-auto")}
-      value={value}
+      value={selectValue}
       onChange={(e) => onChange(e.target.value)}
     >
       {emptyLabel ? <option value="">{emptyLabel}</option> : null}
