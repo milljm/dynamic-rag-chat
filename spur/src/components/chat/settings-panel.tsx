@@ -3,11 +3,15 @@ import { Settings2, X } from "lucide-react";
 import { toast } from "sonner";
 import {
   fetchSettings,
+  hostForRole,
+  normalizeHost,
   pingSettings,
   pingSd,
   saveSettings,
+  uniqueRoleHosts,
   ROUTE_GROUPS,
   type ModelInfo,
+  type PingResult,
   type SettingsKey,
   type SettingsValues,
 } from "@/lib/chat/settings";
@@ -25,6 +29,46 @@ const fieldLabelClass =
 
 const modelLabelClass =
   "font-display text-[11px] font-semibold uppercase tracking-[0.32em] text-route";
+
+type Catalog = {
+  models: string[];
+  details: ModelInfo[];
+  note: string;
+  ok: boolean;
+};
+
+const EMPTY_CATALOG: Catalog = {
+  models: [],
+  details: [],
+  note: "",
+  ok: false,
+};
+
+function catalogFromPing(ping: PingResult): Catalog {
+  const rows = (
+    ping.details?.length
+      ? ping.details
+      : ping.models.map((id) => ({ id, loaded: null as boolean | null }))
+  )
+    .slice()
+    .sort((a, b) => {
+      if (Boolean(a.loaded) !== Boolean(b.loaded)) return a.loaded ? -1 : 1;
+      return a.id.localeCompare(b.id);
+    });
+  const hot = rows.filter((row) => row.loaded).length;
+  return {
+    models: rows.map((row) => row.id),
+    details: rows,
+    note: ping.knows_loaded
+      ? `${hot} loaded · ${rows.length} downloaded`
+      : `${rows.length} models`,
+    ok: true,
+  };
+}
+
+function failedCatalog(error: string): Catalog {
+  return { models: [], details: [], note: error, ok: false };
+}
 
 function Field({
   label,
@@ -155,8 +199,7 @@ function SettingsPanel({
 }) {
   const [values, setValues] = useState<SettingsValues | null>(null);
   const [effective, setEffective] = useState<SettingsValues | null>(null);
-  const [models, setModels] = useState<string[]>([]);
-  const [details, setDetails] = useState<ModelInfo[]>([]);
+  const [catalogs, setCatalogs] = useState<Record<string, Catalog>>({});
   const [pingNote, setPingNote] = useState("");
   const [sdNote, setSdNote] = useState("");
   const [sdModels, setSdModels] = useState<string[]>([]);
@@ -168,29 +211,17 @@ function SettingsPanel({
     setValues((prev) => (prev ? { ...prev, [key]: value } : prev));
   }
 
-  function applyPing(ping: {
-    models: string[];
-    details?: ModelInfo[];
-    loaded?: string[];
-    knows_loaded?: boolean;
-  }) {
-    const rows = (
-      ping.details?.length
-        ? ping.details
-        : ping.models.map((id) => ({ id, loaded: null as boolean | null }))
-    )
-      .slice()
-      .sort((a, b) => {
-        if (Boolean(a.loaded) !== Boolean(b.loaded)) return a.loaded ? -1 : 1;
-        return a.id.localeCompare(b.id);
-      });
-    setDetails(rows);
-    setModels(rows.map((row) => row.id));
-    const hot = rows.filter((row) => row.loaded).length;
-    if (ping.knows_loaded) {
-      setPingNote(`${hot} loaded · ${rows.length} downloaded`);
-    } else {
-      setPingNote(`${rows.length} models`);
+  function catalogFor(roleServer: string): Catalog {
+    const host = hostForRole(roleServer, values?.llm_server || "");
+    return (host && catalogs[host]) || EMPTY_CATALOG;
+  }
+
+  function storeCatalog(host: string, catalog: Catalog) {
+    const key = normalizeHost(host);
+    if (!key) return;
+    setCatalogs((prev) => ({ ...prev, [key]: catalog }));
+    if (key === normalizeHost(values?.llm_server || host)) {
+      setPingNote(catalog.note);
     }
   }
 
@@ -217,11 +248,23 @@ function SettingsPanel({
           payload.values.embedding_llm || payload.effective.embedding_llm;
         setValues(merged);
         setEffective(payload.effective);
-        if (merged.llm_server) {
-          const ping = await pingSettings(merged.llm_server, merged.api_key);
-          if (!cancelled && ping.ok) applyPing(ping);
-          else if (!cancelled) setPingNote(ping.error || "unreachable");
+        const hosts = uniqueRoleHosts(merged);
+        const results = await Promise.all(
+          hosts.map(async (host) => {
+            const ping = await pingSettings(host, merged.api_key);
+            return { host, ping };
+          }),
+        );
+        if (cancelled) return;
+        const next: Record<string, Catalog> = {};
+        for (const { host, ping } of results) {
+          next[normalizeHost(host)] = ping.ok
+            ? catalogFromPing(ping)
+            : failedCatalog(ping.error || "unreachable");
         }
+        setCatalogs(next);
+        const main = next[normalizeHost(merged.llm_server)];
+        if (main) setPingNote(main.note);
         if (merged.sd_server) {
           const sd = await pingSd(merged.sd_server);
           if (cancelled) return;
@@ -256,11 +299,12 @@ function SettingsPanel({
     noisy = true,
   ) {
     if (!host) return;
-    setPinging(true);
+    const isMain = normalizeHost(host) === normalizeHost(values?.llm_server || host);
+    if (isMain) setPinging(true);
     try {
       const ping = await pingSettings(host, key || "none");
       if (ping.ok) {
-        applyPing(ping);
+        storeCatalog(host, catalogFromPing(ping));
         if (noisy) {
           const hot = (ping.loaded || []).length;
           toast.success(
@@ -270,12 +314,18 @@ function SettingsPanel({
           );
         }
       } else {
-        setPingNote(ping.error || "unreachable");
+        storeCatalog(host, failedCatalog(ping.error || "unreachable"));
         if (noisy) toast.error(ping.error || "Server did not answer");
       }
     } finally {
-      setPinging(false);
+      if (isMain) setPinging(false);
     }
+  }
+
+  function onRoleServerBlur(host: string) {
+    const trimmed = host.trim();
+    if (!trimmed) return;
+    void onPing(trimmed, values?.api_key, false);
   }
 
   async function onSdPing() {
@@ -327,6 +377,10 @@ function SettingsPanel({
       setSaving(false);
     }
   }
+
+  const mainCat = catalogFor("");
+  const preCat = catalogFor(values?.pre_server || "");
+  const embedCat = catalogFor(values?.embedding_server || "");
 
   return (
     <div className="fixed inset-0 z-[60] flex justify-end">
@@ -405,33 +459,67 @@ function SettingsPanel({
                 <h3 className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                   Required models
                 </h3>
-                <Field label="Generator">
+                <Field label="Generator" hint="Uses the server above">
                   <ModelSelect
                     required
                     value={values.model}
                     onChange={(v) => patch("model", v)}
-                    models={models}
-                    details={details}
+                    models={mainCat.models}
+                    details={mainCat.details}
                   />
                 </Field>
-                <Field label="Pre-conditioner">
+                <div className="grid gap-1.5">
+                  <span className={fieldLabelClass}>Pre-conditioner</span>
                   <ModelSelect
                     required
                     value={values.pre_llm}
                     onChange={(v) => patch("pre_llm", v)}
-                    models={models}
-                    details={details}
+                    models={preCat.models}
+                    details={preCat.details}
                   />
-                </Field>
-                <Field label="Embeddings">
+                  <Input
+                    value={values.pre_server}
+                    onChange={(e) => patch("pre_server", e.target.value)}
+                    onBlur={(e) => onRoleServerBlur(e.target.value)}
+                    placeholder="same server"
+                    spellCheck={false}
+                  />
+                  {values.pre_server && preCat.note ? (
+                    <span className="text-[11px] text-muted-foreground">
+                      {preCat.note}
+                    </span>
+                  ) : (
+                    <span className="text-[11px] text-muted-foreground">
+                      Blank server inherits the generator server
+                    </span>
+                  )}
+                </div>
+                <div className="grid gap-1.5">
+                  <span className={fieldLabelClass}>Embeddings</span>
                   <ModelSelect
                     required
                     value={values.embedding_llm}
                     onChange={(v) => patch("embedding_llm", v)}
-                    models={models}
-                    details={details}
+                    models={embedCat.models}
+                    details={embedCat.details}
                   />
-                </Field>
+                  <Input
+                    value={values.embedding_server}
+                    onChange={(e) => patch("embedding_server", e.target.value)}
+                    onBlur={(e) => onRoleServerBlur(e.target.value)}
+                    placeholder="same server"
+                    spellCheck={false}
+                  />
+                  {values.embedding_server && embedCat.note ? (
+                    <span className="text-[11px] text-muted-foreground">
+                      {embedCat.note}
+                    </span>
+                  ) : (
+                    <span className="text-[11px] text-muted-foreground">
+                      Blank server inherits the generator server
+                    </span>
+                  )}
+                </div>
               </section>
 
               <details className="border-t border-border pt-3">
@@ -441,7 +529,8 @@ function SettingsPanel({
                 <p className="mt-2 text-[11px] text-muted-foreground">
                   Blank inherits the generator. Vision, agent, and polisher stay
                   unset unless you pick one. Unset polisher skips the extra
-                  generation pass.
+                  generation pass. Each dropdown lists models from that row's
+                  server.
                 </p>
                 <div className="mt-3 grid gap-4">
                   {ROUTE_GROUPS.map((group, gi) => (
@@ -457,7 +546,9 @@ function SettingsPanel({
                         {group.title}
                       </h4>
                       <div className="grid gap-4">
-                  {group.rows.map((row) => (
+                  {group.rows.map((row) => {
+                    const cat = catalogFor(values[row.server]);
+                    return (
                     <div key={row.id} className="grid gap-1.5">
                       <span className={modelLabelClass}>
                         {row.label}
@@ -465,8 +556,8 @@ function SettingsPanel({
                       <ModelSelect
                         value={values[row.llm]}
                         onChange={(v) => patch(row.llm, v)}
-                        models={models}
-                        details={details}
+                        models={cat.models}
+                        details={cat.details}
                         emptyLabel={
                           row.id === "vision" ||
                           row.id === "agent" ||
@@ -480,9 +571,15 @@ function SettingsPanel({
                       <Input
                         value={values[row.server]}
                         onChange={(e) => patch(row.server, e.target.value)}
+                        onBlur={(e) => onRoleServerBlur(e.target.value)}
                         placeholder="same server"
                         spellCheck={false}
                       />
+                      {values[row.server] && cat.note ? (
+                        <span className="text-[11px] text-muted-foreground">
+                          {cat.note}
+                        </span>
+                      ) : null}
                       {row.id === "agent" ? (
                         <Field
                           label="Tavily"
@@ -497,7 +594,8 @@ function SettingsPanel({
                         </Field>
                       ) : null}
                     </div>
-                  ))}
+                    );
+                  })}
                       </div>
                     </div>
                   ))}
