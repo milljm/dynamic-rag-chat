@@ -59,9 +59,8 @@ from src.project_store import (
     MAX_PROJECT_OPS,
     ProjectNeedFeed,
     add_project,
+    apply_tag,
     delete_file as delete_project_file,
-    format_read,
-    format_run,
     persist_named_fences,
     read_file as read_project_file,
     remove_project,
@@ -1155,17 +1154,10 @@ def _apply_project_tag(
     persist_named_fences(vector, answer)
     documents['use_coding'] = True
     documents['project_resume'] = answer
-    if action == 'read':
-        text = read_project_file(vector, rel)
-        documents['project_result'] = (
-            format_read(rel, text) if text is not None
-            else f'=== PROJECT_READ {rel} ===\n(missing)'
-        )
-        documents['project_index'] = tree_listing(vector)
-        return f'Reading {rel}…'
-    documents['project_result'] = format_run(run_project_file(vector, rel, args))
+    result, status = apply_tag(vector, action, rel, args)
+    documents['project_result'] = result
     documents['project_index'] = tree_listing(vector)
-    return f'Running {rel}…'
+    return status
 
 
 def _iter_sse_chunks(

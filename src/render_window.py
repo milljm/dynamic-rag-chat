@@ -42,11 +42,8 @@ from .sd_tools import make_sd_tools, seed_last_generated
 from .gold_fetch import MAX_GOLD_FETCHES, take_need_gold, recall_status
 from .project_store import (
     MAX_PROJECT_OPS,
-    format_read,
-    format_run,
+    apply_tag,
     persist_named_fences,
-    read_file,
-    run_file,
     take_project_tag,
     tree_listing,
 )
@@ -1121,16 +1118,8 @@ class RenderWindow(PromptManager):
             assembled = visible
             if not rel:
                 break
-            if action == 'read':
-                text = read_file(vector, rel)
-                documents['project_result'] = (
-                    format_read(rel, text) if text is not None
-                    else f'=== PROJECT_READ {rel} ===\n(missing)'
-                )
-                status = f'Reading {rel}…'
-            else:
-                documents['project_result'] = format_run(run_file(vector, rel, args))
-                status = f'Running {rel}…'
+            block, status = apply_tag(vector, action or 'run', rel, args)
+            documents['project_result'] = block
             documents['project_resume'] = visible
             documents['project_index'] = tree_listing(vector)
             self.renderable.response = Text(status, style=f'color({color}')

@@ -11,6 +11,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from project_store import (  # noqa: E402  # pylint: disable=wrong-import-position
     ProjectNeedFeed,
     add_project,
+    apply_tag,
     delete_file,
     extract_named_fences,
     list_files,
@@ -20,6 +21,7 @@ from project_store import (  # noqa: E402  # pylint: disable=wrong-import-positi
     read_file,
     remove_project,
     run_file,
+    run_git,
     safe_relpath,
     scratch_root,
     select_project,
@@ -64,6 +66,7 @@ class WorkspaceTest(unittest.TestCase):
         listing = tree_listing(self.root)
         self.assertIn('src/hi.py', listing)
         self.assertIn('project: workspace', listing)
+        self.assertIn('git: no', listing)
 
     def test_delete_prunes_empty_dirs(self):
         write_file(self.root, 'src/hi.py', 'x\n')
@@ -298,6 +301,82 @@ class ProjectTagTest(unittest.TestCase):
         self.assertEqual(action, 'read')
         self.assertEqual(name, 'notes.md')
         self.assertEqual(args, [])
+
+    def test_git_tag(self):
+        vis, action, name, args = take_project_tag(
+            'ok.\n<GIT:commit -m "start here">\n',
+        )
+        self.assertEqual(action, 'git')
+        self.assertEqual(name, 'commit')
+        self.assertEqual(args, ['-m', 'start here'])
+        self.assertEqual(vis, 'ok.')
+
+    def test_git_placeholder_ignored(self):
+        vis, action, name, args = take_project_tag('<GIT:example>')
+        self.assertIsNone(action)
+        self.assertIsNone(name)
+        self.assertEqual(args, [])
+        self.assertIn('example', vis)
+
+    def test_feed_git_tag(self):
+        feed = ProjectNeedFeed()
+        _, hit = feed.feed('<GIT:status>\n')
+        self.assertTrue(hit)
+        self.assertEqual(feed.action, 'git')
+        self.assertEqual(feed.path, 'status')
+        self.assertEqual(feed.args, [])
+
+
+class GitAgentTest(unittest.TestCase):
+    """Local git only; init after add of a plain directory."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()  # pylint: disable=consider-using-with
+        self.root = self.tmp.name
+        self.addCleanup(self.tmp.cleanup)
+        self.repo = Path(self.root) / 'repos' / 'plain-app'
+        self.repo.mkdir(parents=True)
+        (self.repo / 'readme.md').write_text('hi\n', encoding='utf-8')
+        add_project(self.root, str(self.repo))
+
+    def test_tree_git_no_until_init(self):
+        listing = tree_listing(self.root)
+        self.assertIn('git: no', listing)
+        result = run_git(self.root, ['init'])
+        self.assertEqual(result['code'], 0, result)
+        listing = tree_listing(self.root)
+        self.assertIn('git: yes', listing)
+        rec = next(p for p in list_projects(self.root) if p['id'] == 'plain-app')
+        self.assertTrue(rec['git'])
+
+    def test_push_denied(self):
+        result = run_git(self.root, ['push'])
+        self.assertEqual(result['code'], 127)
+        self.assertIn('not allowed', result['stderr'])
+
+    def test_escape_denied(self):
+        result = run_git(self.root, ['status', '-C', '/tmp'])
+        self.assertEqual(result['code'], 127)
+
+    def test_global_config_denied(self):
+        result = run_git(self.root, ['config', '--global', 'user.name', 'nope'])
+        self.assertEqual(result['code'], 127)
+
+    def test_status_add_commit(self):
+        self.assertEqual(run_git(self.root, ['init'])['code'], 0)
+        self.assertEqual(run_git(self.root, ['config', 'user.email', 'a@b.c'])['code'], 0)
+        self.assertEqual(run_git(self.root, ['config', 'user.name', 'Test'])['code'], 0)
+        self.assertEqual(run_git(self.root, ['add', 'readme.md'])['code'], 0)
+        result = run_git(self.root, ['commit', '-m', 'start'])
+        self.assertEqual(result['code'], 0, result)
+        st = run_git(self.root, ['status'])
+        self.assertEqual(st['code'], 0, st)
+
+    def test_apply_tag_git(self):
+        body, status = apply_tag(self.root, 'git', 'init', [])
+        self.assertTrue(status.startswith('Git init'))
+        self.assertIn('PROJECT_GIT', body)
+        self.assertIn('git: yes', tree_listing(self.root))
 
 
 if __name__ == '__main__':

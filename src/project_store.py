@@ -6,6 +6,8 @@ land in the active root when Coding is on. ``<RUN:path args>`` /
 ``<READ:path>`` are own-line tags (same shape as NEED_GOLD). Execution is
 argv-only: python3 for .py, node for .js — no shell, no path escape.
 Workers under ``agents/`` are ordinary scripts the model writes and runs.
+``<GIT:status>`` is a local git agent (no remotes). Non-git projects must
+be initialized only after the user agrees.
 """
 from __future__ import annotations
 
@@ -39,8 +41,8 @@ _FILE_TOKEN = re.compile(
     r'^(?:\./)?[\w.@+-]+(?:/[\w.@+-]+)*\.[A-Za-z0-9]{1,8}$',
 )
 _FENCE_OPEN = re.compile(r'^( {0,3})(`{3,}|~{3,})([^\n]*)$')
-_RUN_READ = re.compile(
-    r'^[ \t]*<(RUN|READ):\s*([^>\n]+?)\s*>[ \t]*$',
+_PROJECT_TAG = re.compile(
+    r'^[ \t]*<(RUN|READ|GIT):\s*([^>\n]+?)\s*>[ \t]*$',
     re.I,
 )
 _SLUG = re.compile(r'[^a-z0-9]+')
@@ -53,6 +55,11 @@ _INTERPRETERS = {
     '.js': ('node',),
     '.mjs': ('node',),
 }
+GIT_ALLOW = frozenset({
+    'init', 'status', 'add', 'commit', 'diff', 'log', 'branch',
+    'checkout', 'switch', 'restore', 'show', 'stash', 'mv', 'rm',
+    'tag', 'blame', 'ls-files', 'rev-parse', 'config',
+})
 
 
 def scratch_root(vector_dir: str) -> Path:
@@ -207,7 +214,8 @@ def tree_listing(vector_dir: str) -> str:
     """Human listing for the prompt, or ``(empty workspace)``."""
     rec = _active_record(vector_dir)
     rows = list_files(vector_dir)
-    header = f'project: {rec["name"]}\nroot: {rec["path"]}'
+    git = 'yes' if rec.get('git') else 'no'
+    header = f'project: {rec["name"]}\nroot: {rec["path"]}\ngit: {git}'
     if not rows:
         empty = (
             '(empty workspace)' if rec['kind'] == 'scratch'
@@ -405,8 +413,95 @@ def format_read(rel: str, text: str) -> str:
     return f'=== PROJECT_READ {rel} ===\n{text}'
 
 
+def format_git(result: dict[str, Any]) -> str:
+    """Block the model sees after ``<GIT:…>``."""
+    cmd = result.get('cmd') or 'git'
+    code = result.get('code')
+    stdout = result.get('stdout') or ''
+    stderr = result.get('stderr') or ''
+    parts = [f'=== PROJECT_GIT  cmd={cmd}  exit={code} ===']
+    if stdout:
+        parts.append(stdout.rstrip())
+    if stderr:
+        parts.append('--- stderr ---')
+        parts.append(stderr.rstrip())
+    if not stdout and not stderr:
+        parts.append('(no output)')
+    return '\n'.join(parts)
+
+
+def run_git(vector_dir: str, argv: list[str] | None = None) -> dict[str, Any]:
+    """Local git only. cwd is the active project. No remotes."""
+    parts = _clean_args(argv)
+    if not parts:
+        return _run_result('git', '', 'Missing git command', 127, '')
+    sub = parts[0].lower()
+    extra = parts[1:]
+    if sub not in GIT_ALLOW:
+        return _run_result(
+            'git', '',
+            f'git {sub} is not allowed (local only; no remotes).',
+            127, '',
+        )
+    if any(_git_escape(part) for part in extra):
+        return _run_result('git', '', 'Refusing git path escape.', 127, '')
+    extra = _git_config_args(sub, extra)
+    if extra is None:
+        return _run_result('git', '', 'git config is local only.', 127, '')
+    exe = shutil.which('git')
+    if not exe:
+        return _run_result('git', '', 'git is not installed.', 127, '')
+    root = project_root(vector_dir).resolve()
+    cmd = [exe, '-c', 'color.ui=never', '-c', 'core.pager=cat', sub, *extra]
+    displayed = _cmd_str(['git', sub, *extra])
+    try:
+        proc = subprocess.run(  # noqa: S603  # argv list, no shell
+            cmd,
+            cwd=str(root),
+            capture_output=True,
+            text=True,
+            timeout=RUN_TIMEOUT,
+            env=_git_env(root),
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        out = _clip(getattr(exc, 'stdout', None) or '')
+        err = _clip((getattr(exc, 'stderr', None) or '') + f'\n(timed out after {RUN_TIMEOUT}s)')
+        return _run_result('git', out, err, 124, displayed)
+    except OSError as exc:
+        return _run_result('git', '', str(exc), 127, displayed)
+    return _run_result(
+        'git',
+        _clip(proc.stdout or ''),
+        _clip(proc.stderr or ''),
+        int(proc.returncode),
+        displayed,
+    )
+
+
+def apply_tag(
+    vector_dir: str,
+    action: str,
+    rel: str,
+    args: list[str] | None = None,
+) -> tuple[str, str]:
+    """Run a coding tag. Return ``(project_result, status)``."""
+    extra = args or []
+    if action == 'read':
+        text = read_file(vector_dir, rel)
+        body = (
+            format_read(rel, text) if text is not None
+            else f'=== PROJECT_READ {rel} ===\n(missing)'
+        )
+        return body, f'Reading {rel}…'
+    if action == 'git':
+        return format_git(run_git(vector_dir, [rel, *extra])), f'Git {rel}…'
+    result = run_file(vector_dir, rel, extra)
+    return format_run(result), f'Running {rel}…'
+
+
 def take_project_tag(text: str) -> tuple[str, str | None, str | None, list[str]]:
-    """Split ``(visible, action, path, args)``. Action is run/read or None."""
+    """Split ``(visible, action, path, args)``. Action is run/read/git or None."""
     if not text:
         return '', None, None, []
     lines = text.split('\n')
@@ -420,7 +515,7 @@ def take_project_tag(text: str) -> tuple[str, str | None, str | None, list[str]]
 
 
 class ProjectNeedFeed:
-    """Hold back an in-progress own-line ``<RUN:>`` / ``<READ:>`` tag."""
+    """Hold back an in-progress own-line ``<RUN:>`` / ``<READ:>`` / ``<GIT:>`` tag."""
 
     def __init__(self):
         self.buf = ''
@@ -470,11 +565,13 @@ class ProjectNeedFeed:
 
 
 def _own_line_tag(line: str) -> tuple[str | None, str | None, list[str]]:
-    match = _RUN_READ.match(line or '')
+    match = _PROJECT_TAG.match(line or '')
     if not match:
         return None, None, []
     action = match.group(1).lower()
     raw = match.group(2)
+    if action == 'git':
+        return _parse_git(raw)
     if action == 'read':
         name = safe_relpath(raw)
         args: list[str] = []
@@ -486,6 +583,29 @@ def _own_line_tag(line: str) -> tuple[str | None, str | None, list[str]]:
     if stem in _PLACEHOLDERS:
         return None, None, []
     return action, name, args
+
+
+def _parse_git(raw: str) -> tuple[str | None, str | None, list[str]]:
+    text = (raw or '').strip()
+    if not text:
+        return None, None, []
+    try:
+        parts = shlex.split(text, posix=True)
+    except ValueError:
+        return None, None, []
+    if not parts:
+        return None, None, []
+    sub = parts[0].lower()
+    if sub in _PLACEHOLDERS:
+        return None, None, []
+    extra = parts[1:]
+    if len(extra) > MAX_RUN_ARGS:
+        return None, None, []
+    if any('\x00' in part or len(part) > MAX_ARG_LEN for part in extra):
+        return None, None, []
+    if any(_git_escape(part) for part in extra):
+        return None, None, []
+    return 'git', sub, extra
 
 
 def _parse_run(raw: str) -> tuple[str | None, list[str]]:
@@ -525,6 +645,52 @@ def _cmd_str(parts: list[str]) -> str:
     return ' '.join(shlex.quote(part) for part in parts)
 
 
+def _has_git(path: Path) -> bool:
+    return (path / '.git').exists()
+
+
+def _git_escape(part: str) -> bool:
+    if part in ('-C', '--git-dir', '--work-tree'):
+        return True
+    if part.startswith('--git-dir=') or part.startswith('--work-tree='):
+        return True
+    if part.startswith('/') or part.startswith('~'):
+        return True
+    if part == '..' or part.startswith('../') or '/../' in part:
+        return True
+    return False
+
+
+def _git_config_args(sub: str, extra: list[str]) -> list[str] | None:
+    if sub != 'config':
+        return extra
+    blocked = ('--global', '--system', '--file', '-f')
+    if any(part in blocked or part.startswith('--file=') for part in extra):
+        return None
+    return extra if '--local' in extra else ['--local', *extra]
+
+
+def _git_env(root: Path) -> dict[str, str]:
+    home = os.environ.get('HOME') or str(root)
+    env = {
+        'PATH': os.environ.get('PATH', '/usr/bin'),
+        'HOME': home,
+        'LANG': 'C.UTF-8',
+        'GIT_TERMINAL_PROMPT': '0',
+        'GIT_PAGER': 'cat',
+        'GIT_EDITOR': 'true',
+        'GC_AUTO': '0',
+    }
+    for key in (
+        'GIT_AUTHOR_NAME', 'GIT_AUTHOR_EMAIL',
+        'GIT_COMMITTER_NAME', 'GIT_COMMITTER_EMAIL',
+    ):
+        val = os.environ.get(key)
+        if val:
+            env[key] = val
+    return env
+
+
 def _might_become_tag(line: str) -> bool:
     if '\n' in line:
         return False
@@ -532,7 +698,7 @@ def _might_become_tag(line: str) -> bool:
     if stripped == '':
         return True
     lower = stripped.lower()
-    for prefix in ('<run:', '<read:'):
+    for prefix in ('<run:', '<read:', '<git:'):
         if prefix.startswith(lower) or lower.startswith(prefix):
             close = lower.find('>')
             if close == -1:
@@ -575,7 +741,7 @@ def _scratch_record(vector_dir: str) -> dict[str, Any]:
         'name': WORKSPACE,
         'kind': 'scratch',
         'path': str(path),
-        'git': False,
+        'git': _has_git(path),
     }
 
 

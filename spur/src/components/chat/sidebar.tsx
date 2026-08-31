@@ -704,7 +704,6 @@ function ProjectFiles({
   if (!usesChatPy()) return null;
 
   const current = projects.find((project) => project.id === active);
-  const imported = projects.filter((project) => project.kind === "imported").length;
   const shown = files.slice(0, SHOW_PROJECT_FILES);
   const locked = streaming || busy;
 
@@ -713,7 +712,7 @@ function ProjectFiles({
       id="projects"
       title="Projects"
       defaultOpen={false}
-      badge={files.length || imported || undefined}
+      badge={projects.length || undefined}
     >
       <div className="space-y-2">
         {projects.length > 0 ? (
@@ -760,6 +759,11 @@ function ProjectFiles({
                     <span className="min-w-0 flex-1 truncate font-medium">
                       {project.name}
                     </span>
+                    {project.git ? null : (
+                      <span className="shrink-0 text-[10px] text-muted-foreground/70">
+                        no git
+                      </span>
+                    )}
                   </button>
                   {project.kind === "imported" ? (
                     <button
@@ -842,10 +846,31 @@ function ProjectFiles({
           </p>
         </form>
 
+        <details
+          key={active}
+          className="rounded-sm"
+          defaultOpen={current?.kind !== "imported" && files.length <= 12}
+        >
+          <summary className="cursor-pointer text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+            Files
+            {files.length ? (
+              <span className="ml-2 font-mono text-[10px] font-normal normal-case tabular-nums tracking-normal">
+                {files.length}
+                {truncated ? "+" : ""}
+              </span>
+            ) : null}
+          </summary>
+          <div className="mt-2 space-y-1">
         {files.length === 0 ? (
           <p className="text-xs text-muted-foreground">
             {current?.kind === "imported" ? (
               <>No listed files (hidden and vendor dirs are skipped).</>
+            ) : current && !current.git ? (
+              <>
+                Turn on <span className="text-foreground">Coding</span>. If
+                this folder is not a git repo, the model will ask before{" "}
+                <code className="font-mono">{"git init"}</code>.
+              </>
             ) : (
               <>
                 Turn on <span className="text-foreground">Coding</span>. Named
@@ -935,14 +960,16 @@ function ProjectFiles({
             {truncated ? "+" : ""}
           </p>
         ) : null}
+          </div>
+        </details>
         {output ? (
           <pre className="max-h-32 overflow-auto rounded-sm bg-background px-2 py-1.5 font-mono text-[10px] leading-relaxed text-muted-foreground">
             {output}
           </pre>
         ) : null}
         <p className="text-[10px] leading-relaxed text-muted-foreground/70">
-          Local workers the coding model writes and runs. Imported dirs stay
-          in place.
+          One row per project root. Not a git repo? Coding will ask before
+          init.
         </p>
       </div>
     </SidebarSection>
