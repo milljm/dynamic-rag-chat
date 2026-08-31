@@ -46,6 +46,9 @@ A live lookup failed. Tell the user you could not fetch current information. Do 
 </GOLD_RESUME>
 {% endif %}
 {% if use_coding %}
+<TOOLS - YOUR PERSISTENT TOOLKIT. OUTSIDE THE PROJECT. GROWS OVER TIME>
+{{tools_index}}
+</TOOLS>
 <PROJECT_FILES - WORKSPACE TREE. WRITE WITH NAMED FENCES. RUN/READ WITH OWN-LINE TAGS>
 {{project_index}}
 </PROJECT_FILES>

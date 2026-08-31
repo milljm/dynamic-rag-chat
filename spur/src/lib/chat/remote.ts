@@ -201,6 +201,7 @@ export type ProjectSnapshot = {
   active: string;
   projects: ProjectRecord[];
   files: ProjectFile[];
+  tools: ProjectFile[];
   truncated?: boolean;
 };
 
@@ -208,11 +209,13 @@ const EMPTY_PROJECTS: ProjectSnapshot = {
   active: "workspace",
   projects: [],
   files: [],
+  tools: [],
 };
 
 function asProjectSnapshot(json: unknown): ProjectSnapshot {
   const raw = json && typeof json === "object" ? (json as Record<string, unknown>) : {};
   const files = Array.isArray(raw.files) ? (raw.files as ProjectFile[]) : [];
+  const tools = Array.isArray(raw.tools) ? (raw.tools as ProjectFile[]) : [];
   const projects = Array.isArray(raw.projects)
     ? (raw.projects as ProjectRecord[])
     : [];
@@ -220,6 +223,7 @@ function asProjectSnapshot(json: unknown): ProjectSnapshot {
     active: typeof raw.active === "string" ? raw.active : "workspace",
     projects,
     files,
+    tools,
     truncated: Boolean(raw.truncated),
   };
 }
@@ -269,6 +273,48 @@ export async function runProjectFile(path: string): Promise<{
   error?: string;
 }> {
   const res = await fetch(url("/api/projects/run"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path }),
+  });
+  try {
+    return (await res.json()) as {
+      ok: boolean;
+      path?: string;
+      stdout?: string;
+      stderr?: string;
+      code?: number;
+      cmd?: string;
+      error?: string;
+    };
+  } catch {
+    return { ok: false, error: `Run failed (${res.status})` };
+  }
+}
+
+export async function getToolFile(path: string): Promise<string | null> {
+  const res = await fetch(
+    url(`/api/tools/file?path=${encodeURIComponent(path)}`),
+  );
+  if (!res.ok) return null;
+  const json = (await res.json()) as { text?: string };
+  return typeof json.text === "string" ? json.text : null;
+}
+
+export async function deleteTool(path: string): Promise<RemoteOp> {
+  return postOp("/api/tools/delete", { path });
+}
+
+export async function runTool(path: string): Promise<{
+  ok: boolean;
+  path?: string;
+  stdout?: string;
+  stderr?: string;
+  code?: number;
+  cmd?: string;
+  error?: string;
+}> {
+  const res = await fetch(url("/api/tools/run"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ path }),

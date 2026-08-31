@@ -61,12 +61,16 @@ from src.project_store import (
     add_project,
     apply_tag,
     delete_file as delete_project_file,
+    delete_tool as delete_project_tool,
     persist_named_fences,
     read_file as read_project_file,
+    read_tool as read_project_tool,
     remove_project,
     run_file as run_project_file,
+    run_tool as run_project_tool,
     select_project,
     snapshot as project_snapshot,
+    tools_listing,
     tree_listing,
 )
 from src.chat_utils import (
@@ -1017,6 +1021,41 @@ async def api_projects_run(request: Request) -> JSONResponse:
     return JSONResponse({'ok': result.get('code') == 0, **result})
 
 
+@app.get('/api/tools/file')
+def api_tool_file(path: str = '') -> JSONResponse:
+    """UTF-8 body of one tool."""
+    text = read_project_tool(_vector_dir(), path)
+    if text is None:
+        return JSONResponse({'ok': False, 'error': 'Not found'}, status_code=404)
+    return JSONResponse({'ok': True, 'path': path, 'text': text})
+
+
+@app.post('/api/tools/delete')
+async def api_tools_delete(request: Request) -> JSONResponse:
+    """Remove a tool from vector_dir/tools."""
+    body = await request.json()
+    rel = str(body.get('path') or '')
+    if not rel:
+        return JSONResponse({'ok': False, 'error': 'Missing path'}, status_code=400)
+    ok = delete_project_tool(_vector_dir(), rel)
+    if not ok:
+        return JSONResponse({'ok': False, 'error': f'Could not delete {rel}'}, status_code=400)
+    return JSONResponse({'ok': True, 'message': f'Deleted {rel}'})
+
+
+@app.post('/api/tools/run')
+async def api_tools_run(request: Request) -> JSONResponse:
+    """Run a tool (argv only). cwd is the active project."""
+    body = await request.json()
+    rel = str(body.get('path') or '')
+    if not rel:
+        return JSONResponse({'ok': False, 'error': 'Missing path'})
+    extra = body.get('args') or []
+    args = [str(item) for item in extra] if isinstance(extra, list) else []
+    result = run_project_tool(_vector_dir(), rel, args)
+    return JSONResponse({'ok': result.get('code') == 0, **result})
+
+
 @app.get('/api/generated/{name}')
 def api_generated(name: str):
     """PNG written by the Stable Diffusion agent."""
@@ -1157,6 +1196,7 @@ def _apply_project_tag(
     result, status = apply_tag(vector, action, rel, args)
     documents['project_result'] = result
     documents['project_index'] = tree_listing(vector)
+    documents['tools_index'] = tools_listing(vector)
     return status
 
 

@@ -13,6 +13,7 @@ import {
   RotateCcw,
   Trash2,
   Undo2,
+  Wrench,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -28,12 +29,15 @@ import { previewCharsForWidth } from "@/lib/chat/preview-chars";
 import {
   deleteDocument,
   deleteProjectFile,
+  deleteTool,
   getProjectFile,
+  getToolFile,
   addProjectDir,
   listDocuments,
   listProjects,
   removeProject,
   runProjectFile,
+  runTool,
   selectProject,
   usesChatPy,
 } from "@/lib/chat/remote";
@@ -656,6 +660,7 @@ const EMPTY_PROJECTS: ProjectSnapshot = {
   active: "workspace",
   projects: [],
   files: [],
+  tools: [],
 };
 
 function ProjectFiles({
@@ -668,6 +673,7 @@ function ProjectFiles({
   streaming: boolean;
 }) {
   const [files, setFiles] = useState<ProjectFile[]>([]);
+  const [tools, setTools] = useState<ProjectFile[]>([]);
   const [projects, setProjects] = useState<ProjectRecord[]>([]);
   const [active, setActive] = useState("workspace");
   const [truncated, setTruncated] = useState(false);
@@ -677,6 +683,7 @@ function ProjectFiles({
 
   const apply = (snap: ProjectSnapshot) => {
     setFiles(snap.files);
+    setTools(snap.tools);
     setProjects(snap.projects);
     setActive(snap.active);
     setTruncated(Boolean(snap.truncated));
@@ -846,6 +853,94 @@ function ProjectFiles({
           </p>
         </form>
 
+        <details key={`tools-${tools.length}`} className="rounded-sm" defaultOpen={tools.length > 0}>
+          <summary className="cursor-pointer text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+            Tools
+            {tools.length ? (
+              <span className="ml-2 font-mono text-[10px] font-normal normal-case tabular-nums tracking-normal">
+                {tools.length}
+              </span>
+            ) : null}
+          </summary>
+          <div className="mt-2 space-y-1">
+            {tools.length === 0 ? (
+              <p className="text-xs text-muted-foreground">
+                Coding can write helpers here (
+                <code className="font-mono">{"tool:uv_setup.py"}</code>
+                ), outside the project. They stick around.
+              </p>
+            ) : (
+              <ul className="space-y-1">
+                {tools.map((file) => (
+                  <li
+                    key={file.path}
+                    className="flex items-center gap-1 rounded-sm bg-secondary px-2 py-1.5 text-xs"
+                  >
+                    <Wrench className="size-3 shrink-0 text-muted-foreground" />
+                    <span className="min-w-0 flex-1 truncate font-mono" title={file.path}>
+                      {file.path}
+                    </span>
+                    {runnable(file.path) ? (
+                      <button
+                        type="button"
+                        className="relative size-8 text-muted-foreground after:absolute after:left-1/2 after:top-1/2 after:size-10 after:-translate-x-1/2 after:-translate-y-1/2 hover:text-foreground"
+                        aria-label={`Run ${file.path}`}
+                        onClick={async () => {
+                          const result = await runTool(file.path);
+                          const body = (
+                            result.stdout ||
+                            result.stderr ||
+                            result.error ||
+                            `exit ${result.code}`
+                          ).trim();
+                          setOutput(`$ ${result.cmd || file.path}\n${body}`);
+                          if (result.ok) toast.success(`Ran ${file.path}`);
+                          else toast.error(result.stderr || result.error || "Run failed");
+                          refresh();
+                        }}
+                      >
+                        <Play className="size-3.5" />
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      className="relative size-8 text-muted-foreground after:absolute after:left-1/2 after:top-1/2 after:size-10 after:-translate-x-1/2 after:-translate-y-1/2 hover:text-foreground"
+                      aria-label={`Download ${file.path}`}
+                      onClick={async () => {
+                        const text = await getToolFile(file.path);
+                        if (text == null) {
+                          toast.error(`Could not read ${file.path}`);
+                          return;
+                        }
+                        downloadTextFile(file.path.split("/").pop() || file.path, text);
+                      }}
+                    >
+                      <Download className="size-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      className="relative size-8 text-muted-foreground after:absolute after:left-1/2 after:top-1/2 after:size-10 after:-translate-x-1/2 after:-translate-y-1/2 hover:text-destructive"
+                      aria-label={`Delete ${file.path}`}
+                      onClick={async () => {
+                        if (!window.confirm(`Remove tool ${file.path}?`)) return;
+                        const result = await deleteTool(file.path);
+                        if (!result.ok) {
+                          toast.error(result.error || `Could not delete ${file.path}`);
+                          return;
+                        }
+                        toast.success(`Deleted ${file.path}`);
+                        refresh();
+                      }}
+                    >
+                      <Trash2 className="size-3.5" />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </details>
+
         <details
           key={active}
           className="rounded-sm"
@@ -968,8 +1063,8 @@ function ProjectFiles({
           </pre>
         ) : null}
         <p className="text-[10px] leading-relaxed text-muted-foreground/70">
-          One row per project root. Not a git repo? Coding will ask before
-          init.
+          One row per project root. Tools live outside the project and stick
+          around. Not a git repo? Coding will ask before init.
         </p>
       </div>
     </SidebarSection>

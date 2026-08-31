@@ -16,19 +16,25 @@ from project_store import (  # noqa: E402  # pylint: disable=wrong-import-positi
     extract_named_fences,
     list_files,
     list_projects,
+    list_tools,
     persist_named_fences,
     project_root,
     read_file,
+    read_tool,
     remove_project,
     run_file,
     run_git,
+    run_tool,
     safe_relpath,
     scratch_root,
     select_project,
     snapshot,
     take_project_tag,
+    tools_listing,
+    tools_root,
     tree_listing,
     write_file,
+    write_tool,
 )
 
 
@@ -377,6 +383,82 @@ class GitAgentTest(unittest.TestCase):
         self.assertTrue(status.startswith('Git init'))
         self.assertIn('PROJECT_GIT', body)
         self.assertIn('git: yes', tree_listing(self.root))
+
+
+class ToolNamespaceTest(unittest.TestCase):
+    """Tools live outside the project and persist across switches."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()  # pylint: disable=consider-using-with
+        self.root = self.tmp.name
+        self.addCleanup(self.tmp.cleanup)
+
+    def test_tool_fence_not_in_project(self):
+        text = (
+            '```python tool:uv_setup.py\n'
+            'from pathlib import Path\n'
+            'Path("marker.txt").write_text("ok\\n")\n'
+            'print("installed")\n'
+            '```\n'
+        )
+        arts = extract_named_fences(text)
+        self.assertEqual(arts[0]['ns'], 'tool')
+        self.assertEqual(arts[0]['file'], 'uv_setup.py')
+        written = persist_named_fences(self.root, text)
+        self.assertEqual(written, ['tool:uv_setup.py'])
+        self.assertIsNone(read_file(self.root, 'uv_setup.py'))
+        self.assertIn('Path("marker.txt")', read_tool(self.root, 'uv_setup.py') or '')
+        self.assertTrue((tools_root(self.root) / 'uv_setup.py').is_file())
+        paths = {row['path'] for row in list_files(self.root)}
+        self.assertNotIn('uv_setup.py', paths)
+
+    def test_tool_runs_in_project_cwd(self):
+        write_tool(
+            self.root,
+            'uv_setup.py',
+            'from pathlib import Path\n'
+            'import os\n'
+            'Path("marker.txt").write_text("ok\\n")\n'
+            'print(os.getcwd())\n',
+        )
+        result = run_tool(self.root, 'uv_setup.py')
+        self.assertEqual(result['code'], 0, result)
+        self.assertEqual(read_file(self.root, 'marker.txt'), 'ok\n')
+        project = scratch_root(self.root).resolve()
+        self.assertIn(str(project), result['stdout'])
+        self.assertFalse((tools_root(self.root) / 'marker.txt').exists())
+
+    def test_tools_survive_project_switch(self):
+        write_tool(self.root, 'shared.py', 'print(1)\n')
+        repo = Path(self.root) / 'repos' / 'other'
+        repo.mkdir(parents=True)
+        add_project(self.root, str(repo))
+        names = {row['path'] for row in list_tools(self.root)}
+        self.assertEqual(names, {'shared.py'})
+        self.assertIn('shared.py', tools_listing(self.root))
+        snap = snapshot(self.root)
+        self.assertEqual([t['path'] for t in snap['tools']], ['shared.py'])
+
+    def test_tool_jail(self):
+        self.assertIsNone(write_tool(self.root, '../escape.py', 'nope\n'))
+        result = run_tool(self.root, '../escape.py')
+        self.assertEqual(result['code'], 127)
+
+    def test_tool_tag(self):
+        vis, action, name, args = take_project_tag(
+            'ok.\n<TOOL:uv_setup.py --quiet>\n',
+        )
+        self.assertEqual(action, 'tool')
+        self.assertEqual(name, 'uv_setup.py')
+        self.assertEqual(args, ['--quiet'])
+        self.assertEqual(vis, 'ok.')
+
+    def test_apply_tag_tool(self):
+        write_tool(self.root, 'hi.py', 'print("tool-hi")\n')
+        body, status = apply_tag(self.root, 'tool', 'hi.py', [])
+        self.assertTrue(status.startswith('Tool hi.py'))
+        self.assertIn('PROJECT_TOOL', body)
+        self.assertIn('tool-hi', body)
 
 
 if __name__ == '__main__':

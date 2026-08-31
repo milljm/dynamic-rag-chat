@@ -38,7 +38,7 @@ Without `VITE_CHAT_API`, the UI is demo mode and never talks to your history. `.
 - **Mode / Branches / History / Slash** — the same rules as `chat.py` (`story` and `assistant` are protected).
 - **Composer paperclip** — attach files *this turn*. After the turn they become Documents (assistant mode).
 - **Documents** — whole files in `vector_dir/attachments/`. Mention a name to load it; the model can emit `<NEED_GOLD:file>` and Spur shows `Recalling Document…`.
-- **Projects** — one row per project root. **Add project dir** registers a directory in place. If it is not git, Coding asks before `git init`. `<GIT:status>` is local-only. Workers: `<RUN:file.py args>`.
+- **Projects** — one row per project root. **Tools** live outside the project and persist. **Add project dir** registers a directory in place. If it is not git, Coding asks before `git init`. `<GIT:status>` is local-only. `<TOOL:uv_setup.py>` runs a toolkit script with cwd in the project.
 - **Downloadable Files** — named code fences on assistant messages still in this branch.
 - **Status** — `RAG Processing…` → `Agent Web Search…` (when it searches) → `Processing Prompt… [model] [route] [12.4k]` → `Streaming…`.
 

@@ -45,6 +45,7 @@ from .project_store import (
     apply_tag,
     persist_named_fences,
     take_project_tag,
+    tools_listing,
     tree_listing,
 )
 
@@ -836,11 +837,13 @@ class RenderWindow(PromptManager):
             self.state.context.fill_documents_index(documents)
         if documents.get('use_coding'):
             documents['project_index'] = tree_listing(self.opts.vector_dir)
+            documents['tools_index'] = tools_listing(self.opts.vector_dir)
         documents.setdefault('documents_index', '')
         documents.setdefault('has_documents_index', False)
         documents.setdefault('gold_resume', '')
         documents.setdefault('use_coding', False)
         documents.setdefault('project_index', '(empty workspace)')
+        documents.setdefault('tools_index', '(no tools yet)')
         documents.setdefault('project_resume', '')
         documents.setdefault('project_result', '')
         documents.setdefault('attached_files_note', '')
@@ -1122,6 +1125,7 @@ class RenderWindow(PromptManager):
             documents['project_result'] = block
             documents['project_resume'] = visible
             documents['project_index'] = tree_listing(vector)
+            documents['tools_index'] = tools_listing(vector)
             self.renderable.response = Text(status, style=f'color({color}')
             self.render_chat(live)
             packed = self.get_messages(meta_data, documents)

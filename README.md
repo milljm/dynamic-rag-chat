@@ -23,7 +23,7 @@ Light mode (washed dust / sand). Code fences have a **theme dropdown** — pick 
 - **URL scrape** — wrap a link in double braces and the page text joins the turn:
   `{{https://example.com/article}}`
 - **Web agent** — `\agent` or the Agent toggle. Live search, then the answering model.
-- **Coding / Projects** — `\coding` or the Coding toggle (assistant). The Projects sidebar is one row per project root (add a directory → 1 project). Add an existing repo via **Add project dir**. If the folder is not git, the model asks before `git init`. Local `<GIT:status>` / commit / branch (no remotes). Workers under `agents/` with `<RUN:file.py args>`. Image and Coding are exclusive.
+- **Coding / Projects** — `\coding` or the Coding toggle (assistant). One row per project root. Persistent **tools** live outside the project (`vector_dir/tools/`); write `tool:uv_setup.py`, run `<TOOL:uv_setup.py>` (cwd is the project, so uv/conda/pip installs land there). Local git agent. Image and Coding are exclusive.
 - **Stable Diffusion** — Settings → Automatic1111 URL. **Image** on in assistant (toggle + New ↻). In story, Image is a one-click still of the current beat. No follow-up LLM after the PNG.
 - **Model routes** — casual, coder, vision, agent… fill in only what you run. Three models is enough (generator, pre-conditioner, embeddings).
 - **Branches** — fork, switch, rewind. `story` and `assistant` are protected.
@@ -199,7 +199,7 @@ Each **branch** owns `{branch}_user_documents` and `{branch}_ai_documents`. Stor
 | Filename in the query | — | inject the whole file |
 | `<NEED_GOLD:filename>` mid-reply | — | fetch, resume same turn (cap 2) |
 
-**Projects** (Coding toggle / `\coding`): default `vector_dir/projects/workspace/`. **Add project dir** registers an existing directory in place — that directory is one project. Named fences persist in the active root. Own-line `<RUN:file.py args>`, `<READ:file.py>`, or `<GIT:status>` mid-reply (cap 8). Git is local only (init / status / add / commit / diff / log / branch / checkout; no push/pull/fetch/clone). If `git: no`, the model must ask before `<GIT:init>`. Python and Node workers under `agents/` must exit.
+**Projects** (Coding toggle / `\coding`): default `vector_dir/projects/workspace/`. **Add project dir** registers an existing directory in place — that directory is one project. Named fences persist in the active root. Own-line `<RUN:file.py args>`, `<READ:file.py>`, `<GIT:status>`, or `<TOOL:uv_setup.py>` mid-reply (cap 8). **Tools** (`vector_dir/tools/`) are the model's own namespace — outside the git project, reused across projects. Write with ` ```python tool:name.py `; cwd when run is the project so installs go there. Git is local only. If `git: no`, the model must ask before `<GIT:init>`.
 
 Chunking is parent/child:
 

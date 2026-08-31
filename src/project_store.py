@@ -1,3 +1,4 @@
+# pylint: disable=too-many-lines  # project + tools + git in one store
 """Persistent coding workspace, plus imported project directories.
 
 Default root is ``vector_dir/projects/workspace``. ``add_project`` registers
@@ -5,7 +6,10 @@ an existing directory in place (a git repo stays a git repo). Named fences
 land in the active root when Coding is on. ``<RUN:path args>`` /
 ``<READ:path>`` are own-line tags (same shape as NEED_GOLD). Execution is
 argv-only: python3 for .py, node for .js — no shell, no path escape.
-Workers under ``agents/`` are ordinary scripts the model writes and runs.
+Workers under ``agents/`` are ordinary scripts in the project.
+Persistent **tools** live in ``vector_dir/tools/`` (outside the project) and
+grow over time. Write them with ``tool:name.py`` fences; run with
+``<TOOL:name.py>``. cwd is the active project so installs land there.
 ``<GIT:status>`` is a local git agent (no remotes). Non-git projects must
 be initialized only after the user agrees.
 """
@@ -23,6 +27,7 @@ from typing import Any
 MAX_FILE_BYTES = 512_000
 MAX_OUTPUT = 32_000
 RUN_TIMEOUT = 45
+TOOL_TIMEOUT = 120
 MAX_PROJECT_OPS = 8
 MAX_RUN_ARGS = 16
 MAX_ARG_LEN = 200
@@ -30,6 +35,7 @@ MAX_LIST_FILES = 400
 MAX_TREE_LINES = 80
 WORKSPACE = 'workspace'
 SCRATCH_ID = 'workspace'
+TOOLS = 'tools'
 REGISTRY = 'registry.json'
 SKIP_DIRS = frozenset({
     '.git', 'node_modules', '__pycache__', '.venv', 'venv',
@@ -42,7 +48,7 @@ _FILE_TOKEN = re.compile(
 )
 _FENCE_OPEN = re.compile(r'^( {0,3})(`{3,}|~{3,})([^\n]*)$')
 _PROJECT_TAG = re.compile(
-    r'^[ \t]*<(RUN|READ|GIT):\s*([^>\n]+?)\s*>[ \t]*$',
+    r'^[ \t]*<(RUN|READ|GIT|TOOL):\s*([^>\n]+?)\s*>[ \t]*$',
     re.I,
 )
 _SLUG = re.compile(r'[^a-z0-9]+')
@@ -72,6 +78,11 @@ def project_root(vector_dir: str) -> Path:
     return Path(_active_record(vector_dir)['path'])
 
 
+def tools_root(vector_dir: str) -> Path:
+    """``vector_dir/tools`` — Coding's toolkit, outside any project."""
+    return Path(vector_dir) / TOOLS
+
+
 def list_projects(vector_dir: str) -> list[dict[str, Any]]:
     """Registered projects; scratch first."""
     return list(_load_registry(vector_dir)['projects'])
@@ -85,6 +96,7 @@ def snapshot(vector_dir: str) -> dict[str, Any]:
         'active': data['active'],
         'projects': data['projects'],
         'files': files,
+        'tools': list_tools(vector_dir),
         'truncated': len(files) >= MAX_LIST_FILES,
     }
 
@@ -276,6 +288,100 @@ def delete_file(vector_dir: str, rel: str) -> bool:
     return True
 
 
+def resolve_tool(vector_dir: str, rel: str) -> Path | None:
+    """Absolute path inside ``vector_dir/tools``, or None."""
+    name = safe_relpath(rel)
+    if not name:
+        return None
+    root = tools_root(vector_dir).resolve()
+    dest = (root / name).resolve()
+    if dest == root or root not in dest.parents:
+        return None
+    return dest
+
+
+def list_tools(vector_dir: str) -> list[dict]:
+    """[{path, chars}] in the tools namespace."""
+    root = tools_root(vector_dir)
+    if not root.is_dir():
+        return []
+    out: list[dict] = []
+    try:
+        root = root.resolve()
+    except OSError:
+        return []
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if not d.startswith('.')]
+        dirnames.sort()
+        for name in sorted(filenames):
+            if name.startswith('.'):
+                continue
+            path = Path(dirpath) / name
+            if not path.is_file():
+                continue
+            rel = path.relative_to(root).as_posix()
+            try:
+                chars = path.stat().st_size
+            except OSError:
+                chars = 0
+            out.append({'path': rel, 'chars': chars})
+    out.sort(key=lambda row: row['path'])
+    return out
+
+
+def tools_listing(vector_dir: str) -> str:
+    """Human listing of the toolkit, or ``(no tools yet)``."""
+    rows = list_tools(vector_dir)
+    if not rows:
+        return '(no tools yet)'
+    lines = [f'- {row["path"]} ({row["chars"]} bytes)' for row in rows]
+    return '\n'.join(lines)
+
+
+def read_tool(vector_dir: str, rel: str) -> str | None:
+    """UTF-8 tool text, or None."""
+    dest = resolve_tool(vector_dir, rel)
+    if dest is None or not dest.is_file():
+        return None
+    try:
+        return dest.read_text(encoding='utf-8')
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
+def write_tool(vector_dir: str, rel: str, text: str) -> str | None:
+    """Write a tool outside the project. Return stored relative path."""
+    dest = resolve_tool(vector_dir, rel)
+    if dest is None:
+        return None
+    payload = text or ''
+    if len(payload.encode('utf-8')) > MAX_FILE_BYTES:
+        return None
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_text(payload, encoding='utf-8')
+    return dest.relative_to(tools_root(vector_dir).resolve()).as_posix()
+
+
+def delete_tool(vector_dir: str, rel: str) -> bool:
+    """Unlink a tool. True if something was removed."""
+    dest = resolve_tool(vector_dir, rel)
+    if dest is None or not dest.is_file():
+        return False
+    try:
+        dest.unlink()
+    except OSError:
+        return False
+    root = tools_root(vector_dir).resolve()
+    parent = dest.parent
+    while parent != root and parent.is_dir() and not any(parent.iterdir()):
+        try:
+            parent.rmdir()
+        except OSError:
+            break
+        parent = parent.parent
+    return True
+
+
 def extract_named_fences(text: str) -> list[dict[str, str]]:
     """``[{file, text}]`` from fences that name a file in the info line."""
     source = text or ''
@@ -298,37 +404,46 @@ def extract_named_fences(text: str) -> list[dict[str, str]]:
             i += 1
         if i < len(lines):
             i += 1
-        name = _filename_from_info(info)
+        name, ns = _fence_target(info)
         code = '\n'.join(body)
-        if name and name.lower() not in used and code.strip():
-            used.add(name.lower())
-            out.append({'file': name, 'text': code.rstrip('\n') + '\n'})
+        key = f'{ns}:{name.lower()}' if name else ''
+        if name and key not in used and code.strip():
+            used.add(key)
+            out.append({'file': name, 'text': code.rstrip('\n') + '\n', 'ns': ns})
     return out
 
 
 def persist_named_fences(vector_dir: str, text: str) -> list[str]:
-    """Write named fences into the active project. Return stored paths."""
+    """Write named fences into the project or tools namespace."""
     written: list[str] = []
     for art in extract_named_fences(text):
+        if art.get('ns') == 'tool':
+            stored = write_tool(vector_dir, art['file'], art['text'])
+            if stored:
+                written.append(f'tool:{stored}')
+            continue
         stored = write_file(vector_dir, art['file'], art['text'])
         if stored:
             written.append(stored)
     return written
 
 
-def _filename_from_info(info: str) -> str | None:
+def _fence_target(info: str) -> tuple[str | None, str]:
     raw = (info or '').strip()
+    tool = re.search(r'(?:^|[\s])tool\s*:\s*([^\s"\']+)', raw, re.I)
+    if tool:
+        return safe_relpath(tool.group(1)), 'tool'
     named = re.search(r'(?:filename|file|title|path)\s*[:=]\s*["\']?([^\s"\']+)', raw, re.I)
     if named:
-        return safe_relpath(named.group(1))
+        return safe_relpath(named.group(1)), 'project'
     colon = re.match(r'^[A-Za-z0-9_+-]+\s*:\s*(\S+)$', raw)
     if colon:
-        return safe_relpath(colon.group(1))
+        return safe_relpath(colon.group(1)), 'project'
     for part in raw.split():
         hit = safe_relpath(part)
         if hit:
-            return hit
-    return None
+            return hit, 'project'
+    return None, 'project'
 
 
 def interpreter_for(rel: str) -> str | None:
@@ -351,33 +466,70 @@ def run_file(
     extra = _clean_args(args)
     if not name or dest is None or not dest.is_file():
         return _run_result(name or rel, '', f'No such file: {rel}', 127, '')
+    root = project_root(vector_dir).resolve()
+    return _exec_script(
+        name, dest, extra, cwd=root, pythonpath=str(root), timeout=RUN_TIMEOUT,
+    )
+
+
+def run_tool(
+    vector_dir: str,
+    rel: str,
+    args: list[str] | None = None,
+) -> dict[str, Any]:
+    """Run a tool. Script lives in tools/; cwd is the active project."""
+    name = safe_relpath(rel)
+    dest = resolve_tool(vector_dir, rel) if name else None
+    extra = _clean_args(args)
+    if not name or dest is None or not dest.is_file():
+        return _run_result(name or rel, '', f'No such tool: {rel}', 127, '')
+    project = project_root(vector_dir).resolve()
+    troot = tools_root(vector_dir).resolve()
+    pypath = str(troot) + os.pathsep + str(project)
+    return _exec_script(
+        name, dest, extra, cwd=project, pythonpath=pypath, timeout=TOOL_TIMEOUT,
+    )
+
+
+def _exec_script(
+    name: str,
+    dest: Path,
+    extra: list[str],
+    cwd: Path,
+    pythonpath: str,
+    timeout: int,
+) -> dict[str, Any]:
     exe = interpreter_for(name)
     if not exe:
         return _run_result(name, '', f'Cannot run {name} (need python3 or node).', 127, '')
-    root = project_root(vector_dir).resolve()
-    argv = [exe, name, *extra]
+    cwd.mkdir(parents=True, exist_ok=True)
+    argv = [exe, str(dest), *extra]
+    displayed = _cmd_str([exe, name, *extra])
+    path = os.environ.get('PATH', '/usr/bin')
+    for bin_dir in (cwd / '.venv' / 'bin', cwd / '.miniforge' / 'bin', cwd / 'bin'):
+        if bin_dir.is_dir():
+            path = str(bin_dir) + os.pathsep + path
     env = {
-        'PATH': os.environ.get('PATH', '/usr/bin'),
-        'HOME': str(root),
+        'PATH': path,
+        'HOME': str(cwd),
         'PYTHONUNBUFFERED': '1',
-        'PYTHONPATH': str(root),
-        'NODE_PATH': str(root),
+        'PYTHONPATH': pythonpath,
+        'NODE_PATH': pythonpath,
         'LANG': 'C.UTF-8',
     }
-    displayed = _cmd_str(argv)
     try:
         proc = subprocess.run(  # noqa: S603  # argv list, no shell
             argv,
-            cwd=str(root),
+            cwd=str(cwd),
             capture_output=True,
             text=True,
-            timeout=RUN_TIMEOUT,
+            timeout=timeout,
             env=env,
             check=False,
         )
     except subprocess.TimeoutExpired as exc:
         out = _clip(getattr(exc, 'stdout', None) or '')
-        err = _clip((getattr(exc, 'stderr', None) or '') + f'\n(timed out after {RUN_TIMEOUT}s)')
+        err = _clip((getattr(exc, 'stderr', None) or '') + f'\n(timed out after {timeout}s)')
         return _run_result(name, out, err, 124, displayed)
     except OSError as exc:
         return _run_result(name, '', str(exc), 127, displayed)
@@ -415,11 +567,22 @@ def format_read(rel: str, text: str) -> str:
 
 def format_git(result: dict[str, Any]) -> str:
     """Block the model sees after ``<GIT:…>``."""
-    cmd = result.get('cmd') or 'git'
+    return _format_block('PROJECT_GIT', result)
+
+
+def format_tool(result: dict[str, Any]) -> str:
+    """Block the model sees after ``<TOOL:…>``."""
+    return _format_block('PROJECT_TOOL', result)
+
+
+def _format_block(kind: str, result: dict[str, Any]) -> str:
+    path = result.get('path') or ''
+    cmd = result.get('cmd') or ''
     code = result.get('code')
     stdout = result.get('stdout') or ''
     stderr = result.get('stderr') or ''
-    parts = [f'=== PROJECT_GIT  cmd={cmd}  exit={code} ===']
+    label = f'{kind} {path}'.rstrip() if path else kind
+    parts = [f'=== {label}  cmd={cmd}  exit={code} ===']
     if stdout:
         parts.append(stdout.rstrip())
     if stderr:
@@ -496,12 +659,14 @@ def apply_tag(
         return body, f'Reading {rel}…'
     if action == 'git':
         return format_git(run_git(vector_dir, [rel, *extra])), f'Git {rel}…'
+    if action == 'tool':
+        return format_tool(run_tool(vector_dir, rel, extra)), f'Tool {rel}…'
     result = run_file(vector_dir, rel, extra)
     return format_run(result), f'Running {rel}…'
 
 
 def take_project_tag(text: str) -> tuple[str, str | None, str | None, list[str]]:
-    """Split ``(visible, action, path, args)``. Action is run/read/git or None."""
+    """Split ``(visible, action, path, args)``. Action is run/read/git/tool or None."""
     if not text:
         return '', None, None, []
     lines = text.split('\n')
@@ -515,7 +680,7 @@ def take_project_tag(text: str) -> tuple[str, str | None, str | None, list[str]]
 
 
 class ProjectNeedFeed:
-    """Hold back an in-progress own-line ``<RUN:>`` / ``<READ:>`` / ``<GIT:>`` tag."""
+    """Hold back an in-progress own-line RUN/READ/GIT/TOOL tag."""
 
     def __init__(self):
         self.buf = ''
@@ -698,7 +863,7 @@ def _might_become_tag(line: str) -> bool:
     if stripped == '':
         return True
     lower = stripped.lower()
-    for prefix in ('<run:', '<read:', '<git:'):
+    for prefix in ('<run:', '<read:', '<git:', '<tool:'):
         if prefix.startswith(lower) or lower.startswith(prefix):
             close = lower.find('>')
             if close == -1:
