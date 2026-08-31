@@ -30,7 +30,7 @@ MAX_OUTPUT = 32_000
 RUN_TIMEOUT = 45
 TOOL_TIMEOUT = 120
 MAX_PROJECT_OPS = 8
-MAX_RUN_ARGS = 16
+MAX_RUN_ARGS = 32
 MAX_ARG_LEN = 200
 MAX_LIST_FILES = 400
 MAX_TREE_LINES = 80
@@ -49,7 +49,7 @@ _FILE_TOKEN = re.compile(
 )
 _FENCE_OPEN = re.compile(r'^( {0,3})(`{3,}|~{3,})([^\n]*)$')
 _PROJECT_TAG = re.compile(
-    r'^[ \t]*<(RUN|READ|GIT|TOOL|NEW):\s*([^>\n]+?)\s*>[ \t]*$',
+    r'^[ \t]*<(RUN|READ|GIT|TOOL|NEW):\s*([^>\n]+?)\s*>(.*)$',
     re.I,
 )
 _SLUG = re.compile(r'[^a-z0-9_-]+')
@@ -371,10 +371,13 @@ def list_tools(vector_dir: str) -> list[dict]:
 
 
 def tools_listing(vector_dir: str) -> str:
-    """Human listing of the toolkit, or ``(no tools yet)``."""
+    """Human listing of the toolkit, or a write-one-first hint."""
     rows = list_tools(vector_dir)
     if not rows:
-        return '(no tools yet)'
+        return (
+            '(no tools yet — write one with ```python tool:name.py '
+            'then <TOOL:name.py argv>. nothing is built-in)'
+        )
     lines = [f'- {row["path"]} ({row["chars"]} bytes)' for row in rows]
     return '\n'.join(lines)
 
@@ -523,7 +526,12 @@ def run_tool(
     dest = resolve_tool(vector_dir, rel) if name else None
     extra = _clean_args(args)
     if not name or dest is None or not dest.is_file():
-        return _run_result(name or rel, '', f'No such tool: {rel}', 127, '')
+        hint = (
+            f'No such tool: {rel}. Write it first with a '
+            f'```python tool:{name or rel} fence, then '
+            f'<TOOL:{name or rel} argv>. Nothing is built-in.'
+        )
+        return _run_result(name or rel, '', hint, 127, '')
     project = project_root(vector_dir).resolve()
     troot = tools_root(vector_dir).resolve()
     pypath = str(troot) + os.pathsep + str(project)
@@ -800,6 +808,9 @@ def _own_line_tag(line: str) -> tuple[str | None, str | None, list[str]]:
         return None, None, []
     action = match.group(1).lower()
     raw = match.group(2)
+    trailing = (match.group(3) or '').strip()
+    if trailing and action in ('run', 'tool', 'git'):
+        raw = f'{raw} {trailing}'
     if action == 'new':
         return _parse_new(raw)
     if action == 'git':
@@ -940,15 +951,12 @@ def _might_become_tag(line: str) -> bool:
     if '\n' in line:
         return False
     stripped = line.lstrip(' \t')
-    if stripped == '':
+    if stripped in ('', '<'):
         return True
     lower = stripped.lower()
     for prefix in ('<run:', '<read:', '<git:', '<tool:', '<new:'):
         if prefix.startswith(lower) or lower.startswith(prefix):
-            close = lower.find('>')
-            if close == -1:
-                return True
-            return stripped[close + 1:].strip() == ''
+            return True
     return False
 
 

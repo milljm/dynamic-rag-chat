@@ -102,7 +102,7 @@ class PromptManager():
             extra = f'{self.plot_prompt_file}_sd_last.md'
             if os.path.exists(extra):
                 parts.append(self.get_prompt(extra))
-        if documents.get('use_coding') and not resume:
+        if documents.get('use_coding'):
             extra = f'{self.plot_prompt_file}_coding.md'
             if os.path.exists(extra):
                 parts.append(self.get_prompt(extra))

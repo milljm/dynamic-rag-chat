@@ -46,7 +46,7 @@ A live lookup failed. Tell the user you could not fetch current information. Do 
 </GOLD_RESUME>
 {% endif %}
 {% if use_coding %}
-<TOOLS - YOUR PERSISTENT TOOLKIT. OUTSIDE THE PROJECT. GROWS OVER TIME>
+<TOOLS - YOUR SCRIPTS. (no tools yet) MEANS WRITE ONE. tool:name.py FENCE, THEN <TOOL:name.py argv> INSIDE THE TAG. NOTHING IS BUILT-IN>
 {{tools_index}}
 </TOOLS>
 <PROJECT_FILES - ACTIVE PROJECT TREE. WRITE WITH NAMED FENCES. NEW/RUN/READ/GIT/TOOL ARE OWN-LINE TAGS>

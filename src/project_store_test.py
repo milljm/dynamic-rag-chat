@@ -270,6 +270,30 @@ class ProjectTagTest(unittest.TestCase):
         self.assertEqual(args, ['--name', 'my app'])
         self.assertEqual(vis, 'ok.')
 
+    def test_args_after_closing_bracket(self):
+        vis, action, name, args = take_project_tag(
+            '<TOOL:uv_setup.py> init -n matplotlib-env python=3.11 '
+            'matplotlib numpy pandas\n',
+        )
+        self.assertEqual(action, 'tool')
+        self.assertEqual(name, 'uv_setup.py')
+        self.assertEqual(
+            args,
+            [
+                'init', '-n', 'matplotlib-env', 'python=3.11',
+                'matplotlib', 'numpy', 'pandas',
+            ],
+        )
+        self.assertEqual(vis, '')
+        _, action, name, args = take_project_tag('<RUN:app.py> --port 8\n')
+        self.assertEqual(action, 'run')
+        self.assertEqual(name, 'app.py')
+        self.assertEqual(args, ['--port', '8'])
+        _, action, name, args = take_project_tag('<GIT:commit> -m "hi"\n')
+        self.assertEqual(action, 'git')
+        self.assertEqual(name, 'commit')
+        self.assertEqual(args, ['-m', 'hi'])
+
     def test_inline_is_talk(self):
         text = 'emit tags like `<RUN:src/hello.py>` and keep talking'
         vis, action, name, args = take_project_tag(text)
@@ -303,6 +327,18 @@ class ProjectTagTest(unittest.TestCase):
         self.assertTrue(hit)
         self.assertEqual(feed.path, 'agents/do.py')
         self.assertEqual(feed.args, ['--x', 'foo'])
+
+    def test_feed_args_after_gt(self):
+        feed = ProjectNeedFeed()
+        a, hit = feed.feed('<TOOL:uv_setup.py> init')
+        self.assertFalse(hit)
+        self.assertEqual(a, '')
+        b, hit = feed.feed(' -n env\n')
+        self.assertTrue(hit)
+        self.assertEqual(b, '')
+        self.assertEqual(feed.action, 'tool')
+        self.assertEqual(feed.path, 'uv_setup.py')
+        self.assertEqual(feed.args, ['init', '-n', 'env'])
 
     def test_read_tag(self):
         _, action, name, args = take_project_tag('<READ:notes.md>')
@@ -461,6 +497,18 @@ class ToolNamespaceTest(unittest.TestCase):
         self.assertTrue(status.startswith('Tool hi.py'))
         self.assertIn('PROJECT_TOOL', body)
         self.assertIn('tool-hi', body)
+
+    def test_missing_tool_tells_write_first(self):
+        result = run_tool(self.root, 'uv_setup.py')
+        self.assertEqual(result['code'], 127)
+        self.assertIn('Write it first', result['stderr'])
+        self.assertIn('tool:uv_setup.py', result['stderr'])
+        self.assertIn('nothing is built-in', result['stderr'].lower())
+
+    def test_empty_tools_listing_says_write(self):
+        listing = tools_listing(self.root)
+        self.assertIn('no tools yet', listing)
+        self.assertIn('nothing is built-in', listing)
 
 
 class CreateProjectTest(unittest.TestCase):

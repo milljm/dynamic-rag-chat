@@ -987,9 +987,9 @@ function ProjectFiles({
           <div className="mt-2 space-y-1">
             {tools.length === 0 ? (
               <p className="text-xs text-muted-foreground">
-                Coding can write helpers here (
-                <code className="font-mono">{"tool:uv_setup.py"}</code>
-                ), outside the project. They stick around.
+                Coding writes helpers here (
+                <code className="font-mono">{"tool:name.py"}</code>
+                ), then runs them. They stick around, outside the project.
               </p>
             ) : (
               <ul className="space-y-1">

@@ -23,7 +23,7 @@ Light mode (washed dust / sand). Code fences have a **theme dropdown** — pick 
 - **URL scrape** — wrap a link in double braces and the page text joins the turn:
   `{{https://example.com/article}}`
 - **Web agent** — `\agent` or the Agent toggle. Live search, then the answering model.
-- **Coding / Projects** — `\coding` or the Coding toggle. New apps: `<NEW:hello_world>` (named project, git init immediately). Click a project to browse files. Tools live outside the project. Imported dirs that are not git: the model asks before init.
+- **Coding / Projects** — `\coding` or the Coding toggle. New apps: `<NEW:hello_world>` (named project, git init immediately). Click a project to browse files. Tools are scripts the model writes (`tool:name.py` fence, then `<TOOL:name.py argv>`) — nothing is built-in. Imported dirs that are not git: the model asks before init.
 - **Stable Diffusion** — Settings → Automatic1111 URL. **Image** on in assistant (toggle + New ↻). In story, Image is a one-click still of the current beat. No follow-up LLM after the PNG.
 - **Model routes** — casual, coder, vision, agent… fill in only what you run. Three models is enough (generator, pre-conditioner, embeddings).
 - **Branches** — fork, switch, rewind. `story` and `assistant` are protected.
@@ -199,7 +199,7 @@ Each **branch** owns `{branch}_user_documents` and `{branch}_ai_documents`. Stor
 | Filename in the query | — | inject the whole file |
 | `<NEED_GOLD:filename>` mid-reply | — | fetch, resume same turn (cap 2) |
 
-**Projects** (Coding toggle / `\coding`): `<NEW:hello_world>` creates `vector_dir/projects/hello_world/` and git-inits it (no ask). **Add project dir** registers an existing directory in place. If that import is not git, the model asks before `<GIT:init>`. Click a project in the sidebar to browse its files. Tools (`vector_dir/tools/`) are the model's namespace. Own-line `<RUN:>` / `<READ:>` / `<GIT:>` / `<TOOL:>` / `<NEW:>` mid-reply (cap 8).
+**Projects** (Coding toggle / `\coding`): `<NEW:hello_world>` creates `vector_dir/projects/hello_world/` and git-inits it (no ask). **Add project dir** registers an existing directory in place. If that import is not git, the model asks before `<GIT:init>`. Click a project in the sidebar to browse its files. Tools (`vector_dir/tools/`) are scripts the model writes — there is no built-in uv/conda helper. Own-line `<RUN:>` / `<READ:>` / `<GIT:>` / `<TOOL:name.py argv>` / `<NEW:>` mid-reply (cap 8). argv stay inside the tag.
 
 Chunking is parent/child:
 

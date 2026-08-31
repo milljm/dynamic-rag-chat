@@ -843,7 +843,11 @@ class RenderWindow(PromptManager):
         documents.setdefault('gold_resume', '')
         documents.setdefault('use_coding', False)
         documents.setdefault('project_index', '(empty workspace)')
-        documents.setdefault('tools_index', '(no tools yet)')
+        documents.setdefault(
+            'tools_index',
+            '(no tools yet — write one with ```python tool:name.py '
+            'then <TOOL:name.py argv>. nothing is built-in)',
+        )
         documents.setdefault('project_resume', '')
         documents.setdefault('project_result', '')
         documents.setdefault('attached_files_note', '')
