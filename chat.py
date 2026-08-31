@@ -29,6 +29,7 @@
 #     "streamlit",
 #     "nodejs",
 #     "fastapi",
+#     "yfinance",
 # ]
 # ///
 import os

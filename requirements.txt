@@ -21,6 +21,7 @@ rank_bm25
 duckduckgo-search
 ddgs
 cloudscraper
+yfinance
 streamlit
 nodejs
 fastapi

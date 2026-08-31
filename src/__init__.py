@@ -5,5 +5,5 @@ from .render_window import RenderWindow
 from .chat_utils import CommonUtils, ChatOptions, RAGTag
 from .import_data import ImportData
 from .scene_manager import SceneManager
-from .agent_tools import DuckDuckGoSearchTool
+from .agent_tools import DuckDuckGoSearchTool, StockPriceTool
 from .model_orchestrator import Orchestration

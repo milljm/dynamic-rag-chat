@@ -62,6 +62,11 @@ THINK_START_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Regex to detect stock-related queries for status display
+_STOCK_QUERY = re.compile(
+    r'(?i)(stock\s*(price|quote)?|share\s*price|ticker\b|market\s*data)',
+)
+
 console = Console(highlight=True)
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -988,7 +993,14 @@ def call_llm_stream(
     status.markdown('RAG Processing…')
     renderer.set_llm(meta, documents)
     if renderer.orchestrator.requires_agent(meta, documents):
-        status.markdown('Agent Web Search…')
+        # Determine which tool to show in status
+        query = documents.get('user_query', '') or ''
+        if _STOCK_QUERY.search(query):
+            tool_name = 'yfinance'
+        else:
+            key = (renderer.opts.tavily_key or '').strip().lower()
+            tool_name = 'tavily' if (key and key != 'none') else 'duckduckgo'
+        status.markdown(f'Agent [{tool_name}]…')
     messages = renderer.get_messages(meta, documents)
     renderer.set_llm(meta, documents)
     if documents.get('sd_ran') and not messages:
