@@ -40,6 +40,7 @@ from .sd_session import (
 from .think_tags import ThinkFeed, chunk_text, split_think
 from .sd_tools import make_sd_tools, seed_last_generated
 from .gold_fetch import MAX_GOLD_FETCHES, take_need_gold, recall_status
+from .prompt_progress import PromptProgress, format_prompt_status, stream_chat
 
 # Regex to detect stock-related queries for status display
 _STOCK_QUERY = re.compile(
@@ -950,7 +951,7 @@ class RenderWindow(PromptManager):
     # Stream response as chunks
     def stream_response(self, messages: Document)->object:
         """Invoke LLM and stream response. Always abort the HTTP body on exit."""
-        stream = self.llm.stream(messages)
+        stream = stream_chat(self.llm, messages)
         try:
             for chunk in stream:
                 yield chunk
@@ -1066,6 +1067,9 @@ class RenderWindow(PromptManager):
         current_response = ''
         first_token_at = 0
         for piece in self.stream_response(messages):
+            if isinstance(piece, PromptProgress):
+                self._status(format_prompt_status(piece.fraction))
+                continue
             piece = self.reveal_thinking(piece, self.state.verbose)
             if first_token_at == 0:
                 first_token_at = time.time()
@@ -1126,6 +1130,8 @@ class RenderWindow(PromptManager):
             messages = self.get_messages(meta_data, documents, polish=True)
             current_response = ''
             for piece in self.stream_response(messages):
+                if isinstance(piece, PromptProgress):
+                    continue
                 piece = self.reveal_thinking(piece, self.state.verbose)
                 current_response += piece.content
                 footer_meta['token_count'] += self.response_count(piece.content)
