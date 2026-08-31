@@ -13,6 +13,13 @@ _LIVE_QUERY = re.compile(
     r'|right\s+now|as\s+of\b|just\s+released'
     r'|latest\s+(version|release|news|price))'
 )
+# Trivial queries that are pure greetings/farewells - never need web search.
+# Note: This uses fullmatch so "hi what's the stock price" does NOT match.
+_TRIVIAL_QUERY = re.compile(
+    r'(?i)^(\s*(hi|hello|hey|howdy|greetings?|yo|yoo?\b|h(i|ey)\s*there|sup|wazzup)\s*[.!?]?)?$'
+    r'|^(thanks?|thank\s*(you|u)|thx|ty|cheers|yw)\s*[.!?]?$'
+    r'|^(bye|bbl?|brb|gtg|kthxbye|c\s*ya|see\s*ya)\s*[.!?]?$'
+)
 
 class Orchestration():
     """ Responsible for instantiating all ChatOpenAI objects """
@@ -156,7 +163,13 @@ class Orchestration():
         """True when this turn should run AgentExecutor (capped at 2)."""
         if not self.args.assistant_mode or self.__llm['agent'].model_name == 'None':
             return False
-        answer_confidence = float(0.0)
+
+        # Trivial queries (pure greetings/farewells) never need web search.
+        query = str(documents.get('user_query') or '').strip()
+        if _TRIVIAL_QUERY.fullmatch(query):
+            return False
+
+        answer_confidence = float(1.0)  # Safe default: if missing, assume no search needed
         for tag in meta_tags:
             if tag.tag == 'answer_confidence':
                 answer_confidence = float(tag.content)
@@ -172,15 +185,21 @@ class Orchestration():
             return True
         if self.requires_sd(documents):
             return False
-        query = str(documents.get('user_query') or '')
+        # Trivial queries already handled above; check for live query indicators.
         if _LIVE_QUERY.search(query) and not (
                 documents.get('has_images') or documents.get('dynamic_images')
                 or documents.get('has_files')
                 or documents.get('attached_files_note')):
             return True
-        # Agent requested
-        if (answer_confidence <= float(self.args.distrust_confidence)
-            or 'agent' in documents.get('in_line_commands', [])):
+        # Agent requested (via confidence threshold or explicit command)
+        if answer_confidence <= float(self.args.distrust_confidence):
+            if self.args.debug:
+                self.console.print(
+                    f'DEBUG: WEB SEARCH TRIGGERED - confidence={answer_confidence} '
+                    f'<= threshold={self.args.distrust_confidence}',
+                    style=f'color({self.args.color})', highlight=False)
+            return True
+        if 'agent' in documents.get('in_line_commands', []):
             return True
 
         return False

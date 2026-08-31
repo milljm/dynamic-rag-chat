@@ -105,6 +105,32 @@ HARD RULES (these win; do not score 1.0 to skip them):
 - Not sure → ≤ 0.5
 - Greetings, math, history, stable facts → 0.8–1.0
 
+## CRITICAL: assistant_mode and answer_confidence are INDEPENDENT
+
+assistant_mode answers "What TYPE of interaction is this?"
+answer_confidence answers "Does my training data have a CURRENT answer?"
+
+A casual query about live data SHOULD trigger search. A general query about stable facts should NOT.
+
+EXAMPLES (follow these exactly):
+- Input: "hi"
+  → assistant_mode: casual, answer_confidence: 0.95
+
+- Input: "what's the stock price right now?"
+  → assistant_mode: casual (or general), answer_confidence: 0.2
+
+- Input: "hi, what's the stock price right now?"
+  → assistant_mode: casual (or general), answer_confidence: 0.2
+
+- Input: "explain recursion to me"
+  → assistant_mode: general, answer_confidence: 0.9
+
+- Input: "thanks"
+  → assistant_mode: casual, answer_confidence: 0.95
+
+- Input: "what's the weather forecast for tomorrow?"
+  → assistant_mode: casual (or general), answer_confidence: 0.2
+
 # JSON SCHEMA
 {
   "metadata": {
