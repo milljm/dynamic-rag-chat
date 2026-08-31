@@ -12,6 +12,7 @@ from project_store import (  # noqa: E402  # pylint: disable=wrong-import-positi
     ProjectNeedFeed,
     add_project,
     apply_tag,
+    create_project,
     delete_file,
     extract_named_fences,
     list_files,
@@ -72,6 +73,7 @@ class WorkspaceTest(unittest.TestCase):
         listing = tree_listing(self.root)
         self.assertIn('src/hi.py', listing)
         self.assertIn('project: workspace', listing)
+        self.assertIn('kind: scratch', listing)
         self.assertIn('git: no', listing)
 
     def test_delete_prunes_empty_dirs(self):
@@ -459,6 +461,68 @@ class ToolNamespaceTest(unittest.TestCase):
         self.assertTrue(status.startswith('Tool hi.py'))
         self.assertIn('PROJECT_TOOL', body)
         self.assertIn('tool-hi', body)
+
+
+class CreateProjectTest(unittest.TestCase):
+    """<NEW:hello_world> is its own git repo, not workspace."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()  # pylint: disable=consider-using-with
+        self.root = self.tmp.name
+        self.addCleanup(self.tmp.cleanup)
+
+    def test_new_is_named_and_git(self):
+        result = create_project(self.root, 'hello_world')
+        self.assertTrue(result['ok'], result)
+        self.assertEqual(result['active'], 'hello_world')
+        self.assertEqual(result['project']['kind'], 'managed')
+        dest = Path(self.root) / 'projects' / 'hello_world'
+        self.assertEqual(project_root(self.root).resolve(), dest.resolve())
+        self.assertTrue((dest / '.git').exists())
+        self.assertFalse((scratch_root(self.root) / '.git').exists())
+        listing = tree_listing(self.root)
+        self.assertIn('project: hello_world', listing)
+        self.assertIn('git: yes', listing)
+        self.assertIn('kind: created', listing)
+
+    def test_writes_land_in_named_project(self):
+        create_project(self.root, 'hello_world')
+        stored = write_file(self.root, 'hello_world.py', 'print(1)\n')
+        self.assertEqual(stored, 'hello_world.py')
+        dest = Path(self.root) / 'projects' / 'hello_world' / 'hello_world.py'
+        self.assertTrue(dest.is_file())
+        self.assertFalse((scratch_root(self.root) / 'hello_world.py').exists())
+
+    def test_new_tag(self):
+        vis, action, name, args = take_project_tag('go.\n<NEW:hello_world>\n')
+        self.assertEqual(action, 'new')
+        self.assertEqual(name, 'hello_world')
+        self.assertEqual(args, [])
+        self.assertEqual(vis, 'go.')
+        body, status = apply_tag(self.root, 'new', 'hello_world', [])
+        self.assertTrue(status.startswith('Project hello_world'))
+        self.assertIn('PROJECT_NEW', body)
+        self.assertIn('git=yes', body)
+
+    def test_fences_above_new_land_in_project(self):
+        fence = '```python hi.py\nprint(1)\n```\n<NEW:hello_world>\n'
+        body, _ = apply_tag(self.root, 'new', 'hello_world', [], fence)
+        self.assertIn('git=yes', body)
+        dest = Path(self.root) / 'projects' / 'hello_world' / 'hi.py'
+        self.assertTrue(dest.is_file())
+        self.assertFalse((scratch_root(self.root) / 'hi.py').exists())
+        self.assertFalse((scratch_root(self.root) / '.git').exists())
+
+    def test_reject_workspace_name(self):
+        result = create_project(self.root, 'workspace')
+        self.assertFalse(result['ok'])
+
+    def test_second_new_selects(self):
+        first = create_project(self.root, 'hello_world')
+        write_file(self.root, 'keep.py', '1\n')
+        second = create_project(self.root, 'hello_world')
+        self.assertEqual(second['active'], first['active'])
+        self.assertIsNotNone(read_file(self.root, 'keep.py'))
 
 
 if __name__ == '__main__':

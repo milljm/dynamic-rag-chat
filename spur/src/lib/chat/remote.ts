@@ -192,7 +192,7 @@ export type ProjectFile = { path: string; chars: number };
 export type ProjectRecord = {
   id: string;
   name: string;
-  kind: "scratch" | "imported";
+  kind: "scratch" | "imported" | "managed";
   path: string;
   git: boolean;
 };

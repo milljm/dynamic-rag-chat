@@ -1109,19 +1109,21 @@ class RenderWindow(PromptManager):
         self, assembled: str, documents: dict, meta_data, messages,
         footer_meta, color, live, inference_start, first_token_at,
     ) -> str:
-        """Persist named fences; honour <RUN:> / <READ:> and continue."""
+        """Honour <NEW:> / <RUN:> / <READ:> / <GIT:> / <TOOL:> and continue."""
         del messages
         if not documents.get('use_coding') or not self.opts.assistant_mode:
             return assembled
         vector = str(self.opts.vector_dir)
         ops = 0
         while ops < MAX_PROJECT_OPS:
-            persist_named_fences(vector, assembled)
             visible, action, rel, args = take_project_tag(assembled)
-            assembled = visible
             if not rel:
+                persist_named_fences(vector, assembled)
                 break
-            block, status = apply_tag(vector, action or 'run', rel, args)
+            block, status = apply_tag(
+                vector, action or 'run', rel, args, assembled,
+            )
+            assembled = visible
             documents['project_result'] = block
             documents['project_resume'] = visible
             documents['project_index'] = tree_listing(vector)

@@ -1188,12 +1188,11 @@ def _apply_project_tag(
     documents: dict, answer: str, action: str, rel: str,
     args: list[str] | None = None,
 ) -> str:
-    """Persist fences, run/read, stamp resume fields. Return status line."""
+    """Run/read/new/git/tool; persist fences. Return status line."""
     vector = _vector_dir()
-    persist_named_fences(vector, answer)
     documents['use_coding'] = True
     documents['project_resume'] = answer
-    result, status = apply_tag(vector, action, rel, args)
+    result, status = apply_tag(vector, action, rel, args, answer)
     documents['project_result'] = result
     documents['project_index'] = tree_listing(vector)
     documents['tools_index'] = tools_listing(vector)

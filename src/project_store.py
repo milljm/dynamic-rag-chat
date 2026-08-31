@@ -10,8 +10,9 @@ Workers under ``agents/`` are ordinary scripts in the project.
 Persistent **tools** live in ``vector_dir/tools/`` (outside the project) and
 grow over time. Write them with ``tool:name.py`` fences; run with
 ``<TOOL:name.py>``. cwd is the active project so installs land there.
-``<GIT:status>`` is a local git agent (no remotes). Non-git projects must
-be initialized only after the user agrees.
+``<NEW:hello_world>`` creates a named project under ``vector_dir/projects/``
+and git-inits it immediately. Imported dirs that are not git repos still
+require the user's OK before ``<GIT:init>``.
 """
 from __future__ import annotations
 
@@ -48,10 +49,10 @@ _FILE_TOKEN = re.compile(
 )
 _FENCE_OPEN = re.compile(r'^( {0,3})(`{3,}|~{3,})([^\n]*)$')
 _PROJECT_TAG = re.compile(
-    r'^[ \t]*<(RUN|READ|GIT|TOOL):\s*([^>\n]+?)\s*>[ \t]*$',
+    r'^[ \t]*<(RUN|READ|GIT|TOOL|NEW):\s*([^>\n]+?)\s*>[ \t]*$',
     re.I,
 )
-_SLUG = re.compile(r'[^a-z0-9]+')
+_SLUG = re.compile(r'[^a-z0-9_-]+')
 _PLACEHOLDERS = frozenset({
     'filename', 'file', 'name', 'path', 'example',
     'script', 'yourfile', 'your-file', 'your_file',
@@ -116,6 +117,38 @@ def add_project(vector_dir: str, raw_path: str) -> dict[str, Any]:
     data['projects'].append(rec)
     data['active'] = rec['id']
     _save_registry(vector_dir, data)
+    return _result(vector_dir, rec)
+
+
+def create_project(vector_dir: str, raw_name: str) -> dict[str, Any]:
+    """Create a named project under vector_dir/projects/ and git init it."""
+    ident = _slug_name(raw_name)
+    if not ident:
+        return {'ok': False, 'error': 'Bad project name'}
+    data = _load_registry(vector_dir)
+    for rec in data['projects']:
+        if rec['id'] == ident:
+            data['active'] = rec['id']
+            _save_registry(vector_dir, data)
+            return _result(vector_dir, rec)
+    ident = _unique_id(ident, {p['id'] for p in data['projects']})
+    dest = Path(vector_dir) / 'projects' / ident
+    try:
+        dest.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        return {'ok': False, 'error': str(exc)}
+    rec = {
+        'id': ident,
+        'name': ident,
+        'kind': 'managed',
+        'path': str(dest.resolve()),
+        'git': False,
+    }
+    data['projects'].append(rec)
+    data['active'] = ident
+    _save_registry(vector_dir, data)
+    if not _has_git(dest):
+        _git_init(dest)
     return _result(vector_dir, rec)
 
 
@@ -227,7 +260,15 @@ def tree_listing(vector_dir: str) -> str:
     rec = _active_record(vector_dir)
     rows = list_files(vector_dir)
     git = 'yes' if rec.get('git') else 'no'
-    header = f'project: {rec["name"]}\nroot: {rec["path"]}\ngit: {git}'
+    kind = rec.get('kind') or 'scratch'
+    if kind == 'managed':
+        kind = 'created'
+    header = (
+        f'project: {rec["name"]}\n'
+        f'root: {rec["path"]}\n'
+        f'git: {git}\n'
+        f'kind: {kind}'
+    )
     if not rows:
         empty = (
             '(empty workspace)' if rec['kind'] == 'scratch'
@@ -575,6 +616,18 @@ def format_tool(result: dict[str, Any]) -> str:
     return _format_block('PROJECT_TOOL', result)
 
 
+def format_new(result: dict[str, Any]) -> str:
+    """Block the model sees after ``<NEW:…>``."""
+    rec = result.get('project') or {}
+    ident = rec.get('id') or rec.get('name') or ''
+    if not result.get('ok'):
+        err = result.get('error') or 'failed'
+        return f'=== PROJECT_NEW {ident} ===\n(error: {err})'
+    git = 'yes' if rec.get('git') else 'no'
+    root = rec.get('path') or ''
+    return f'=== PROJECT_NEW {ident}  git={git} ===\nroot: {root}'
+
+
 def _format_block(kind: str, result: dict[str, Any]) -> str:
     path = result.get('path') or ''
     cmd = result.get('cmd') or ''
@@ -647,13 +700,25 @@ def apply_tag(
     action: str,
     rel: str,
     args: list[str] | None = None,
+    text: str = '',
 ) -> tuple[str, str]:
-    """Run a coding tag. Return ``(project_result, status)``."""
+    """Run a coding tag. Return ``(project_result, status)``.
+
+    When ``text`` is set, named fences persist too. ``new`` runs first so
+    those files land in the created project, not workspace.
+    """
     extra = args or []
+    if action == 'new':
+        created = create_project(vector_dir, rel)
+        if created.get('ok') and text:
+            persist_named_fences(vector_dir, text)
+        return format_new(created), f'Project {created.get("active") or rel}…'
+    if text:
+        persist_named_fences(vector_dir, text)
     if action == 'read':
-        text = read_file(vector_dir, rel)
+        text_out = read_file(vector_dir, rel)
         body = (
-            format_read(rel, text) if text is not None
+            format_read(rel, text_out) if text_out is not None
             else f'=== PROJECT_READ {rel} ===\n(missing)'
         )
         return body, f'Reading {rel}…'
@@ -666,7 +731,7 @@ def apply_tag(
 
 
 def take_project_tag(text: str) -> tuple[str, str | None, str | None, list[str]]:
-    """Split ``(visible, action, path, args)``. Action is run/read/git/tool or None."""
+    """Split ``(visible, action, path, args)``. Action is run/read/git/tool/new or None."""
     if not text:
         return '', None, None, []
     lines = text.split('\n')
@@ -735,6 +800,8 @@ def _own_line_tag(line: str) -> tuple[str | None, str | None, list[str]]:
         return None, None, []
     action = match.group(1).lower()
     raw = match.group(2)
+    if action == 'new':
+        return _parse_new(raw)
     if action == 'git':
         return _parse_git(raw)
     if action == 'read':
@@ -748,6 +815,19 @@ def _own_line_tag(line: str) -> tuple[str | None, str | None, list[str]]:
     if stem in _PLACEHOLDERS:
         return None, None, []
     return action, name, args
+
+
+def _parse_new(raw: str) -> tuple[str | None, str | None, list[str]]:
+    text = (raw or '').strip().strip('"\'`')
+    if not text:
+        return None, None, []
+    token = text.split()[0]
+    if '/' in token or '\\' in token or token.startswith('.'):
+        return None, None, []
+    ident = _slug_name(token)
+    if not ident:
+        return None, None, []
+    return 'new', ident, []
 
 
 def _parse_git(raw: str) -> tuple[str | None, str | None, list[str]]:
@@ -863,7 +943,7 @@ def _might_become_tag(line: str) -> bool:
     if stripped == '':
         return True
     lower = stripped.lower()
-    for prefix in ('<run:', '<read:', '<git:', '<tool:'):
+    for prefix in ('<run:', '<read:', '<git:', '<tool:', '<new:'):
         if prefix.startswith(lower) or lower.startswith(prefix):
             close = lower.find('>')
             if close == -1:
@@ -933,6 +1013,9 @@ def _normalize_registry(vector_dir: str, data: dict) -> dict[str, Any]:
             continue
         ident = str(rec.get('id') or '').strip()
         raw = str(rec.get('path') or '').strip()
+        kind = rec.get('kind')
+        if kind not in ('imported', 'managed'):
+            kind = 'imported'
         if rec.get('kind') == 'scratch' or ident == SCRATCH_ID:
             continue
         if not ident or not raw or ident in seen_ids:
@@ -949,7 +1032,7 @@ def _normalize_registry(vector_dir: str, data: dict) -> dict[str, Any]:
         imported.append({
             'id': ident,
             'name': str(rec.get('name') or dest.name or ident),
-            'kind': 'imported',
+            'kind': kind,
             'path': key,
             'git': (dest / '.git').exists(),
         })
@@ -1008,7 +1091,7 @@ def _imported_record(dest: Path, used: set[str]) -> dict[str, Any]:
 
 
 def _unique_id(name: str, used: set[str]) -> str:
-    base = _SLUG.sub('-', (name or '').lower()).strip('-')[:40] or 'project'
+    base = _slug_name(name) or 'project'
     if base not in used:
         return base
     n = 2
@@ -1017,9 +1100,36 @@ def _unique_id(name: str, used: set[str]) -> str:
     return f'{base}-{n}'
 
 
+def _slug_name(name: str) -> str | None:
+    base = _SLUG.sub('-', (name or '').lower()).strip('-_')[:40]
+    if not base or base in _PLACEHOLDERS or base == SCRATCH_ID:
+        return None
+    return base
+
+
+def _git_init(dest: Path) -> None:
+    exe = shutil.which('git')
+    if not exe:
+        return
+    try:
+        subprocess.run(  # noqa: S603
+            [exe, 'init'],
+            cwd=str(dest),
+            capture_output=True,
+            text=True,
+            timeout=20,
+            env=_git_env(dest),
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return
+
+
 def _result(vector_dir: str, rec: dict[str, Any]) -> dict[str, Any]:
     snap = snapshot(vector_dir)
     snap['ok'] = True
     snap['error'] = None
-    snap['project'] = rec
+    snap['project'] = next(
+        (item for item in snap['projects'] if item['id'] == rec['id']), rec,
+    )
     return snap

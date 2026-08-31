@@ -680,6 +680,7 @@ function ProjectFiles({
   const [output, setOutput] = useState("");
   const [dirPath, setDirPath] = useState("");
   const [busy, setBusy] = useState(false);
+  const [filesOpen, setFilesOpen] = useState(true);
 
   const apply = (snap: ProjectSnapshot) => {
     setFiles(snap.files);
@@ -687,6 +688,7 @@ function ProjectFiles({
     setProjects(snap.projects);
     setActive(snap.active);
     setTruncated(Boolean(snap.truncated));
+    setFilesOpen(true);
   };
 
   const refresh = () => {
@@ -710,96 +712,216 @@ function ProjectFiles({
 
   if (!usesChatPy()) return null;
 
-  const current = projects.find((project) => project.id === active);
   const shown = files.slice(0, SHOW_PROJECT_FILES);
   const locked = streaming || busy;
+  const others = projects.filter((project) => project.kind !== "scratch");
+  const visible =
+    others.length === 0
+      ? projects
+      : projects.filter((project) => project.kind !== "scratch" || project.id === active);
 
   return (
     <SidebarSection
       id="projects"
       title="Projects"
       defaultOpen={false}
-      badge={projects.length || undefined}
+      badge={visible.length || undefined}
     >
       <div className="space-y-2">
-        {projects.length > 0 ? (
+        {visible.length > 0 ? (
           <ul className="space-y-1">
-            {projects.map((project) => {
+            {visible.map((project) => {
               const isActive = project.id === active;
+              const canRemove = project.kind !== "scratch";
               return (
                 <li
                   key={project.id}
                   className={cn(
-                    "flex min-w-0 items-center gap-0.5 rounded-sm",
+                    "min-w-0 rounded-sm",
                     isActive ? "bg-accent" : "hover:bg-accent/70",
                   )}
                 >
-                  <button
-                    type="button"
-                    disabled={locked || isActive}
-                    onClick={async () => {
-                      setBusy(true);
-                      const result = await selectProject(project.id);
-                      setBusy(false);
-                      if (!result.ok) {
-                        toast.error(result.error || `Could not select ${project.name}`);
-                        return;
-                      }
-                      setOutput("");
-                      refresh();
-                    }}
-                    aria-current={isActive ? "true" : undefined}
-                    className="flex min-w-0 flex-1 items-center gap-1.5 px-2 py-1.5 text-left text-xs"
-                    title={project.path}
-                  >
-                    <span
-                      className={cn(
-                        "size-1.5 shrink-0 rounded-full",
-                        isActive ? "bg-primary" : "bg-muted-foreground/40",
-                      )}
-                    />
-                    {project.git ? (
-                      <GitBranch className="size-3 shrink-0 text-muted-foreground" />
-                    ) : (
-                      <FolderCode className="size-3 shrink-0 text-muted-foreground" />
-                    )}
-                    <span className="min-w-0 flex-1 truncate font-medium">
-                      {project.name}
-                    </span>
-                    {project.git ? null : (
-                      <span className="shrink-0 text-[10px] text-muted-foreground/70">
-                        no git
-                      </span>
-                    )}
-                  </button>
-                  {project.kind === "imported" ? (
+                  <div className="flex min-w-0 items-center gap-0.5">
                     <button
                       type="button"
                       disabled={locked}
-                      className="relative mr-0.5 size-8 shrink-0 text-muted-foreground after:absolute after:left-1/2 after:top-1/2 after:size-10 after:-translate-x-1/2 after:-translate-y-1/2 hover:text-destructive"
-                      aria-label={`Remove ${project.name}`}
                       onClick={async () => {
-                        if (
-                          !window.confirm(
-                            `Unregister ${project.name}? Files on disk are not deleted.`,
-                          )
-                        ) {
+                        if (isActive) {
+                          setFilesOpen((open) => !open);
                           return;
                         }
                         setBusy(true);
-                        const result = await removeProject(project.id);
+                        const result = await selectProject(project.id);
                         setBusy(false);
                         if (!result.ok) {
-                          toast.error(result.error || `Could not remove ${project.name}`);
+                          toast.error(result.error || `Could not select ${project.name}`);
                           return;
                         }
-                        toast.success(`Removed ${project.name}`);
                         setOutput("");
+                        setFilesOpen(true);
                         refresh();
                       }}
+                      aria-current={isActive ? "true" : undefined}
+                      aria-expanded={isActive ? filesOpen : undefined}
+                      className="flex min-w-0 flex-1 items-center gap-1.5 px-2 py-1.5 text-left text-xs"
+                      title={project.path}
                     >
-                      <X className="size-3.5" />
+                      <span
+                        className={cn(
+                          "size-1.5 shrink-0 rounded-full",
+                          isActive ? "bg-primary" : "bg-muted-foreground/40",
+                        )}
+                      />
+                      {project.git ? (
+                        <GitBranch className="size-3 shrink-0 text-muted-foreground" />
+                      ) : (
+                        <FolderCode className="size-3 shrink-0 text-muted-foreground" />
+                      )}
+                      <span className="min-w-0 flex-1 truncate font-medium">
+                        {project.name}
+                      </span>
+                      {isActive && !filesOpen && files.length > 0 ? (
+                        <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground/70">
+                          {files.length}
+                        </span>
+                      ) : null}
+                      {project.git ? null : (
+                        <span className="shrink-0 text-[10px] text-muted-foreground/70">
+                          no git
+                        </span>
+                      )}
                     </button>
+                    {canRemove ? (
+                      <button
+                        type="button"
+                        disabled={locked}
+                        className="relative mr-0.5 size-8 shrink-0 text-muted-foreground after:absolute after:left-1/2 after:top-1/2 after:size-10 after:-translate-x-1/2 after:-translate-y-1/2 hover:text-destructive"
+                        aria-label={`Remove ${project.name}`}
+                        onClick={async () => {
+                          if (
+                            !window.confirm(
+                              `Unregister ${project.name}? Files on disk are not deleted.`,
+                            )
+                          ) {
+                            return;
+                          }
+                          setBusy(true);
+                          const result = await removeProject(project.id);
+                          setBusy(false);
+                          if (!result.ok) {
+                            toast.error(result.error || `Could not remove ${project.name}`);
+                            return;
+                          }
+                          toast.success(`Removed ${project.name}`);
+                          setOutput("");
+                          refresh();
+                        }}
+                      >
+                        <X className="size-3.5" />
+                      </button>
+                    ) : null}
+                  </div>
+                  {isActive && filesOpen ? (
+                    <div className="space-y-1 px-2 pb-2">
+                      {files.length === 0 ? (
+                        <p className="text-[10px] leading-relaxed text-muted-foreground/70">
+                          No files yet.
+                        </p>
+                      ) : (
+                        <ul className="space-y-1">
+                          {shown.map((file) => (
+                            <li
+                              key={file.path}
+                              className="flex items-center gap-1 rounded-sm bg-secondary px-2 py-1.5 text-xs"
+                            >
+                              <FolderCode className="size-3 shrink-0 text-muted-foreground" />
+                              <span
+                                className="min-w-0 flex-1 truncate font-mono"
+                                title={file.path}
+                              >
+                                {file.path}
+                              </span>
+                              <span className="font-mono text-[10px] tabular-nums text-muted-foreground/50">
+                                {fmtChars(file.chars)}
+                              </span>
+                              {runnable(file.path) ? (
+                                <button
+                                  type="button"
+                                  className="relative size-8 text-muted-foreground after:absolute after:left-1/2 after:top-1/2 after:size-10 after:-translate-x-1/2 after:-translate-y-1/2 hover:text-foreground"
+                                  aria-label={`Run ${file.path}`}
+                                  onClick={async () => {
+                                    const result = await runProjectFile(file.path);
+                                    const body = (
+                                      result.stdout ||
+                                      result.stderr ||
+                                      result.error ||
+                                      `exit ${result.code}`
+                                    ).trim();
+                                    setOutput(`$ ${result.cmd || file.path}\n${body}`);
+                                    if (result.ok) toast.success(`Ran ${file.path}`);
+                                    else
+                                      toast.error(
+                                        result.stderr || result.error || "Run failed",
+                                      );
+                                  }}
+                                >
+                                  <Play className="size-3.5" />
+                                </button>
+                              ) : null}
+                              <button
+                                type="button"
+                                className="relative size-8 text-muted-foreground after:absolute after:left-1/2 after:top-1/2 after:size-10 after:-translate-x-1/2 after:-translate-y-1/2 hover:text-foreground"
+                                aria-label={`Download ${file.path}`}
+                                onClick={async () => {
+                                  const text = await getProjectFile(file.path);
+                                  if (text == null) {
+                                    toast.error(`Could not read ${file.path}`);
+                                    return;
+                                  }
+                                  downloadTextFile(
+                                    file.path.split("/").pop() || file.path,
+                                    text,
+                                  );
+                                }}
+                              >
+                                <Download className="size-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                className="relative size-8 text-muted-foreground after:absolute after:left-1/2 after:top-1/2 after:size-10 after:-translate-x-1/2 after:-translate-y-1/2 hover:text-destructive"
+                                aria-label={`Delete ${file.path}`}
+                                onClick={async () => {
+                                  if (
+                                    !window.confirm(
+                                      `Remove ${file.path} from the project?`,
+                                    )
+                                  ) {
+                                    return;
+                                  }
+                                  const result = await deleteProjectFile(file.path);
+                                  if (!result.ok) {
+                                    toast.error(
+                                      result.error || `Could not delete ${file.path}`,
+                                    );
+                                    return;
+                                  }
+                                  toast.success(`Deleted ${file.path}`);
+                                  refresh();
+                                }}
+                              >
+                                <Trash2 className="size-3.5" />
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                      {files.length > SHOW_PROJECT_FILES ? (
+                        <p className="text-[10px] text-muted-foreground/70">
+                          Showing {SHOW_PROJECT_FILES} of {files.length}
+                          {truncated ? "+" : ""}
+                        </p>
+                      ) : null}
+                    </div>
                   ) : null}
                 </li>
               );
@@ -940,131 +1062,14 @@ function ProjectFiles({
             )}
           </div>
         </details>
-
-        <details
-          key={active}
-          className="rounded-sm"
-          defaultOpen={current?.kind !== "imported" && files.length <= 12}
-        >
-          <summary className="cursor-pointer text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
-            Files
-            {files.length ? (
-              <span className="ml-2 font-mono text-[10px] font-normal normal-case tabular-nums tracking-normal">
-                {files.length}
-                {truncated ? "+" : ""}
-              </span>
-            ) : null}
-          </summary>
-          <div className="mt-2 space-y-1">
-        {files.length === 0 ? (
-          <p className="text-xs text-muted-foreground">
-            {current?.kind === "imported" ? (
-              <>No listed files (hidden and vendor dirs are skipped).</>
-            ) : current && !current.git ? (
-              <>
-                Turn on <span className="text-foreground">Coding</span>. If
-                this folder is not a git repo, the model will ask before{" "}
-                <code className="font-mono">{"git init"}</code>.
-              </>
-            ) : (
-              <>
-                Turn on <span className="text-foreground">Coding</span>. Named
-                fences land here. Write workers under{" "}
-                <span className="font-mono text-foreground">agents/</span>;{" "}
-                <code className="font-mono">{"<RUN:file.py args>"}</code>{" "}
-                executes them.
-              </>
-            )}
-          </p>
-        ) : (
-          <ul className="space-y-1">
-            {shown.map((file) => (
-              <li
-                key={file.path}
-                className="flex items-center gap-1 rounded-sm bg-secondary px-2 py-1.5 text-xs"
-              >
-                <FolderCode className="size-3 shrink-0 text-muted-foreground" />
-                <span className="min-w-0 flex-1 truncate font-mono" title={file.path}>
-                  {file.path}
-                </span>
-                <span className="font-mono text-[10px] tabular-nums text-muted-foreground/50">
-                  {fmtChars(file.chars)}
-                </span>
-                {runnable(file.path) ? (
-                  <button
-                    type="button"
-                    className="relative size-8 text-muted-foreground after:absolute after:left-1/2 after:top-1/2 after:size-10 after:-translate-x-1/2 after:-translate-y-1/2 hover:text-foreground"
-                    aria-label={`Run ${file.path}`}
-                    onClick={async () => {
-                      const result = await runProjectFile(file.path);
-                      const body = (
-                        result.stdout ||
-                        result.stderr ||
-                        result.error ||
-                        `exit ${result.code}`
-                      ).trim();
-                      setOutput(`$ ${result.cmd || file.path}\n${body}`);
-                      if (result.ok) toast.success(`Ran ${file.path}`);
-                      else toast.error(result.stderr || result.error || "Run failed");
-                    }}
-                  >
-                    <Play className="size-3.5" />
-                  </button>
-                ) : null}
-                <button
-                  type="button"
-                  className="relative size-8 text-muted-foreground after:absolute after:left-1/2 after:top-1/2 after:size-10 after:-translate-x-1/2 after:-translate-y-1/2 hover:text-foreground"
-                  aria-label={`Download ${file.path}`}
-                  onClick={async () => {
-                    const text = await getProjectFile(file.path);
-                    if (text == null) {
-                      toast.error(`Could not read ${file.path}`);
-                      return;
-                    }
-                    downloadTextFile(file.path.split("/").pop() || file.path, text);
-                  }}
-                >
-                  <Download className="size-3.5" />
-                </button>
-                <button
-                  type="button"
-                  className="relative size-8 text-muted-foreground after:absolute after:left-1/2 after:top-1/2 after:size-10 after:-translate-x-1/2 after:-translate-y-1/2 hover:text-destructive"
-                  aria-label={`Delete ${file.path}`}
-                  onClick={async () => {
-                    if (!window.confirm(`Remove ${file.path} from the workspace?`)) {
-                      return;
-                    }
-                    const result = await deleteProjectFile(file.path);
-                    if (!result.ok) {
-                      toast.error(result.error || `Could not delete ${file.path}`);
-                      return;
-                    }
-                    toast.success(`Deleted ${file.path}`);
-                    refresh();
-                  }}
-                >
-                  <Trash2 className="size-3.5" />
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-        {files.length > SHOW_PROJECT_FILES ? (
-          <p className="text-[10px] text-muted-foreground/70">
-            Showing {SHOW_PROJECT_FILES} of {files.length}
-            {truncated ? "+" : ""}
-          </p>
-        ) : null}
-          </div>
-        </details>
         {output ? (
           <pre className="max-h-32 overflow-auto rounded-sm bg-background px-2 py-1.5 font-mono text-[10px] leading-relaxed text-muted-foreground">
             {output}
           </pre>
         ) : null}
         <p className="text-[10px] leading-relaxed text-muted-foreground/70">
-          One row per project root. Tools live outside the project and stick
-          around. Not a git repo? Coding will ask before init.
+          Click a project to browse its files. New apps get their own name —
+          not workspace. Imported dirs that are not git: the model asks first.
         </p>
       </div>
     </SidebarSection>
