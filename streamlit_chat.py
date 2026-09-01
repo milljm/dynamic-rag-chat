@@ -24,6 +24,7 @@ from rich.console import Console
 from chat import Chat, ChatOptions, SessionContext, parse_args, seed_from_string
 from src import RenderWindow
 from src.chat_utils import CommonUtils, RAGTag, load_pdf
+from src.prompt_progress import PromptProgress, format_prompt_status
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Page config MUST be the first Streamlit call
@@ -1006,13 +1007,16 @@ def call_llm_stream(
     if documents.get('sd_ran') and not messages:
         status.empty()
         return
-    status.markdown(f'Streaming `{renderer.llm.model_name}`')
+    status.markdown(format_prompt_status(0))
     metrics.model = renderer.llm.model_name
     metrics.prompt_tokens = documents.get('prompt_tokens', 0)
     metrics.token_savings = documents.get('token_savings', 0)
     started = time.time()
     first = True
     for token in renderer.stream_response(messages):
+        if isinstance(token, PromptProgress):
+            status.markdown(format_prompt_status(token.fraction))
+            continue
         status.empty()
         if first:
             metrics.ttft = time.time() - started

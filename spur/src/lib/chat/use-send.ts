@@ -128,7 +128,7 @@ export function useSend() {
           ? "Stable Diffusion…"
           : agent
             ? "Agent Web Search…"
-            : "Processing Prompt…",
+            : "Processing Prompt… 0%",
         createdAt: Date.now(),
       };
       store.appendMessage(assistantMsg, [], originId);

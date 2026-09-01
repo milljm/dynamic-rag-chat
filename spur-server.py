@@ -69,6 +69,7 @@ from src.settings_yaml import (
 )
 from src.sd_client import ping_sd, sd_enabled
 from src.sd_session import clear_session
+from src.prompt_progress import PromptProgress, format_prompt_status
 
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -1051,6 +1052,13 @@ def _iter_sse_chunks(
         announced_stream = False
         try:
             for chunk in chunks:
+                if isinstance(chunk, PromptProgress):
+                    yield _status_sse(
+                        format_prompt_status(chunk.fraction),
+                        model or '', route or '', context or 0,
+                        recalled,
+                    )
+                    continue
                 if first:
                     ttft = time.time() - started
                     first = False
@@ -1131,7 +1139,7 @@ def _iter_sse_chunks(
         documents['prompt_tokens'] = context
         first = True
         yield _status_sse(
-            'Processing Prompt…', model or '', route or '', context or 0,
+            format_prompt_status(0), model or '', route or '', context or 0,
             recalled,
         )
         yield b':\n\n'
@@ -1227,7 +1235,7 @@ async def api_chat(request: Request) -> StreamingResponse:
                 documents['prompt_tokens'] = context
             yield sse({
                 'type': 'status',
-                'message': 'Processing Prompt…',
+                'message': format_prompt_status(0),
                 'model': model,
                 'route': route,
                 'context': context,

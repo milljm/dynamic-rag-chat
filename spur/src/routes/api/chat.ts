@@ -183,7 +183,7 @@ export const Route = createFileRoute("/api/chat")({
 
               sendLine(controller, {
                 type: "status",
-                message: "Processing Prompt…",
+                message: "Processing Prompt… 0%",
                 model: llm.model,
                 route: mode === "story" ? "story" : "general",
                 context: 0,
