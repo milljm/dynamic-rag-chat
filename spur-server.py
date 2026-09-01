@@ -69,7 +69,13 @@ from src.settings_yaml import (
 )
 from src.sd_client import ping_sd, sd_enabled
 from src.sd_session import clear_session
-from src.prompt_progress import PromptProgress, format_prompt_status
+from src.prompt_progress import (
+    PromptProgress,
+    abort_generation,
+    begin_generation,
+    format_prompt_status,
+    generation_stopped,
+)
 
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -191,7 +197,9 @@ def _hook_sse(kind: str, payload: Any) -> bytes:
     return sse({'type': 'status', 'message': str(payload)}).encode()
 
 
-async def _aiter_sync(factory) -> AsyncIterator[bytes]:
+async def _aiter_sync(
+    factory, request: Request | None = None,
+) -> AsyncIterator[bytes]:
     """Run a sync iterator in a thread so each item can flush over SSE."""
     boxed: queue.Queue[tuple[str, Any]] = queue.Queue()
 
@@ -207,9 +215,13 @@ async def _aiter_sync(factory) -> AsyncIterator[bytes]:
     task = asyncio.create_task(asyncio.to_thread(run))
     try:
         while True:
+            if request is not None and await request.is_disconnected():
+                abort_generation()
             try:
                 kind, payload = boxed.get_nowait()
             except queue.Empty:
+                if task.done() and boxed.empty():
+                    break
                 await asyncio.sleep(0.02)
                 continue
             if kind == 'done':
@@ -217,8 +229,17 @@ async def _aiter_sync(factory) -> AsyncIterator[bytes]:
             if kind == 'err':
                 raise payload
             yield payload
+    except asyncio.CancelledError:
+        abort_generation()
+        raise
     finally:
-        await task
+        abort_generation()
+        try:
+            await asyncio.wait_for(asyncio.shield(task), timeout=2.0)
+        except (asyncio.TimeoutError, asyncio.CancelledError):
+            pass
+        except Exception:  # pylint: disable=broad-exception-caught
+            pass
 
 
 def _status_sse(
@@ -1046,6 +1067,8 @@ def _iter_sse_chunks(
         tokens += max(1, count)
 
     while True:
+        if generation_stopped():
+            break
         parser = ThinkFeed()
         gold_feed = GoldNeedFeed()
         last_gold_channel = 'visible'
@@ -1055,6 +1078,8 @@ def _iter_sse_chunks(
         announced_stream = False
         try:
             for chunk in chunks:
+                if generation_stopped():
+                    break
                 if isinstance(chunk, PromptProgress):
                     yield _status_sse(
                         format_prompt_status(chunk.fraction),
@@ -1126,8 +1151,8 @@ def _iter_sse_chunks(
                 answer += leftover
                 yield sse({'type': 'token', 'content': leftover}).encode()
         fname = gold_feed.filename
-        if (not fname or not assistant or fetches >= MAX_GOLD_FETCHES
-                or meta is None):
+        if (generation_stopped() or not fname or not assistant
+                or fetches >= MAX_GOLD_FETCHES or meta is None):
             break
         if not renderer.state.context.fetch_gold_file(documents, fname):
             break
@@ -1176,6 +1201,7 @@ async def api_chat(request: Request) -> StreamingResponse:
     async def generate() -> AsyncIterator[bytes]:
         """Yield SSE frames for this request body."""
         global _streams
+        begin_generation()
         with _stream_lock:
             _streams += 1
         notes: queue.Queue[tuple[str, Any]] = queue.Queue()
@@ -1248,7 +1274,7 @@ async def api_chat(request: Request) -> StreamingResponse:
             async for frame in _aiter_sync(lambda: _iter_sse_chunks(
                 renderer, packed, documents, stats,
                 route=route, context=context, meta=meta,
-            )):
+            ), request):
                 yield frame
             if ((stats.get('answer') or stats.get('reasoning')
                     or documents.get('generated_images'))
@@ -1272,6 +1298,7 @@ async def api_chat(request: Request) -> StreamingResponse:
         except Exception as exc:  # pylint: disable=broad-exception-caught
             yield sse({'type': 'error', 'error': str(exc)}).encode()
         finally:
+            abort_generation()
             renderer.status_hook = None
             renderer.image_hook = None
             with _stream_lock:
@@ -1287,6 +1314,13 @@ async def api_chat(request: Request) -> StreamingResponse:
     )
 
 
+
+
+@app.post('/api/stop')
+def api_stop() -> JSONResponse:
+    """Abort the in-flight OpenAI ``/v1/chat/completions`` HTTP stream."""
+    abort_generation()
+    return JSONResponse({'ok': True, 'message': 'Stopping.'})
 
 
 @app.get('/api/health')

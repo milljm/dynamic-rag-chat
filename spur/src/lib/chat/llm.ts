@@ -30,3 +30,16 @@ export function resolveLlm(
     webSearch: true,
   };
 }
+
+/** Abort dest when source aborts. OpenAI Chat Completions stop = close the HTTP body. */
+export function forwardAbort(source: AbortSignal, dest: AbortController): () => void {
+  const abortDest = () => {
+    if (!dest.signal.aborted) dest.abort();
+  };
+  if (source.aborted) {
+    abortDest();
+    return () => undefined;
+  }
+  source.addEventListener("abort", abortDest);
+  return () => source.removeEventListener("abort", abortDest);
+}

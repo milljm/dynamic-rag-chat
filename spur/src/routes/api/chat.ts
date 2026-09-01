@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { z } from "zod";
-import { resolveLlm, type LlmTarget } from "@/lib/chat/llm";
+import { forwardAbort, resolveLlm, type LlmTarget } from "@/lib/chat/llm";
 import { systemFor } from "@/lib/chat/prompts";
 
 const Body = z.object({
@@ -103,6 +103,9 @@ export const Route = createFileRoute("/api/chat")({
           controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
         };
 
+        const upstreamAbort = new AbortController();
+        const stopForward = forwardAbort(request.signal, upstreamAbort);
+
         const stream = new ReadableStream({
           async start(controller) {
             try {
@@ -113,7 +116,11 @@ export const Route = createFileRoute("/api/chat")({
                     type: "status",
                     message: "Agent Web Search…",
                   });
-                  const searched = await runAgentSearch(llm, lastUser);
+                  const searched = await runAgentSearch(
+                    llm,
+                    lastUser,
+                    upstreamAbort.signal,
+                  );
                   if (searched.error) {
                     agentBlock =
                       "=== AGENT_TOOL_RESULT ===\nERROR: Tool execution failed.\nINSTRUCTION: Inform the user that the web search failed. Do NOT fabricate or guess.\n";
@@ -128,7 +135,9 @@ export const Route = createFileRoute("/api/chat")({
                 }
               }
 
-              const fetched = noContext ? [] : await fetchIncludes(includes ?? []);
+              const fetched = noContext
+                ? []
+                : await fetchIncludes(includes ?? [], upstreamAbort.signal);
               const ragAll = noContext
                 ? agentBlock
                   ? [{ source: "agent", text: agentBlock }]
@@ -210,8 +219,10 @@ export const Route = createFileRoute("/api/chat")({
                     temperature: mode === "story" ? 0.9 : 0.4,
                     messages: xaiMessages,
                   }),
+                  signal: upstreamAbort.signal,
                 });
               } catch {
+                if (upstreamAbort.signal.aborted) return;
                 sendLine(controller, {
                   type: "error",
                   error:
@@ -238,69 +249,84 @@ export const Route = createFileRoute("/api/chat")({
               let carry = "";
               let announced = false;
               const reader = upstream.body.getReader();
-              while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-                carry += decoder.decode(value, { stream: true });
-                const lines = carry.split("\n");
-                carry = lines.pop() ?? "";
-                for (const line of lines) {
-                  const trimmed = line.trim();
-                  if (!trimmed.startsWith("data:")) continue;
-                  const payload = trimmed.slice(5).trim();
-                  if (!payload) continue;
-                  if (payload === "[DONE]") {
-                    sendLine(controller, { type: "done" });
-                    continue;
-                  }
-                  let chunk: XaiChunk;
-                  try {
-                    chunk = JSON.parse(payload) as XaiChunk;
-                  } catch {
-                    continue;
-                  }
-                  const delta = chunk.choices?.[0]?.delta;
-                  if (delta && !announced) {
-                    announced = true;
-                    sendLine(controller, {
-                      type: "status",
-                      message: "Streaming…",
-                      model: llm.model,
-                      route: mode === "story" ? "story" : "general",
-                      context: 0,
-                    });
-                  }
-                  if (delta?.reasoning_content) {
-                    sendLine(controller, {
-                      type: "reasoning",
-                      content: delta.reasoning_content,
-                    });
-                  }
-                  if (delta?.content) {
-                    sendLine(controller, {
-                      type: "token",
-                      content: delta.content,
-                    });
-                  }
-                  if (chunk.usage) {
-                    sendLine(controller, {
-                      type: "usage",
-                      model: chunk.model ?? llm.model,
-                      promptTokens: chunk.usage.prompt_tokens ?? 0,
-                      completionTokens: chunk.usage.completion_tokens ?? 0,
-                    });
+              try {
+                while (!upstreamAbort.signal.aborted) {
+                  const { done, value } = await reader.read();
+                  if (done) break;
+                  carry += decoder.decode(value, { stream: true });
+                  const lines = carry.split("\n");
+                  carry = lines.pop() ?? "";
+                  for (const line of lines) {
+                    const trimmed = line.trim();
+                    if (!trimmed.startsWith("data:")) continue;
+                    const payload = trimmed.slice(5).trim();
+                    if (!payload) continue;
+                    if (payload === "[DONE]") {
+                      sendLine(controller, { type: "done" });
+                      continue;
+                    }
+                    let chunk: XaiChunk;
+                    try {
+                      chunk = JSON.parse(payload) as XaiChunk;
+                    } catch {
+                      continue;
+                    }
+                    const delta = chunk.choices?.[0]?.delta;
+                    if (delta && !announced) {
+                      announced = true;
+                      sendLine(controller, {
+                        type: "status",
+                        message: "Streaming…",
+                        model: llm.model,
+                        route: mode === "story" ? "story" : "general",
+                        context: 0,
+                      });
+                    }
+                    if (delta?.reasoning_content) {
+                      sendLine(controller, {
+                        type: "reasoning",
+                        content: delta.reasoning_content,
+                      });
+                    }
+                    if (delta?.content) {
+                      sendLine(controller, {
+                        type: "token",
+                        content: delta.content,
+                      });
+                    }
+                    if (chunk.usage) {
+                      sendLine(controller, {
+                        type: "usage",
+                        model: chunk.model ?? llm.model,
+                        promptTokens: chunk.usage.prompt_tokens ?? 0,
+                        completionTokens: chunk.usage.completion_tokens ?? 0,
+                      });
+                    }
                   }
                 }
+                if (!upstreamAbort.signal.aborted) {
+                  sendLine(controller, { type: "done" });
+                }
+              } finally {
+                try {
+                  await reader.cancel();
+                } catch {
+                  /* already closed */
+                }
               }
-              sendLine(controller, { type: "done" });
             } catch (err) {
+              if (upstreamAbort.signal.aborted) return;
               sendLine(controller, {
                 type: "error",
                 error: err instanceof Error ? err.message : "Stream failed",
               });
             } finally {
+              stopForward();
               controller.close();
             }
+          },
+          cancel() {
+            if (!upstreamAbort.signal.aborted) upstreamAbort.abort();
           },
         });
 
@@ -319,6 +345,7 @@ export const Route = createFileRoute("/api/chat")({
 async function runAgentSearch(
   llm: LlmTarget,
   query: string,
+  signal?: AbortSignal,
 ): Promise<{ text: string; error?: boolean }> {
   const today = new Date().toLocaleDateString("en-US", {
     month: "long",
@@ -332,6 +359,7 @@ async function runAgentSearch(
         "Content-Type": "application/json",
         Authorization: `Bearer ${llm.apiKey}`,
       },
+      signal,
       body: JSON.stringify({
         model: llm.model,
         stream: false,
@@ -361,6 +389,7 @@ async function runAgentSearch(
 
 async function fetchIncludes(
   urls: string[],
+  signal?: AbortSignal,
 ): Promise<{ source: string; text: string }[]> {
   const out: { source: string; text: string }[] = [];
   for (const url of urls.slice(0, 4)) {
@@ -369,8 +398,9 @@ async function fetchIncludes(
       if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
         continue;
       }
+      const timeout = AbortSignal.timeout(8000);
       const res = await fetch(url, {
-        signal: AbortSignal.timeout(8000),
+        signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
         headers: { Accept: "text/plain, text/html, application/json" },
         redirect: "follow",
       });

@@ -9,7 +9,7 @@ import {
 } from "./branch-mode";
 import { parseComposerInput, parseIncludes, SLASH_HELP } from "./commands";
 import { retrieve } from "./rag";
-import { chatPyOrigin, usesChatPy } from "./remote";
+import { chatPyOrigin, postOp, usesChatPy } from "./remote";
 import { ragFromPending, useChatStore } from "./store";
 import { streamChat, streamSse } from "./stream";
 import { feedThink } from "./think";
@@ -26,6 +26,7 @@ export function useSend() {
 
   const stop = useCallback(() => {
     abortRef.current?.abort();
+    if (usesChatPy()) void postOp("/api/stop");
   }, []);
 
   const generate = useCallback(

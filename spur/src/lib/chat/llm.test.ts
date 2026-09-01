@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { resolveLlm } from "./llm.ts";
+import { forwardAbort, resolveLlm } from "./llm.ts";
 
 test("local OpenAI-compatible server wins over xAI", () => {
   const llm = resolveLlm({
@@ -23,4 +23,22 @@ test("xAI is used when no local server is configured", () => {
 
 test("missing both returns null", () => {
   assert.equal(resolveLlm({}), null);
+});
+
+test("forwardAbort aborts dest when source aborts", () => {
+  const source = new AbortController();
+  const dest = new AbortController();
+  const stop = forwardAbort(source.signal, dest);
+  assert.equal(dest.signal.aborted, false);
+  source.abort();
+  assert.equal(dest.signal.aborted, true);
+  stop();
+});
+
+test("forwardAbort fires immediately when source is already aborted", () => {
+  const source = new AbortController();
+  source.abort();
+  const dest = new AbortController();
+  forwardAbort(source.signal, dest);
+  assert.equal(dest.signal.aborted, true);
 });
