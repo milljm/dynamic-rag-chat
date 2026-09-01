@@ -12,8 +12,10 @@ from rich.live import Live
 from rich.panel import Panel
 from rich.table import Table
 import pypdf
-from src import RAGTag
-from src.chat_utils import load_pdf
+try:
+    from .chat_utils import RAGTag, load_pdf
+except ImportError:
+    from chat_utils import RAGTag, load_pdf
 
 class ImportData:
     """ handle incoming data and store it accordingly into the RAG """
@@ -222,7 +224,6 @@ class ImportData:
             self.state['current_parent'] = [cnt+1, len(split_docs)]
             child_docs = self.child_splitter.split_text(split_doc)
             if self.live:
-                self.live.console.clear(home=True)
                 self.state['chunk_panel'] = self.make_status_table(
                                                             (cnt, len(split_docs), meta_tags),
                                                             (0, len(child_docs), 0, 0),
@@ -313,7 +314,6 @@ class ImportData:
             .. code-block:: python
                 return None
         """
-        c_cnt = 0
         k_cnt = 0
         _meta = list(meta_tags)
         _contents = []
@@ -326,29 +326,18 @@ class ImportData:
             else:
                 _contents = [keyword_contents[0].content]
 
-        # For each child document
-        for c_cnt, child_doc in enumerate(child_docs):
-            _tmp_meta = [RAGTag(mode, _contents), *_meta]
-            self.d_session.rag.store_data(child_doc,
-                                            tags_metadata=_tmp_meta,
-                                            collection=self.g_branch,
-                                            quiet=True)
-            if self.live and self.state is not None:
-                self.state['chunk_panel'] = self.make_status_table(
-                                    (parent_state[0], parent_state[1], _tmp_meta),
-                                    (c_cnt+1, len(child_docs), k_cnt, len(_contents)),
-                                    file_path,
-                                    storing=True
-                                    )
-                self.live.update(self.make_full_status())
-
-        # Finish up by triggering one last uptime to the Rich Panel
-        if self.live and child_docs:
+        # ParentDocumentRetriever.add_documents (inside store_data of the
+        # parent) already child-splits and embeds in one OpenAI request.
+        # Re-storing each 100-char child was a separate HTTP + Chroma open
+        # (~400ms overhead on an 11ms embed).
+        if self.live and self.state is not None:
+            _tmp_meta = [RAGTag(mode, _contents), *_meta] if _contents or _meta else _meta
             self.state['chunk_panel'] = self.make_status_table(
-                                                (c_cnt, parent_state[1],[]),
-                                                (k_cnt+1, len(child_docs), 0, 0),
-                                                file_path
-                                                )
+                                (parent_state[0], parent_state[1], _tmp_meta),
+                                (len(child_docs), len(child_docs), k_cnt, len(_contents)),
+                                file_path,
+                                storing=True
+                                )
             self.live.update(self.make_full_status())
 
     def store_data(self, data: str, file_path: str = '')->tuple[bool,str]:

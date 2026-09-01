@@ -17,9 +17,14 @@ from langchain_core.retrievers import BaseRetriever
 from langchain_openai import OpenAIEmbeddings
 from langchain_ollama import OllamaEmbeddings
 from langchain_chroma import Chroma
-from .chat_utils import CommonUtils, ChatOptions, RAGTag  # for Type Hinting
-from .filter_builder import metadata_matches
-from .attachment_store import get_attachment, put_attachment, delete_attachment
+try:
+    from .chat_utils import CommonUtils, ChatOptions, RAGTag  # for Type Hinting
+    from .filter_builder import metadata_matches
+    from .attachment_store import get_attachment, put_attachment, delete_attachment
+except ImportError:
+    from chat_utils import CommonUtils, ChatOptions, RAGTag
+    from filter_builder import metadata_matches
+    from attachment_store import get_attachment, put_attachment, delete_attachment
 # Silence initial RAG database being empty
 logging.getLogger('chromadb').setLevel(logging.ERROR)
 
@@ -83,6 +88,10 @@ class RAG():
         self.opts = args
         self.retriever_id = 0
         self.embeddings = self._make_embeddings()
+        # Opening Chroma(persist_directory=…) per call was ~400ms of the
+        # 11ms-embed + 400ms-gap RAG loop. Reuse one client per collection.
+        self._chroma: dict[str, Chroma] = {}
+        self._pdr: dict[str, ParentDocumentRetriever] = {}
 
         p_chunk_size = 1000
         p_chunk_overlap = 500
@@ -152,16 +161,27 @@ class RAG():
             name = name[:max_length]
         return name
 
+    def _forget_collection(self, collection: str) -> None:
+        """Drop cached Chroma / ParentDocumentRetriever for a collection name."""
+        key = self._normalize_collection_name(collection)
+        self._chroma.pop(key, None)
+        self._pdr.pop(key, None)
+
     def _parent_retriever(self, collection: str)->ParentDocumentRetriever:
         """ Return ParentDocumentRetriever for provided collection """
         collection = self._normalize_collection_name(collection)
+        cached = self._pdr.get(collection)
+        if cached is not None:
+            return cached
         fs = LocalFileStore(os.path.join(self.opts.vector_dir, collection))
         store = create_kv_docstore(fs)
-        return ParentDocumentRetriever(
+        retriever = ParentDocumentRetriever(
                     vectorstore=self._vector_store(collection),
                     docstore=store,
                     child_splitter=self.child_splitter,
                     parent_splitter=self.parent_splitter)
+        self._pdr[collection] = retriever
+        return retriever
 
     @staticmethod
     def _file_key(filename: str) -> str:
@@ -170,6 +190,9 @@ class RAG():
 
     def _docstore(self, collection: str):
         """KV docstore used by ParentDocumentRetriever for this collection."""
+        retriever = self._pdr.get(self._normalize_collection_name(collection))
+        if retriever is not None:
+            return retriever.docstore
         collection = self._normalize_collection_name(collection)
         fs = LocalFileStore(os.path.join(self.opts.vector_dir, collection))
         return create_kv_docstore(fs)
@@ -309,9 +332,13 @@ class RAG():
     def _vector_store(self, collection: str)->Chroma:
         """ Return our Chroma Collections Database """
         collection = self._normalize_collection_name(collection)
+        cached = self._chroma.get(collection)
+        if cached is not None:
+            return cached
         chroma = Chroma(persist_directory=self.opts.vector_dir,
                         embedding_function=self.embeddings,
                         collection_name=collection)
+        self._chroma[collection] = chroma
         return chroma
 
     def _ensemble_retriever(self, retriever: list[object],
@@ -386,18 +413,46 @@ class RAG():
         retriever = self._chroma_retriever(collection, {'k': k})
         return retriever.invoke(query)
 
+    @staticmethod
+    def _parent_ids(documents: list[Document]) -> list[str]:
+        """Unique ParentDocumentRetriever ids from child metadata."""
+        ids = []
+        seen = set()
+        for doc in documents:
+            meta = getattr(doc, 'metadata', None) or {}
+            pid = meta.get('doc_id')
+            if not pid or pid in seen:
+                continue
+            seen.add(pid)
+            ids.append(pid)
+        return ids
+
+    def _parents_of(self, children: list[Document], collection: str) -> list[Document]:
+        """Load parent docs for these children. No extra embed_query."""
+        ids = self._parent_ids(children)
+        if not ids:
+            return []
+        try:
+            got = self._docstore(collection).mget(ids)
+        except Exception:  # pylint: disable=broad-exception-caught
+            return []
+        return [p for p in got if p is not None]
+
     def retrieve(self, query: str, collection: str, metadatas: dict = None) -> list[Document]:
         """Similarity, then Python-side field membership, then BM25 + parents.
 
         List tags are stored as comma-joined strings, so Chroma `$in` never
         matches a single name. Filter those in Python instead.
+
+        Parents are loaded from child ``doc_id`` metadata — a second
+        ParentDocumentRetriever.invoke would embed the query again.
         """
         if not self._embeddings_ready() or self.opts.matches == 0:
             return []
         field, values = self._filter_spec(metadatas)
         k = self.opts.matches
         if values:
-            k = max(k * 4, 8)
+            k = max(k * 4 * max(len(values), 1), 8)
         try:
             documents = self._similar_docs(query, collection, k)
             if values:
@@ -408,7 +463,7 @@ class RAG():
             if not documents:
                 return documents
             documents = self._bm25_retriever(documents).invoke(query)
-            documents.extend(self._parent_retriever(collection).invoke(query))
+            documents.extend(self._parents_of(documents, collection))
         except ValueError:
             if metadatas:
                 return self.retrieve(query, collection, metadatas=None)
@@ -470,6 +525,7 @@ class RAG():
             client = src_vs._client
             # pylint: enable=protected-access
             client.delete_collection(f_source)
+            self._forget_collection(f_source)
 
     def _clone_chroma_payload(self, f_source: str, f_target: str, overwrite: bool) -> None:
         """Copy one Chroma collection's documents/metadatas/embeddings."""
@@ -552,6 +608,7 @@ class RAG():
                 )
             self._clone_chroma_payload(f_source, f_target, overwrite)
             self._clone_docstore_dir(f_source, f_target, overwrite)
+            self._forget_collection(f_target)
             if getattr(self.opts, 'debug', False):
                 self.console.print(
                     f"[green]Cloned RAG collection[/green] '{f_source}' "
@@ -578,6 +635,7 @@ class RAG():
                                    style=f'color({self.opts.color})',
                                    highlight=False)
             f_target = f'{target}_{collection}'
+            self._forget_collection(f_target)
             vs = self._vector_store(f_target)
             # pylint: disable=protected-access
             col = vs._collection

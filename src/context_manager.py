@@ -278,8 +278,7 @@ class ContextManager(PromptManager):
             self.console.print(f'THREADED META TAGS PARSED: {list_rag_tags}',
                                style=f'color({self.opts.color})',
                                highlight=False)
-        rag = RAG(self.console, self.common, self.opts)
-        rag.store_data(response, tags_metadata=list_rag_tags, collection=collection)
+        self.rag.store_data(response, tags_metadata=list_rag_tags, collection=collection)
 
     def _mint_new_characters(self, documents: dict) -> None:
         """Write NPC sheets for anyone new in the current scene entity list."""
@@ -407,14 +406,9 @@ class ContextManager(PromptManager):
         if not values:
             return storage
 
-        for value in values:
-            storage.extend(self.gather_context(
-                query,
-                collection,
-                [RAGTag(tag=field, content=value)],
-                field,
-            ))
-        return storage
+        # One similarity search, then Python-side membership for every
+        # entity/topic. A loop of retrieve() re-embedded the query each time.
+        return self.gather_context(query, collection, meta_tags, field)
 
     @staticmethod
     def is_explicit(meta_tags: list[RAGTag[str, str]]) -> bool:
