@@ -173,6 +173,8 @@ class ContextManager(PromptManager):
         if documents.get('chat_history'):
             documents['chat_history'] = self._messages_for_last_n_turns(
                                                         documents['chat_history'], 1)
+        # Tagging LLM: filenames only — never paperclip / gold bodies.
+        documents = CommonUtils.preprocessor_payload(documents)
         if self.opts.assistant_mode:
             human_prompt = prompts.compose_nostory_tag(documents)
         else:

@@ -1,5 +1,6 @@
 <HAS_FILES>
-The user paperclipped text files this turn. The generator already has them.
+The user paperclipped text files this turn{% if attached_filenames %}: {{ attached_filenames }}{% endif %}.
+The generator already has the contents. You only have the names — do not invent file bodies.
 Do not set assistant_mode to vision.
 Classify the QUESTION: coding for source, structured otherwise.
 answer: routing to capable model
