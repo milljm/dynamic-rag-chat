@@ -811,17 +811,23 @@ class Chat():
 
     def _prepare_turn_documents(self, parsed, history: dict, raw: str):
         """Build the documents dict for this user turn, or None on failure."""
+        extras = {}
+        if parsed.includes:
+            extras['has_files'] = True
+            extras['attached_filenames'] = CommonUtils.collect_filenames(
+                parsed.includes,
+            )
         meta_data = []
         if parsed.command in ('no-context', 'agent', 'image'):
             if parsed.command == 'no-context':
                 documents = self.no_context(parsed.args or parsed.clean_text)
             else:
                 documents, meta_data = self.get_documents(
-                    parsed.args or parsed.clean_text,
+                    parsed.args or parsed.clean_text, extras,
                 )
             documents['in_line_commands'] = f'Meta: [{parsed.command}]'
         else:
-            documents, meta_data = self.get_documents(parsed.clean_text)
+            documents, meta_data = self.get_documents(parsed.clean_text, extras)
         if not documents:
             console.print(
                 '[red]There was an error while running pre-processor work.[/red]'

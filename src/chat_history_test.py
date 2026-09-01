@@ -145,6 +145,53 @@ class AttachmentHelpersTest(unittest.TestCase):
         ))
         self.assertEqual(CommonUtils.extract_filenames('python 3.13 rocks'), [])
 
+    def test_collect_filenames_from_dicts_and_paths(self):
+        names = CommonUtils.collect_filenames(
+            [{'name': 'spur-server.py', 'text': 'SECRET'}],
+            [{'name': 'notes.md'}],
+            ['/tmp/vector/README.md', 'notes.md'],
+        )
+        self.assertEqual(names, ['spur-server.py', 'notes.md', 'README.md'])
+
+    def test_preprocessor_payload_keeps_names_drops_bodies(self):
+        docs = {
+            'user_query': 'what does this do?',
+            'dynamic_files': '\n--- spur-server.py ---\n\nSECRET_BODY\n',
+            'dynamic_images': ['iVBORw0KGgo='],
+            'gold_documents': 'GOLD DUMP',
+            'attachment_texts': [{
+                'name': 'spur-server.py',
+                'text': 'SECRET_BODY',
+                'kind': 'text',
+            }],
+            'chat_history': [{
+                'role': 'user',
+                'content': 'look at this',
+                'attachments': [{
+                    'name': 'old.py',
+                    'text': 'PREVIOUS_SECRET',
+                    'kind': 'text',
+                }],
+            }, {
+                'role': 'assistant',
+                'content': 'ok',
+            }],
+        }
+        slim = CommonUtils.preprocessor_payload(docs)
+        blob = str(slim)
+        self.assertNotIn('SECRET_BODY', blob)
+        self.assertNotIn('PREVIOUS_SECRET', blob)
+        self.assertNotIn('GOLD DUMP', blob)
+        self.assertNotIn('iVBORw0KGgo=', blob)
+        self.assertEqual(slim['attached_filenames'], 'spur-server.py')
+        self.assertEqual(slim['dynamic_files'], '')
+        self.assertEqual(slim['dynamic_images'], [])
+        self.assertIn('[attached: old.py]', slim['chat_history'])
+        self.assertIn('what does this do?', slim['user_query'])
+        # Original documents must keep the bodies for the generator.
+        self.assertIn('SECRET_BODY', docs['dynamic_files'])
+        self.assertEqual(docs['attachment_texts'][0]['text'], 'SECRET_BODY')
+
 
 if __name__ == '__main__':
     unittest.main()

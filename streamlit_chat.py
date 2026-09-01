@@ -1410,8 +1410,20 @@ if _incoming:
 
     _sync_chat_object(_chat)
 
+    _pre_atts = st.session_state.get('attachments') or []
     try:
-        _documents, _meta_data = _chat.prepare_turn(_prompt)
+        _documents, _meta_data = _chat.prepare_turn(
+            _prompt,
+            extras={
+                'has_images': any(
+                    str(a.get('type') or '').startswith('image/') for a in _pre_atts
+                ),
+                'has_files': any(
+                    not str(a.get('type') or '').startswith('image/') for a in _pre_atts
+                ),
+                'attached_filenames': CommonUtils.collect_filenames(_pre_atts),
+            },
+        )
     except Exception as exc:  # pylint: disable=broad-exception-caught
         st.error(f'Pre-processor failed: {exc}')
         st.stop()

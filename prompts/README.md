@@ -26,7 +26,7 @@ Assistant (`nostory`) plot prompts are composed per turn:
 - `plot_prompt_nostory_sd_last.md` — a generated picture is already on screen; don't pretend to see it
 - `plot_prompt_nostory_human.md` — Jinja drops empty THIS_TURN / INDEX / GOLD_RESUME / RAG blocks
 
-Tagging (`tagging_prompt_nostory_human.md`) never offers `vision`. Pixels on the turn append `tagging_prompt_nostory_images.md` (HAS_IMAGE); text paperclips append `tagging_prompt_nostory_files.md` (HAS_FILES). Those fragments may set `answer_confidence` 1.0. The spine does not — live queries (stock, weather, current events) must score ≤ 0.4 so the agent can run. The orchestrator also forces a search when the query looks live and nothing was attached.
+Tagging (`tagging_prompt_nostory_human.md`) never offers `vision`. Pixels on the turn append `tagging_prompt_nostory_images.md` (HAS_IMAGE); text paperclips append `tagging_prompt_nostory_files.md` (HAS_FILES, filenames only — never bodies). Those fragments may set `answer_confidence` 1.0. The spine does not — live queries (stock, weather, current events) must score ≤ 0.4 so the agent can run. The orchestrator also forces a search when the query looks live and nothing was attached.
 
 
 

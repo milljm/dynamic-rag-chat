@@ -959,7 +959,10 @@ def _prepare_chat_documents(chat, body: dict) -> tuple[dict, list]:
             parsed.args or parsed.clean_text or prompt,
             extras={
                 'has_images': has_image,
-                'has_files': bool(body.get('files') or has_text),
+                'has_files': bool(body.get('files') or has_text or parsed.includes),
+                'attached_filenames': CommonUtils.collect_filenames(
+                    atts, body.get('files') or [], parsed.includes,
+                ),
             },
         )
     documents = apply_includes(chat, documents, prompt)

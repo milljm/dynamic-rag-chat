@@ -111,6 +111,7 @@ class PromptManager():
             documents.get('has_files')
             or documents.get('attached_files_note')
             or documents.get('attachment_texts')
+            or documents.get('attached_filenames')
         )
         extra = ''
         if has_images:

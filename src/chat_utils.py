@@ -518,6 +518,74 @@ class CommonUtils():
             'kind': kind or 'text',
         })
 
+    @staticmethod
+    def collect_filenames(*groups: Any) -> list[str]:
+        """Basenames from attachment/file dicts or path strings. Deduped."""
+        names: list[str] = []
+        seen: set[str] = set()
+
+        def add(raw: object) -> None:
+            text = str(raw or '').strip()
+            if not text:
+                return
+            name = os.path.basename(text.rstrip('/')) or text
+            key = name.lower()
+            if key in seen:
+                return
+            seen.add(key)
+            names.append(name)
+
+        for group in groups:
+            if group is None or group is False:
+                continue
+            if isinstance(group, str):
+                add(group)
+                continue
+            try:
+                items = list(group)
+            except TypeError:
+                add(group)
+                continue
+            for item in items:
+                if isinstance(item, dict):
+                    add(item.get('name'))
+                else:
+                    add(item)
+        return names
+
+    @staticmethod
+    def attachment_filenames(documents: dict) -> list[str]:
+        """This-turn paperclip names. Never file bodies."""
+        return CommonUtils.collect_filenames(
+            documents.get('attachment_texts'),
+            documents.get('attached_filenames'),
+        )
+
+    @staticmethod
+    def preprocessor_payload(documents: dict) -> dict:
+        """Copy of ``documents`` the tagging LLM may see.
+
+        Filenames only. File bodies (``dynamic_files``,
+        ``attachment_texts[].text``, image pixels, gold dumps) stay out of
+        the pre-processor prompt.
+        """
+        slim = dict(documents or {})
+        history = slim.get('chat_history')
+        if isinstance(history, list):
+            slim['chat_history'] = '\n'.join(
+                CommonUtils.history_line(msg) if isinstance(msg, dict) else str(msg)
+                for msg in history
+            )
+        names = CommonUtils.attachment_filenames(slim)
+        slim['attached_filenames'] = ', '.join(names)
+        slim['dynamic_files'] = ''
+        slim['dynamic_images'] = []
+        slim['gold_documents'] = ''
+        slim['attachment_texts'] = [
+            {'name': name, 'kind': 'text'} for name in names
+        ]
+        return slim
+
     _FILE_EXTS = (
         'py', 'md', 'txt', 'json', 'yaml', 'yml', 'csv', 'pdf', 'js', 'ts',
         'tsx', 'jsx', 'html', 'css', 'rs', 'go', 'c', 'cpp', 'h', 'hpp',
