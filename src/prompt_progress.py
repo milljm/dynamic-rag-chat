@@ -49,6 +49,11 @@ _CACHE: dict[str, str | None] = {}
 _CACHE_LOCK = threading.Lock()
 _MISSING = object()
 
+# In-flight OpenAI ``/v1/chat/completions`` body for this turn.
+_GEN_LOCK = threading.Lock()
+_GEN_HTTP: Any = None
+_GEN_STOP = threading.Event()
+
 
 @dataclass
 class PromptProgress:
@@ -65,6 +70,49 @@ def reset_progress_caches() -> None:
     """Test helper: forget /v1/progress probes."""
     with _CACHE_LOCK:
         _CACHE.clear()
+
+
+def begin_generation() -> None:
+    """Clear a previous Stop so this turn can stream."""
+    global _GEN_HTTP
+    _GEN_STOP.clear()
+    with _GEN_LOCK:
+        _GEN_HTTP = None
+
+
+def abort_generation() -> bool:
+    """Close the in-flight OpenAI ``/v1/chat/completions`` HTTP body.
+
+    Chat Completions has no cancel POST. Closing the stream is the stop
+    command — LM Studio logs ``Client disconnected. Stopping generation…``.
+    """
+    global _GEN_HTTP
+    _GEN_STOP.set()
+    with _GEN_LOCK:
+        stream = _GEN_HTTP
+        _GEN_HTTP = None
+    if stream is None:
+        return False
+    _close_stream(stream)
+    return True
+
+
+def generation_stopped() -> bool:
+    """True after the user hit Stop this turn."""
+    return _GEN_STOP.is_set()
+
+
+def _attach_http(stream: Any) -> None:
+    global _GEN_HTTP
+    with _GEN_LOCK:
+        _GEN_HTTP = stream
+
+
+def _detach_http(stream: Any) -> None:
+    global _GEN_HTTP
+    with _GEN_LOCK:
+        if _GEN_HTTP is stream:
+            _GEN_HTTP = None
 
 
 def format_prompt_status(fraction: float) -> str:
@@ -225,6 +273,8 @@ def stream_chat(
     snapshot leaves ``prefill``) the sideband stops. Hosts that are not
     mlx-edge fall through to ``llm.stream()`` alone.
     """
+    if _GEN_STOP.is_set():
+        return
     base = llm_base_url(llm)
     if not base or is_cloud_host(base) or _cached(_origin(base)) is None:
         yield from _plain_stream(llm, messages)
@@ -235,16 +285,26 @@ def stream_chat(
     inner = {'stream': None}
 
     def read_llm() -> None:
+        stream = None
         try:
+            if _GEN_STOP.is_set():
+                box.put(('done', None))
+                return
             stream = llm.stream(messages)
             inner['stream'] = stream
+            _attach_http(stream)
             for chunk in stream:
-                if stop.is_set():
+                if _GEN_STOP.is_set() or stop.is_set():
                     break
                 box.put(('chunk', chunk))
             box.put(('done', None))
         except Exception as exc:  # pylint: disable=broad-exception-caught
-            box.put(('err', exc))
+            if _GEN_STOP.is_set():
+                box.put(('done', None))
+            else:
+                box.put(('err', exc))
+        finally:
+            _detach_http(stream)
 
     def read_progress() -> None:
         _watch_progress(
@@ -271,7 +331,7 @@ def stream_chat(
             try:
                 kind, payload = box.get(timeout=0.2)
             except queue.Empty:
-                if stop.is_set() or not llm_worker.is_alive():
+                if stop.is_set() or _GEN_STOP.is_set() or not llm_worker.is_alive():
                     break
                 continue
             if kind == 'progress':
@@ -292,10 +352,17 @@ def stream_chat(
 
 
 def _plain_stream(llm: Any, messages: Any) -> Iterator:
+    if _GEN_STOP.is_set():
+        return
     stream = llm.stream(messages)
+    _attach_http(stream)
     try:
-        yield from stream
+        for chunk in stream:
+            if _GEN_STOP.is_set():
+                break
+            yield chunk
     finally:
+        _detach_http(stream)
         _close_stream(stream)
 
 

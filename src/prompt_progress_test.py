@@ -24,6 +24,9 @@ from prompt_progress import (  # noqa: E402
     probe_progress,
     progress_stream_url,
     progress_urls,
+    begin_generation,
+    abort_generation,
+    generation_stopped,
     reset_progress_caches,
     stream_chat,
 )
@@ -402,13 +405,50 @@ class _FakeLLM:
             yield SimpleNamespace(content=text)
 
 
+class _BlockingStream:
+    """Iterator that only ends when close() is called (or a cap)."""
+
+    def __init__(self) -> None:
+        self._gate = threading.Event()
+        self.close_calls = 0
+        self.n = 0
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        if self.n >= 8:
+            raise StopIteration
+        if self._gate.wait(0.25):
+            raise StopIteration
+        self.n += 1
+        return SimpleNamespace(content=f't{self.n}')
+
+    def close(self) -> None:
+        self.close_calls += 1
+        self._gate.set()
+
+
+class _BlockingLLM:
+    def __init__(self) -> None:
+        self.openai_api_base = 'https://api.openai.com/v1'
+        self.model_name = 'test'
+        self.api_key = 'none'
+        self.stream_obj = _BlockingStream()
+
+    def stream(self, _messages):
+        return self.stream_obj
+
+
 class StreamChatTest(unittest.TestCase):
     """Sideband EventSource while llm.stream() is blocked on the first token."""
 
     def setUp(self) -> None:
         reset_progress_caches()
+        begin_generation()
 
     def tearDown(self) -> None:
+        abort_generation()
         reset_progress_caches()
 
     def test_yields_progress_from_sse(self):
@@ -472,6 +512,44 @@ class StreamChatTest(unittest.TestCase):
         pieces = list(stream_chat(llm, []))
         self.assertEqual([c.content for c in pieces], ['hello'])
         self.assertFalse(any(isinstance(p, PromptProgress) for p in pieces))
+
+    def test_abort_closes_openai_http_body(self):
+        llm = _BlockingLLM()
+        pieces: list[str] = []
+
+        def consume() -> None:
+            pieces.extend(
+                c.content for c in stream_chat(llm, [])
+                if not isinstance(c, PromptProgress)
+            )
+
+        worker = threading.Thread(target=consume)
+        worker.start()
+        deadline = time.time() + 1.0
+        while time.time() < deadline and llm.stream_obj.n == 0:
+            time.sleep(0.01)
+        self.assertGreater(llm.stream_obj.n, 0)
+        self.assertTrue(abort_generation())
+        worker.join(timeout=1.5)
+        self.assertFalse(worker.is_alive())
+        self.assertGreaterEqual(llm.stream_obj.close_calls, 1)
+        self.assertTrue(generation_stopped())
+        self.assertLess(llm.stream_obj.n, 8)
+
+    def test_abort_before_stream_skips_llm(self):
+        abort_generation()
+        llm = _FakeLLM('https://api.openai.com/v1', delay=0.0)
+        pieces = list(stream_chat(llm, []))
+        self.assertEqual(pieces, [])
+
+    def test_begin_generation_clears_stop(self):
+        abort_generation()
+        self.assertTrue(generation_stopped())
+        begin_generation()
+        self.assertFalse(generation_stopped())
+        llm = _FakeLLM('https://api.openai.com/v1', delay=0.0)
+        pieces = list(stream_chat(llm, []))
+        self.assertEqual([c.content for c in pieces], ['hello'])
 
 
 if __name__ == '__main__':
