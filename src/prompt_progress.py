@@ -68,15 +68,20 @@ def reset_progress_caches() -> None:
 
 
 def format_prompt_status(fraction: float) -> str:
-    """``Processing Prompt… 46.6%`` — Spur puts model/route/context after."""
+    """``Processing Prompt… 46.6%`` — Spur puts model/route/context after.
+
+    Starts at ``0%``. Never publishes ``100%`` here: that would be a leftover
+    decode snapshot from the previous turn (capped as 99.9% and looking
+    like we finished before we began).
+    """
     frac = _clamp(float(fraction))
-    if frac <= 0:
-        return 'Processing Prompt…'
     shown = min(99.9, frac * 100.0)
+    if shown <= 0:
+        return 'Processing Prompt… 0%'
     if abs(shown - round(shown)) < 0.05:
         whole = int(round(shown))
         if whole <= 0:
-            return 'Processing Prompt…'
+            return 'Processing Prompt… 0%'
         return f'Processing Prompt… {min(99, whole)}%'
     return f'Processing Prompt… {shown:.1f}%'
 
@@ -188,7 +193,12 @@ def pick_progress(
     if frac is None or frac <= 0:
         return None
     if not phase:
-        phase = 'prefill' if snapshot.get('active') else 'idle'
+        # Don't relabel a leftover decode/done snapshot as prefill just
+        # because top-level ``progress`` is 1.0 and ``active`` is still true.
+        if snapshot.get('active') and frac < 0.999:
+            phase = 'prefill'
+        else:
+            phase = 'idle'
     processed = prompt.get('processed_tokens') if prompt else None
     total = prompt.get('total_tokens') if prompt else None
     return PromptProgress(
@@ -303,12 +313,15 @@ def _watch_progress(
     url = _cached(origin)
     if url is None:
         return
-    snap = None
     if not isinstance(url, str):
-        url, snap = _probe(base, headers, timeout)
+        url, _snap = _probe(base, headers, timeout)
         if not isinstance(url, str):
             return
-        _emit_progress(snap, model, box)
+    # Start at 0% so a leftover decode snapshot (progress=1.0 → 99.9%)
+    # from the previous turn cannot flash before this prefill begins.
+    box.put(('progress', PromptProgress(
+        fraction=0.0, phase='prefill', model=model,
+    )))
     if stop.is_set():
         return
     if _subscribe_sse(
@@ -399,9 +412,15 @@ def _subscribe_sse(
 
 
 def _emit_progress(snap: Any, model: str, box: queue.Queue) -> None:
-    """Push a prefill PromptProgress. Ignore idle/decode leftovers."""
+    """Push a live prefill ratio. Ignore idle/decode leftovers and 1.0.
+
+    mlx-edge lingers at ``progress: 1.0`` after the last token. Publishing
+    that as Processing Prompt makes the bar jump to 99.9% on the next turn.
+    """
     pp = pick_progress(snap if isinstance(snap, dict) else None, model)
     if pp is None or pp.phase in {'decode', 'done', 'error', 'idle'}:
+        return
+    if pp.fraction >= 0.999:
         return
     box.put(('progress', pp))
 

@@ -1007,7 +1007,7 @@ def call_llm_stream(
     if documents.get('sd_ran') and not messages:
         status.empty()
         return
-    status.markdown('Processing Prompt…')
+    status.markdown(format_prompt_status(0))
     metrics.model = renderer.llm.model_name
     metrics.prompt_tokens = documents.get('prompt_tokens', 0)
     metrics.token_savings = documents.get('token_savings', 0)

@@ -78,8 +78,8 @@ class _Secret:
 class FormatStatusTest(unittest.TestCase):
     """Status line the Spur badge splits on."""
 
-    def test_zero_is_bare_label(self):
-        self.assertEqual(format_prompt_status(0), 'Processing Prompt…')
+    def test_zero_starts_at_zero_percent(self):
+        self.assertEqual(format_prompt_status(0), 'Processing Prompt… 0%')
 
     def test_one_decimal(self):
         self.assertEqual(format_prompt_status(0.466), 'Processing Prompt… 46.6%')
@@ -184,6 +184,34 @@ class PickProgressTest(unittest.TestCase):
         }
         self.assertIsNone(pick_progress(snap, 'm'))
 
+    def test_leftover_decode_is_not_prefill(self):
+        snap = {
+            'object': EDGE_OBJECT,
+            'active': True,
+            'progress': 1.0,
+            'models': [{
+                'id': 'm',
+                'phase': 'decode',
+                'status': 'processing',
+                'progress': 1.0,
+            }],
+        }
+        pp = pick_progress(snap, 'm')
+        self.assertIsNotNone(pp)
+        self.assertEqual(pp.phase, 'decode')
+        self.assertAlmostEqual(pp.fraction, 1.0)
+
+    def test_top_level_complete_is_not_prefill(self):
+        snap = {
+            'object': EDGE_OBJECT,
+            'active': True,
+            'progress': 1.0,
+            'models': [],
+        }
+        pp = pick_progress(snap)
+        self.assertIsNotNone(pp)
+        self.assertNotEqual(pp.phase, 'prefill')
+
 
 class UrlHelpersTest(unittest.TestCase):
     """Host classification and ChatOpenAI attribute unwrapping."""
@@ -218,6 +246,25 @@ class UrlHelpersTest(unittest.TestCase):
         )
         self.assertEqual(llm_base_url(llm), 'http://127.0.0.1:8080/v1')
         self.assertEqual(llm_api_key(llm), 'sk-test')
+
+
+def _done_body(ident: str) -> dict:
+    return {
+        'object': EDGE_OBJECT,
+        'active': True,
+        'progress': 1.0,
+        'models': [{
+            'id': ident,
+            'phase': 'decode',
+            'status': 'processing',
+            'progress': 1.0,
+            'prompt': {
+                'processed_tokens': 1391,
+                'total_tokens': 1391,
+                'ratio': 1.0,
+            },
+        }],
+    }
 
 
 def _edge_body(ratio: float, ident: str) -> dict:
@@ -285,6 +332,10 @@ class _Handler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps(body).encode())
             self.wfile.flush()
             return
+        if server.kind == 'stale':
+            self.wfile.write(json.dumps(_done_body(ident)).encode())
+            self.wfile.flush()
+            return
         if server.kind == 'poll-only':
             ratio = min(0.9, 0.2 * n)
             self.wfile.write(json.dumps(_edge_body(ratio, ident)).encode())
@@ -305,6 +356,10 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header('Connection', 'close')
         self.end_headers()
         try:
+            if server.kind == 'stale':
+                self.wfile.write(f'data: {json.dumps(_done_body(ident))}\n\n'.encode())
+                self.wfile.flush()
+                time.sleep(0.05)
             n = 0
             while True:
                 n += 1
@@ -366,8 +421,22 @@ class StreamChatTest(unittest.TestCase):
         progress = [p for p in pieces if isinstance(p, PromptProgress)]
         chunks = [p for p in pieces if not isinstance(p, PromptProgress)]
         self.assertGreaterEqual(len(progress), 1)
-        self.assertGreater(progress[-1].fraction, 0)
+        self.assertEqual(progress[0].fraction, 0.0)
+        self.assertTrue(any(0 < p.fraction < 0.999 for p in progress))
         self.assertEqual([c.content for c in chunks], ['hello'])
+
+    def test_stale_complete_does_not_flash_99(self):
+        server, base = _serve('stale')
+        try:
+            llm = _FakeLLM(base, delay=0.4)
+            pieces = list(stream_chat(llm, [], interval=0.05, timeout=0.3))
+        finally:
+            _stop(server)
+        progress = [p for p in pieces if isinstance(p, PromptProgress)]
+        self.assertTrue(progress)
+        self.assertEqual(progress[0].fraction, 0.0)
+        self.assertTrue(all(p.fraction < 0.999 for p in progress))
+        self.assertTrue(any(p.fraction > 0 for p in progress))
 
     def test_falls_back_to_poll_when_stream_missing(self):
         server, base = _serve('poll-only')
@@ -379,6 +448,7 @@ class StreamChatTest(unittest.TestCase):
         progress = [p for p in pieces if isinstance(p, PromptProgress)]
         chunks = [p for p in pieces if not isinstance(p, PromptProgress)]
         self.assertGreaterEqual(len(progress), 1)
+        self.assertEqual(progress[0].fraction, 0.0)
         self.assertEqual([c.content for c in chunks], ['hello'])
 
     def test_lm_studio_fake_200_is_a_miss(self):

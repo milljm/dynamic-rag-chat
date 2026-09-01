@@ -1139,7 +1139,7 @@ def _iter_sse_chunks(
         documents['prompt_tokens'] = context
         first = True
         yield _status_sse(
-            'Processing Prompt…', model or '', route or '', context or 0,
+            format_prompt_status(0), model or '', route or '', context or 0,
             recalled,
         )
         yield b':\n\n'
@@ -1235,7 +1235,7 @@ async def api_chat(request: Request) -> StreamingResponse:
                 documents['prompt_tokens'] = context
             yield sse({
                 'type': 'status',
-                'message': 'Processing Prompt…',
+                'message': format_prompt_status(0),
                 'model': model,
                 'route': route,
                 'context': context,
