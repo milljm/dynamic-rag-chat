@@ -22,6 +22,7 @@ from prompt_progress import (  # noqa: E402
     llm_base_url,
     pick_progress,
     probe_progress,
+    progress_stream_url,
     progress_urls,
     reset_progress_caches,
     stream_chat,
@@ -33,6 +34,7 @@ SAMPLE = {
     'version': 1,
     'generated_at': 1756670123.45,
     'active': True,
+    'progress': 0.3131,
     'models': [
         {
             'id': 'MiniMax-M2.7-ConfigI-MLX',
@@ -40,6 +42,7 @@ SAMPLE = {
             'phase': 'prefill',
             'status': 'processing',
             'stream': True,
+            'progress': 0.3131,
             'prompt': {
                 'processed_tokens': 2048,
                 'total_tokens': 6540,
@@ -109,7 +112,36 @@ class PickProgressTest(unittest.TestCase):
         self.assertIsNotNone(pp)
 
     def test_other_model_ignored(self):
-        self.assertIsNone(pick_progress(SAMPLE, 'qwen3-8b'))
+        self.assertIsNone(pick_progress(
+            {**SAMPLE, 'progress': None}, 'qwen3-8b',
+        ))
+
+    def test_models_progress_float_without_ratio(self):
+        snap = {
+            'object': EDGE_OBJECT,
+            'active': True,
+            'progress': 0.466,
+            'models': [{
+                'id': 'MiniMax-M2.7-ConfigI-MLX',
+                'phase': 'prefill',
+                'status': 'processing',
+                'progress': 0.466,
+                'prompt': {'ratio': None},
+            }],
+        }
+        pp = pick_progress(snap, 'MiniMax-M2.7-ConfigI-MLX')
+        self.assertAlmostEqual(pp.fraction, 0.466)
+
+    def test_top_level_progress(self):
+        snap = {
+            'object': EDGE_OBJECT,
+            'active': True,
+            'progress': 0.25,
+            'models': [],
+        }
+        pp = pick_progress(snap)
+        self.assertAlmostEqual(pp.fraction, 0.25)
+        self.assertEqual(pp.phase, 'prefill')
 
     def test_ratio_from_counts_when_missing(self):
         snap = {
@@ -137,14 +169,16 @@ class PickProgressTest(unittest.TestCase):
         snap = {
             'object': EDGE_OBJECT,
             'active': False,
+            'progress': 0.0,
             'models': [{
                 'id': 'm',
                 'phase': 'idle',
                 'status': 'ready',
+                'progress': 0.0,
                 'prompt': {
                     'processed_tokens': 0,
                     'total_tokens': None,
-                    'ratio': None,
+                    'ratio': 0.0,
                 },
             }],
         }
@@ -164,6 +198,12 @@ class UrlHelpersTest(unittest.TestCase):
             ['http://llm:1234/v1/progress', 'http://llm:1234/progress'],
         )
 
+    def test_stream_url(self):
+        self.assertEqual(
+            progress_stream_url('http://127.0.0.1:8080/v1/progress'),
+            'http://127.0.0.1:8080/v1/progress/stream',
+        )
+
     def test_cloud_hosts_skipped(self):
         self.assertTrue(is_cloud_host('https://api.openai.com/v1'))
         self.assertTrue(is_cloud_host('https://api.x.ai/v1'))
@@ -178,6 +218,25 @@ class UrlHelpersTest(unittest.TestCase):
         )
         self.assertEqual(llm_base_url(llm), 'http://127.0.0.1:8080/v1')
         self.assertEqual(llm_api_key(llm), 'sk-test')
+
+
+def _edge_body(ratio: float, ident: str) -> dict:
+    return {
+        'object': EDGE_OBJECT,
+        'active': True,
+        'progress': ratio,
+        'models': [{
+            'id': ident,
+            'phase': 'prefill',
+            'status': 'processing',
+            'progress': ratio,
+            'prompt': {
+                'processed_tokens': int(ratio * 6540),
+                'total_tokens': 6540,
+                'ratio': ratio,
+            },
+        }],
+    }
 
 
 class _ProgressServer(ThreadingHTTPServer):
@@ -198,6 +257,11 @@ class _Handler(BaseHTTPRequestHandler):
             server.hits += 1
             n = server.hits
         path = parsed.path.rstrip('/') or '/'
+        needle = (parse_qs(parsed.query).get('model') or [''])[0]
+        ident = needle or 'MiniMax-M2.7-ConfigI-MLX'
+        if path in {'/v1/progress/stream', '/progress/stream'}:
+            self._sse(server, ident)
+            return
         if path not in {'/v1/progress', '/progress'}:
             self.send_response(404)
             self.end_headers()
@@ -213,31 +277,44 @@ class _Handler(BaseHTTPRequestHandler):
             body = {
                 'object': EDGE_OBJECT,
                 'active': False,
-                'models': [{'id': 'MiniMax-M2.7-ConfigI-MLX', 'phase': 'idle',
-                            'status': 'ready', 'prompt': {'ratio': None}}],
+                'progress': 0.0,
+                'models': [{'id': ident, 'phase': 'idle',
+                            'status': 'ready', 'progress': 0.0,
+                            'prompt': {'ratio': 0.0}}],
             }
             self.wfile.write(json.dumps(body).encode())
             self.wfile.flush()
             return
+        if server.kind == 'poll-only':
+            ratio = min(0.9, 0.2 * n)
+            self.wfile.write(json.dumps(_edge_body(ratio, ident)).encode())
+            self.wfile.flush()
+            return
         ratio = min(0.9, 0.2 * n)
-        needle = (parse_qs(parsed.query).get('model') or [''])[0]
-        ident = needle or 'MiniMax-M2.7-ConfigI-MLX'
-        body = {
-            'object': EDGE_OBJECT,
-            'active': True,
-            'models': [{
-                'id': ident,
-                'phase': 'prefill',
-                'status': 'processing',
-                'prompt': {
-                    'processed_tokens': int(ratio * 6540),
-                    'total_tokens': 6540,
-                    'ratio': ratio,
-                },
-            }],
-        }
-        self.wfile.write(json.dumps(body).encode())
+        self.wfile.write(json.dumps(_edge_body(ratio, ident)).encode())
         self.wfile.flush()
+
+    def _sse(self, server: _ProgressServer, ident: str) -> None:
+        if server.kind in {'lmstudio', 'poll-only'}:
+            self.send_response(404)
+            self.end_headers()
+            return
+        self.send_response(200)
+        self.send_header('Content-Type', 'text/event-stream')
+        self.send_header('Cache-Control', 'no-cache')
+        self.send_header('Connection', 'close')
+        self.end_headers()
+        try:
+            n = 0
+            while True:
+                n += 1
+                ratio = min(0.9, 0.2 * n)
+                blob = json.dumps(_edge_body(ratio, ident))
+                self.wfile.write(f'data: {blob}\n\n'.encode())
+                self.wfile.flush()
+                time.sleep(0.07)
+        except (BrokenPipeError, ConnectionResetError, TimeoutError, OSError):
+            return
 
     def log_message(self, *_args) -> None:
         return
@@ -271,7 +348,7 @@ class _FakeLLM:
 
 
 class StreamChatTest(unittest.TestCase):
-    """Sideband poll while llm.stream() is blocked on the first token."""
+    """Sideband EventSource while llm.stream() is blocked on the first token."""
 
     def setUp(self) -> None:
         reset_progress_caches()
@@ -279,10 +356,10 @@ class StreamChatTest(unittest.TestCase):
     def tearDown(self) -> None:
         reset_progress_caches()
 
-    def test_yields_progress_then_chunks(self):
+    def test_yields_progress_from_sse(self):
         server, base = _serve('edge')
         try:
-            llm = _FakeLLM(base, delay=0.4)
+            llm = _FakeLLM(base, delay=0.35)
             pieces = list(stream_chat(llm, [], interval=0.05, timeout=0.3))
         finally:
             _stop(server)
@@ -291,7 +368,18 @@ class StreamChatTest(unittest.TestCase):
         self.assertGreaterEqual(len(progress), 1)
         self.assertGreater(progress[-1].fraction, 0)
         self.assertEqual([c.content for c in chunks], ['hello'])
-        self.assertGreaterEqual(server.hits, 1)
+
+    def test_falls_back_to_poll_when_stream_missing(self):
+        server, base = _serve('poll-only')
+        try:
+            llm = _FakeLLM(base, delay=0.4)
+            pieces = list(stream_chat(llm, [], interval=0.05, timeout=0.3))
+        finally:
+            _stop(server)
+        progress = [p for p in pieces if isinstance(p, PromptProgress)]
+        chunks = [p for p in pieces if not isinstance(p, PromptProgress)]
+        self.assertGreaterEqual(len(progress), 1)
+        self.assertEqual([c.content for c in chunks], ['hello'])
 
     def test_lm_studio_fake_200_is_a_miss(self):
         server, base = _serve('lmstudio')

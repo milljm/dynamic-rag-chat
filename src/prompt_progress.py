@@ -1,25 +1,28 @@
-"""Prompt-processing % from mlx-edge ``GET /v1/progress``.
+"""Prompt-processing % from mlx-edge ``GET /v1/progress/stream``.
 
 OpenAI ``/v1/chat/completions`` stays on LangChain. While that HTTP call is
-blocked on prefill (the slow part on long contexts), a sideband polls the
-Edge snapshot:
+blocked on prefill (the slow part on long contexts), a sideband subscribes
+to the Edge EventSource:
 
-    GET {base}/v1/progress?model=…
+    GET {base}/v1/progress/stream
 
-and yields ``PromptProgress`` so Spur/Streamlit can show
+and reads the 0.0..1.0 float at ``models[0].progress`` (fallback:
+``snapshot.progress``, then ``prompt.ratio``). Spur/Streamlit show
 ``Processing Prompt… 46.6%``.
 
-LM Studio answers unknown paths with HTTP 200 + an error JSON. We only treat
-a body as progress when ``object == "edge.progress"``, and we cache a miss so
-we do not hammer a catch-all. Cloud OpenAI-style hosts are never probed.
+If the stream is missing, poll ``GET /v1/progress``. LM Studio's catch-all
+HTTP 200 is a miss — ``object`` must be ``edge.progress`` — and that miss
+is cached. Cloud OpenAI-style hosts are never probed.
 
 This is not PR #79: no ``GET /slots``, no Developer-log scrape, no
 ``return_progress`` rewrite of the chat POST.
 """
 from __future__ import annotations
 
+import http.client
 import json
 import queue
+import socket
 import threading
 import urllib.error
 import urllib.parse
@@ -88,12 +91,27 @@ def progress_urls(base: str) -> list[str]:
     return [f'{root}/v1/progress', f'{root}/progress']
 
 
+def progress_stream_url(snapshot_url: str) -> str:
+    """``GET /v1/progress`` → ``GET /v1/progress/stream``."""
+    root = (snapshot_url or '').rstrip('/')
+    if root.endswith('/stream'):
+        return root
+    return f'{root}/stream'
+
+
 def llm_base_url(llm: Any) -> str:
     """OpenAI-compat origin ChatOpenAI will POST to."""
     for attr in ('openai_api_base', 'base_url'):
         text = _secret(getattr(llm, attr, None))
         if text:
             return text.rstrip('/')
+    for attr in ('root_client', 'client', 'async_client'):
+        client = getattr(llm, attr, None)
+        if client is None:
+            continue
+        text = _secret(getattr(client, 'base_url', None))
+        if text:
+            return str(text).rstrip('/')
     return ''
 
 
@@ -141,23 +159,45 @@ def probe_progress(
 def pick_progress(
     snapshot: dict | None, model: str = '',
 ) -> PromptProgress | None:
-    """Read a prefill ratio out of an ``edge.progress`` snapshot."""
+    """Read the 0..1 float mlx-edge 0.8+ always publishes as ``progress``.
+
+    Order: matching ``models[].progress``, then ``models[0].progress``,
+    then top-level ``snapshot.progress``, then ``prompt.ratio`` / counts.
+    """
     if not _is_edge(snapshot):
         return None
     rows = snapshot.get('models') or []
     if not isinstance(rows, list):
+        rows = []
+    row = _choose_row(rows, model)
+    ident = ''
+    phase = ''
+    prompt: dict[str, Any] = {}
+    frac: float | None = None
+    if row is not None:
+        ident = str(row.get('id') or '')
+        phase = str(row.get('phase') or '')
+        prompt = row.get('prompt') if isinstance(row.get('prompt'), dict) else {}
+        frac = _coerce_fraction(row.get('progress'))
+        if frac is None:
+            frac = _coerce_fraction(prompt.get('ratio'))
+        if frac is None:
+            frac = _ratio_from_counts(prompt)
+    if frac is None:
+        frac = _coerce_fraction(snapshot.get('progress'))
+    if frac is None or frac <= 0:
         return None
-    fallback: PromptProgress | None = None
-    for row in rows:
-        pp = _row_progress(row, model)
-        if pp is None:
-            continue
-        status = str(row.get('status') or '') if isinstance(row, dict) else ''
-        if pp.phase == 'prefill' or status == 'processing':
-            return pp
-        if fallback is None:
-            fallback = pp
-    return fallback
+    if not phase:
+        phase = 'prefill' if snapshot.get('active') else 'idle'
+    processed = prompt.get('processed_tokens') if prompt else None
+    total = prompt.get('total_tokens') if prompt else None
+    return PromptProgress(
+        fraction=frac,
+        phase=phase,
+        model=ident,
+        processed=int(processed) if isinstance(processed, (int, float)) else None,
+        total=int(total) if isinstance(total, (int, float)) else None,
+    )
 
 
 def stream_chat(
@@ -169,10 +209,11 @@ def stream_chat(
 ) -> Iterator:
     """Yield ``PromptProgress`` then LangChain chunks.
 
-    Prefill polls run on a side thread so the generator can emit percents
-    while ``llm.stream()`` is still blocked on the first token. After the
-    first chunk (or when the snapshot leaves ``prefill``) polling stops.
-    Hosts that are not mlx-edge fall through to ``llm.stream()`` alone.
+    Prefill events come from ``GET /v1/progress/stream`` (EventSource) on a
+    side thread so the generator can emit percents while ``llm.stream()`` is
+    still blocked on the first token. After the first chunk (or when the
+    snapshot leaves ``prefill``) the sideband stops. Hosts that are not
+    mlx-edge fall through to ``llm.stream()`` alone.
     """
     base = llm_base_url(llm)
     if not base or is_cloud_host(base) or _cached(_origin(base)) is None:
@@ -196,7 +237,7 @@ def stream_chat(
             box.put(('err', exc))
 
     def read_progress() -> None:
-        _poll_progress(
+        _watch_progress(
             base=base,
             model=llm_model(llm),
             headers=_headers(llm),
@@ -206,19 +247,21 @@ def stream_chat(
             timeout=timeout,
         )
 
-    workers = (
-        threading.Thread(target=read_llm, daemon=True),
-        threading.Thread(target=read_progress, daemon=True),
-    )
-    for worker in workers:
-        worker.start()
+    progress_worker = threading.Thread(target=read_progress, daemon=True)
+    llm_worker = threading.Thread(target=read_llm, daemon=True)
+    # Connect the EventSource before the chat POST so the first prefill
+    # snapshots are not lost behind the completion request.
+    progress_worker.start()
+    stop.wait(0.05)
+    llm_worker.start()
+    workers = (llm_worker, progress_worker)
     saw_token = False
     try:
         while True:
             try:
                 kind, payload = box.get(timeout=0.2)
             except queue.Empty:
-                if stop.is_set() or not workers[0].is_alive():
+                if stop.is_set() or not llm_worker.is_alive():
                     break
                 continue
             if kind == 'progress':
@@ -246,7 +289,7 @@ def _plain_stream(llm: Any, messages: Any) -> Iterator:
         _close_stream(stream)
 
 
-def _poll_progress(
+def _watch_progress(
     *,
     base: str,
     model: str,
@@ -260,34 +303,130 @@ def _poll_progress(
     url = _cached(origin)
     if url is None:
         return
-    last: float | None = None
-    while not stop.is_set():
+    snap = None
+    if not isinstance(url, str):
+        url, snap = _probe(base, headers, timeout)
         if not isinstance(url, str):
-            url, snap = _probe(base, headers, timeout)
-            if url is None:
-                if snap is _MISSING:
-                    if stop.wait(interval):
-                        return
-                    continue
-                return
-        else:
-            snap = _get_json(_with_model(url, model), headers, timeout)
-            if snap is None:
-                if stop.wait(interval):
-                    return
-                continue
-            if not _is_edge(snap):
-                return
-        pp = pick_progress(snap if isinstance(snap, dict) else None, model)
-        if pp is not None and pp.phase in {'decode', 'done', 'error'}:
             return
-        if pp is not None and pp.fraction > 0:
-            key = round(pp.fraction, 3)
-            if key != last:
-                last = key
-                box.put(('progress', pp))
+        _emit_progress(snap, model, box)
+    if stop.is_set():
+        return
+    if _subscribe_sse(
+        progress_stream_url(url), headers, model, box, stop, timeout=max(2.0, timeout),
+    ):
+        return
+    _poll_progress(url, model, headers, box, stop, interval, timeout)
+
+
+def _poll_progress(
+    url: str,
+    model: str,
+    headers: dict[str, str],
+    box: queue.Queue,
+    stop: threading.Event,
+    interval: float,
+    timeout: float,
+) -> None:
+    while not stop.is_set():
+        snap = _get_json(url, headers, timeout)
+        if snap is None:
+            if stop.wait(interval):
+                return
+            continue
+        if not _is_edge(snap):
+            return
+        _emit_progress(snap, model, box)
         if stop.wait(interval):
             return
+
+
+def _subscribe_sse(
+    url: str,
+    headers: dict[str, str],
+    model: str,
+    box: queue.Queue,
+    stop: threading.Event,
+    timeout: float,
+) -> bool:
+    """EventSource ``GET /v1/progress/stream``. False = fall back to poll."""
+    parsed = urlparse(url)
+    if not parsed.hostname:
+        return False
+    path = parsed.path or '/'
+    if parsed.query:
+        path = f'{path}?{parsed.query}'
+    conn: http.client.HTTPConnection | None = None
+    try:
+        conn = _http_conn(parsed, timeout)
+        req_headers = dict(headers)
+        req_headers['Accept'] = 'text/event-stream'
+        req_headers['Cache-Control'] = 'no-cache'
+        conn.request('GET', path, headers=req_headers)
+        resp = conn.getresponse()
+        if resp.status != 200:
+            return False
+        ctype = (resp.getheader('Content-Type') or '').lower()
+        if 'event-stream' not in ctype and 'json' in ctype:
+            return False
+        buf = b''
+        while not stop.is_set():
+            try:
+                chunk = resp.read(256)
+            except (TimeoutError, socket.timeout):
+                continue
+            except OSError:
+                break
+            if not chunk:
+                break
+            buf += chunk
+            while b'\n\n' in buf:
+                frame, buf = buf.split(b'\n\n', 1)
+                snap = _parse_sse_frame(frame.decode('utf-8', errors='replace'))
+                if snap is None:
+                    continue
+                if not _is_edge(snap):
+                    return False
+                _emit_progress(snap, model, box)
+        return True
+    except (http.client.HTTPException, TimeoutError, socket.timeout, OSError):
+        return False
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except OSError:
+                pass
+
+
+def _emit_progress(snap: Any, model: str, box: queue.Queue) -> None:
+    """Push a prefill PromptProgress. Ignore idle/decode leftovers."""
+    pp = pick_progress(snap if isinstance(snap, dict) else None, model)
+    if pp is None or pp.phase in {'decode', 'done', 'error', 'idle'}:
+        return
+    box.put(('progress', pp))
+
+
+def _parse_sse_frame(frame: str) -> dict | None:
+    data_lines: list[str] = []
+    for raw in frame.splitlines():
+        line = raw.strip('\r')
+        if line.startswith('data:'):
+            data_lines.append(line[5:].lstrip())
+    if not data_lines:
+        return None
+    try:
+        data = json.loads('\n'.join(data_lines))
+    except json.JSONDecodeError:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _http_conn(parsed: urllib.parse.ParseResult, timeout: float) -> http.client.HTTPConnection:
+    host = parsed.hostname or '127.0.0.1'
+    port = parsed.port or (443 if parsed.scheme == 'https' else 80)
+    if parsed.scheme == 'https':
+        return http.client.HTTPSConnection(host, port, timeout=timeout)
+    return http.client.HTTPConnection(host, port, timeout=timeout)
 
 
 def _probe(
@@ -322,31 +461,39 @@ def _probe(
     return None, None
 
 
-def _row_progress(row: Any, model: str) -> PromptProgress | None:
-    if not isinstance(row, dict):
+def _choose_row(rows: list, model: str) -> dict | None:
+    """Prefer the named model; otherwise the first processing row / models[0]."""
+    first: dict | None = None
+    processing: dict | None = None
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        if first is None:
+            first = row
+        ident = str(row.get('id') or '')
+        if model and ident and _ids_match(ident, model):
+            return row
+        phase = str(row.get('phase') or '')
+        status = str(row.get('status') or '')
+        if processing is None and (phase == 'prefill' or status == 'processing'):
+            processing = row
+    if model:
         return None
-    ident = str(row.get('id') or '')
-    if model and ident and not _ids_match(ident, model):
+    return processing or first
+
+
+def _coerce_fraction(value: Any) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
-    prompt = row.get('prompt') if isinstance(row.get('prompt'), dict) else {}
-    ratio = prompt.get('ratio')
-    if not isinstance(ratio, (int, float)):
-        processed = prompt.get('processed_tokens')
-        total = prompt.get('total_tokens')
-        if isinstance(processed, (int, float)) and isinstance(total, (int, float)) and total:
-            ratio = processed / float(total)
-        else:
-            return None
-    frac = _clamp(float(ratio))
+    return _clamp(float(value))
+
+
+def _ratio_from_counts(prompt: dict[str, Any]) -> float | None:
     processed = prompt.get('processed_tokens')
     total = prompt.get('total_tokens')
-    return PromptProgress(
-        fraction=frac,
-        phase=str(row.get('phase') or 'prefill'),
-        model=ident,
-        processed=int(processed) if isinstance(processed, (int, float)) else None,
-        total=int(total) if isinstance(total, (int, float)) else None,
-    )
+    if isinstance(processed, (int, float)) and isinstance(total, (int, float)) and total:
+        return _clamp(processed / float(total))
+    return None
 
 
 def _is_edge(snapshot: Any) -> bool:
@@ -386,18 +533,7 @@ def _remember(origin: str, url: str | None) -> None:
 
 def _headers(llm: Any) -> dict[str, str]:
     key = llm_api_key(llm) or 'none'
-    return {'Authorization': f'Bearer {key}', 'Accept': 'application/json'}
-
-
-def _with_model(url: str, model: str) -> str:
-    if not model:
-        return url
-    parsed = urlparse(url)
-    query = dict(urllib.parse.parse_qsl(parsed.query, keep_blank_values=True))
-    query['model'] = model
-    return urllib.parse.urlunparse(
-        parsed._replace(query=urllib.parse.urlencode(query)),
-    )
+    return {'Authorization': f'Bearer {key}'}
 
 
 def _get_json(
@@ -436,7 +572,7 @@ def _secret(value: Any) -> str:
 
 
 def _clamp(value: float) -> float:
-    return max(0.0, min(1.0, value))
+    return max(0.0, min(1.0, float(value)))
 
 
 def _close_stream(stream: Any) -> None:
