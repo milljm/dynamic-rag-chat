@@ -8,49 +8,103 @@ import {
   useSyntaxPref,
 } from "@/lib/chat/syntax";
 import { parseTableAt, type MdTable, type TableAlign } from "@/lib/chat/md-table";
+import { ChatImage } from "@/components/chat/chat-image";
 import { cn } from "@/lib/utils";
+
+function safeHref(raw: string): string | null {
+  const url = raw.trim();
+  if (!url) return null;
+  if (/^(https?:\/\/|mailto:|\/|#)/i.test(url)) return url;
+  return null;
+}
+
+function safeImg(raw: string): string | null {
+  const url = raw.trim();
+  if (!url) return null;
+  if (/^https?:\/\//i.test(url) || url.startsWith("data:image/")) return url;
+  return null;
+}
 
 function inline(text: string): ReactNode[] {
   const parts: ReactNode[] = [];
-  const re = /(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`)/g;
+  const re =
+    /(`[^`]+`)|(!\[([^\]]*)\]\(\s*<?([^)\s>]+)>?(?:\s+"([^"]*)")?\s*\))|(\[([^\]]+)\]\(\s*<?([^)\s>]+)>?(?:\s+"([^"]*)")?\s*\))|(\*\*[^*]+\*\*)|(\*[^*]+\*)/g;
   let last = 0;
   let m: RegExpExecArray | null;
   let k = 0;
   while ((m = re.exec(text))) {
     if (m.index > last) parts.push(text.slice(last, m.index));
-    const token = m[0];
-    if (token.startsWith("**")) {
-      parts.push(
-        <strong key={k++} className="font-medium text-foreground">
-          {token.slice(2, -2)}
-        </strong>,
-      );
-    } else if (token.startsWith("*")) {
-      parts.push(
-        <em key={k++} className="italic">
-          {token.slice(1, -1)}
-        </em>,
-      );
-    } else {
+    if (m[1]) {
       parts.push(
         <code
           key={k++}
           className="rounded-xs bg-code px-1 py-0.5 font-mono text-xs"
         >
-          {token.slice(1, -1)}
+          {m[1].slice(1, -1)}
         </code>,
       );
+    } else if (m[2]) {
+      const src = safeImg(m[4] ?? "");
+      const alt = m[3] ?? "";
+      if (src) {
+        parts.push(
+          <ChatImage key={k++} src={src} alt={alt} name={m[5] || alt} />,
+        );
+      } else {
+        parts.push(m[2]);
+      }
+    } else if (m[6]) {
+      const href = safeHref(m[8] ?? "");
+      const label = m[7] ?? "";
+      if (href) {
+        parts.push(
+          <a
+            key={k++}
+            href={href}
+            title={m[9] || undefined}
+            target="_blank"
+            rel="noreferrer"
+            className="underline underline-offset-2 hover:text-foreground"
+          >
+            {label}
+          </a>,
+        );
+      } else {
+        parts.push(m[6]);
+      }
+    } else if (m[10]) {
+      parts.push(
+        <strong key={k++} className="font-medium text-foreground">
+          {m[10].slice(2, -2)}
+        </strong>,
+      );
+    } else {
+      parts.push(
+        <em key={k++} className="italic">
+          {(m[11] ?? "").slice(1, -1)}
+        </em>,
+      );
     }
-    last = m.index + token.length;
+    last = m.index + m[0].length;
   }
   if (last < text.length) parts.push(text.slice(last));
   return parts;
 }
 
+const HEADING_CLASS = [
+  "mt-4 mb-2 text-xl font-semibold tracking-tight text-foreground first:mt-0",
+  "mt-4 mb-2 text-lg font-semibold text-foreground first:mt-0",
+  "mt-3 mb-1.5 text-base font-semibold text-foreground",
+  "mt-3 mb-1 text-sm font-semibold text-foreground",
+  "mt-2 mb-1 text-sm font-medium text-foreground",
+  "mt-2 mb-1 text-sm font-medium text-muted-foreground",
+];
+
 function renderProse(block: string, nodes: ReactNode[]) {
   const lines = block.split("\n");
   let para: string[] = [];
   let list: string[] = [];
+  let quote: string[] = [];
   const flushPara = () => {
     if (!para.length) return;
     nodes.push(
@@ -74,12 +128,25 @@ function renderProse(block: string, nodes: ReactNode[]) {
     );
     list = [];
   };
+  const flushQuote = () => {
+    if (!quote.length) return;
+    nodes.push(
+      <blockquote
+        key={`q${nodes.length}`}
+        className="my-2 border-l-2 border-border pl-3 text-muted-foreground"
+      >
+        {inline(quote.join("\n"))}
+      </blockquote>,
+    );
+    quote = [];
+  };
 
   for (let i = 0; i < lines.length; i++) {
     const table = parseTableAt(lines, i);
     if (table) {
       flushPara();
       flushList();
+      flushQuote();
       nodes.push(
         <MarkdownTable key={`t${nodes.length}`} table={table.table} />,
       );
@@ -87,21 +154,55 @@ function renderProse(block: string, nodes: ReactNode[]) {
       continue;
     }
     const line = lines[i] ?? "";
+    const heading = line.match(/^ {0,3}(#{1,6})\s+(.*?)\s*#*\s*$/);
+    if (heading) {
+      flushPara();
+      flushList();
+      flushQuote();
+      const level = Math.min(6, heading[1].length);
+      const Tag = (`h${level}` as unknown) as "h1";
+      nodes.push(
+        <Tag key={`h${nodes.length}`} className={HEADING_CLASS[level - 1]}>
+          {inline(heading[2] ?? "")}
+        </Tag>,
+      );
+      continue;
+    }
+    if (/^ {0,3}(?:-{3,}|\*{3,}|_{3,})\s*$/.test(line)) {
+      flushPara();
+      flushList();
+      flushQuote();
+      nodes.push(
+        <hr key={`r${nodes.length}`} className="my-4 border-border" />,
+      );
+      continue;
+    }
+    const quoted = line.match(/^ {0,3}>\s?(.*)$/);
+    if (quoted) {
+      flushPara();
+      flushList();
+      quote.push(quoted[1] ?? "");
+      continue;
+    }
     const bullet = line.match(/^\s*[-*]\s+(.*)$/);
     if (bullet) {
       flushPara();
+      flushQuote();
       list.push(bullet[1] ?? "");
       continue;
     }
     if (line.trim() === "") {
       flushList();
       flushPara();
+      flushQuote();
       continue;
     }
     flushList();
+    flushQuote();
     para.push(line);
   }
   flushList();
+  flushQuote();
   flushPara();
 }
 
