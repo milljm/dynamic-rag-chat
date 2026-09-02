@@ -106,6 +106,161 @@ function takeNamedIds(line: string): { text: string; ids: string[] } {
 
 const KEYCAP = /^((?:[0-9]\uFE0F?\u20E3)|🔟)\s+(.+)$/u;
 
+const SHORTCODES: Record<string, string> = {
+  smile: "😄",
+  grinning: "😀",
+  rocket: "🚀",
+  "+1": "👍",
+  "-1": "👎",
+  thumbsup: "👍",
+  thumbsdown: "👎",
+  heart: "❤️",
+  fire: "🔥",
+  tada: "🎉",
+  check: "✅",
+  x: "❌",
+  warning: "⚠️",
+  eyes: "👀",
+  think: "🤔",
+  thinking: "🤔",
+  wave: "👋",
+  star: "⭐",
+  sparkles: "✨",
+  zap: "⚡",
+  bulb: "💡",
+  laugh: "😂",
+  wink: "😉",
+  cry: "😢",
+  pray: "🙏",
+  clap: "👏",
+  ok: "👌",
+};
+
+const SAFE_COLOR = /^(?:[a-z]+|#(?:[0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})|rgb\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*\))$/i;
+
+
+function decodeEntities(s: string): string {
+  const amp = "\u0026";
+  return s
+    .replace(new RegExp(amp + "nbsp;", "gi"), "\u00a0")
+    .replace(new RegExp(amp + "amp;", "gi"), amp)
+    .replace(new RegExp(amp + "lt;", "gi"), "<")
+    .replace(new RegExp(amp + "gt;", "gi"), ">")
+    .replace(new RegExp(amp + "quot;", "gi"), '"')
+    .replace(new RegExp(amp + "apos;", "gi"), "'")
+    .replace(new RegExp(amp + "#39;", "gi"), "'")
+    .replace(new RegExp(amp + "mdash;", "gi"), "\u2014")
+    .replace(new RegExp(amp + "ndash;", "gi"), "\u2013")
+    .replace(new RegExp(amp + "hellip;", "gi"), "\u2026")
+    .replace(new RegExp(amp + "#x([0-9a-f]+);", "gi"), (_, h) => {
+      const n = Number.parseInt(h, 16);
+      return Number.isFinite(n) ? String.fromCodePoint(n) : _;
+    })
+    .replace(new RegExp(amp + "#(\\d+);", "g"), (_, d) => {
+      const n = Number(d);
+      return Number.isFinite(n) ? String.fromCodePoint(n) : _;
+    });
+}
+
+function expandShortcodes(text: string): ReactNode[] {
+  const parts: ReactNode[] = [];
+  const re = /:([a-z0-9_+-]+):/gi;
+  let last = 0;
+  let m: RegExpExecArray | null;
+  let k = 0;
+  while ((m = re.exec(text))) {
+    if (m.index > last) parts.push(text.slice(last, m.index));
+    const glyph = SHORTCODES[m[1].toLowerCase()];
+    parts.push(glyph ?? m[0]);
+    last = m.index + m[0].length;
+    k += 1;
+  }
+  if (last < text.length) parts.push(text.slice(last));
+  return parts.length ? parts : [text];
+}
+
+type ListItem = {
+  indent: number;
+  ordered: boolean;
+  task: boolean;
+  checked: boolean;
+  text: string;
+};
+
+function indentOf(line: string): number {
+  let n = 0;
+  for (const ch of line) {
+    if (ch === " " || ch === "\u00a0") n += 1;
+    else if (ch === "\t") n += 4;
+    else break;
+  }
+  return n;
+}
+
+function renderListTree(items: ListItem[], ctx: MdCtx, key: number): ReactNode {
+  function walk(start: number, indent: number): { node: ReactNode; next: number } {
+    const ordered = items[start]?.ordered ?? false;
+    const tasky = items[start]?.task ?? false;
+    const lis: ReactNode[] = [];
+    let i = start;
+    while (i < items.length) {
+      const it = items[i];
+      if (it.indent < indent) break;
+      if (it.indent > indent) break;
+      if (it.ordered !== ordered || it.task !== tasky) break;
+      let next = i + 1;
+      let nested: ReactNode = null;
+      if (next < items.length && items[next].indent > indent) {
+        const child = walk(next, items[next].indent);
+        nested = child.node;
+        next = child.next;
+      }
+      lis.push(
+        <li key={i} className={it.task ? "flex items-start gap-2" : undefined}>
+          {it.task ? (
+            <>
+              <input type="checkbox" checked={it.checked} readOnly disabled className="mt-1 size-3.5 shrink-0" />
+              <span className={it.checked ? "text-muted-foreground line-through" : ""}>
+                {inline(it.text, ctx)}
+                {nested}
+              </span>
+            </>
+          ) : (
+            <>
+              {inline(it.text, ctx)}
+              {nested}
+            </>
+          )}
+        </li>,
+      );
+      i = next;
+    }
+    const Tag = ordered ? "ol" : "ul";
+    return {
+      node: (
+        <Tag
+          key={`${key}-${start}`}
+          className={
+            tasky ? "my-2 space-y-1 pl-0" : ordered ? "my-2 list-decimal space-y-1 pl-5" : "my-2 list-disc space-y-1 pl-5"
+          }
+        >
+          {lis}
+        </Tag>
+      ),
+      next: i,
+    };
+  }
+  const out: ReactNode[] = [];
+  let i = 0;
+  while (i < items.length) {
+    const piece = walk(i, items[i].indent);
+    out.push(piece.node);
+    i = piece.next;
+  }
+  return <div key={key}>{out}</div>;
+}
+
+
 function MdLink({
   href,
   title,
@@ -178,31 +333,46 @@ function htmlAnchor(html: string, ctx: MdCtx, key: number): ReactNode {
   return parsed.inner || html;
 }
 
+function htmlInline(html: string, ctx: MdCtx, key: number): ReactNode {
+  if (/^<br\s*\/?>$/i.test(html.trim())) return <br key={key} />;
+  const span = html.trim().match(/^<span\s+style=["']\s*color:\s*([^;"']+?)\s*["']\s*>([\s\S]*)<\/span>$/i);
+  if (span && SAFE_COLOR.test(span[1].trim())) {
+    return (
+      <span key={key} style={{ color: span[1].trim() }}>
+        {inlineMd(span[2], ctx, key + 1)}
+      </span>
+    );
+  }
+  return htmlAnchor(html, ctx, key);
+}
+
 function inline(text: string, ctx: MdCtx): ReactNode[] {
+  const source = decodeEntities(text);
   const parts: ReactNode[] = [];
-  const htmlRe = /(<a\s+[^>]*?\/>|<a\s+[^>]*?>[\s\S]*?<\/a>)/gi;
+  const htmlRe =
+    /(<a\s+[^>]*?\/>|<a\s+[^>]*?>[\s\S]*?<\/a>|<span\s+style=["']\s*color:\s*[^;"']+["']\s*>[\s\S]*?<\/span>|<br\s*\/?>)/gi;
   let last = 0;
   let k = 0;
   let tag: RegExpExecArray | null;
-  while ((tag = htmlRe.exec(text))) {
-    if (tag.index > last) parts.push(...inlineMd(text.slice(last, tag.index), ctx, k));
+  while ((tag = htmlRe.exec(source))) {
+    if (tag.index > last) parts.push(...inlineMd(source.slice(last, tag.index), ctx, k));
     k += 32;
-    parts.push(htmlAnchor(tag[0], ctx, k++));
+    parts.push(htmlInline(tag[0], ctx, k++));
     last = tag.index + tag[0].length;
   }
-  if (last < text.length) parts.push(...inlineMd(text.slice(last), ctx, k));
+  if (last < source.length) parts.push(...inlineMd(source.slice(last), ctx, k));
   return parts;
 }
 
 function inlineMd(text: string, ctx: MdCtx, seed: number): ReactNode[] {
   const parts: ReactNode[] = [];
   const re =
-    /(`[^`]+`)|(!\[([^\]]*)\]\(\s*<?([^)\s>]+)>?(?:\s+"([^"]*)")?\s*\))|(\[\^([^\]]+)\])|(\[([^\]]+)\]\(\s*<?([^)\s>]+)>?(?:\s+"([^"]*)")?\s*\))|(\*\*[^*]+\*\*)|(\*[^*]+\*)/g;
+    /(`[^`]+`)|(!\[([^\]]*)\]\(\s*<?([^)\s>]+)>?(?:\s+"([^"]*)")?\s*\))|(\[\^([^\]]+)\])|(\[([^\]]+)\]\(\s*<?([^)\s>]+)>?(?:\s+"([^"]*)")?\s*\))|(\*\*[^*]+\*\*)|(~~[^~]+~~)|(\*[^*]+\*)/g;
   let last = 0;
   let m: RegExpExecArray | null;
   let k = seed;
   while ((m = re.exec(text))) {
-    if (m.index > last) parts.push(text.slice(last, m.index));
+    if (m.index > last) parts.push(...expandShortcodes(text.slice(last, m.index)));
     if (m[1]) {
       parts.push(
         <code
@@ -256,16 +426,22 @@ function inlineMd(text: string, ctx: MdCtx, seed: number): ReactNode[] {
           {m[12].slice(2, -2)}
         </strong>,
       );
+    } else if (m[13]) {
+      parts.push(
+        <del key={k++} className="text-muted-foreground">
+          {m[13].slice(2, -2)}
+        </del>,
+      );
     } else {
       parts.push(
         <em key={k++} className="italic">
-          {(m[13] ?? "").slice(1, -1)}
+          {(m[14] ?? "").slice(1, -1)}
         </em>,
       );
     }
     last = m.index + m[0].length;
   }
-  if (last < text.length) parts.push(text.slice(last));
+  if (last < text.length) parts.push(...expandShortcodes(text.slice(last)));
   return parts;
 }
 
@@ -280,76 +456,56 @@ const HEADING_CLASS = [
 
 function renderProse(block: string, nodes: ReactNode[], ctx: MdCtx) {
   const lines = block.split("\n");
+  const capTotal = new Map<string, number>();
+  const capSeen = new Map<string, number>();
+  for (const raw of lines) {
+    const peeled = takeNamedIds(decodeEntities(raw));
+    const cap = peeled.text.match(KEYCAP);
+    if (cap) {
+      const slug = githubSlug(cap[2] ?? "");
+      capTotal.set(slug, (capTotal.get(slug) ?? 0) + 1);
+    }
+  }
   let para: string[] = [];
-  let list: string[] = [];
-  let ordered: string[] = [];
-  let tasks: { checked: boolean; text: string }[] = [];
+  let listItems: ListItem[] = [];
+  let defs: { term: string; defs: string[] }[] = [];
   let quote: string[] = [];
   const flushPara = () => {
     if (!para.length) return;
     nodes.push(
-      <p
-        key={`p${nodes.length}`}
-        className="my-2 whitespace-pre-wrap leading-relaxed"
-      >
+      <p key={`p${nodes.length}`} className="my-2 whitespace-pre-wrap leading-relaxed">
         {inline(para.join("\n"), ctx)}
       </p>,
     );
     para = [];
   };
-  const flushList = () => {
-    if (!list.length) return;
-    nodes.push(
-      <ul key={`l${nodes.length}`} className="my-2 list-disc space-y-1 pl-5">
-        {list.map((item, idx) => (
-          <li key={idx}>{inline(item, ctx)}</li>
-        ))}
-      </ul>,
-    );
-    list = [];
+  const flushLists = () => {
+    if (!listItems.length) return;
+    nodes.push(renderListTree(listItems, ctx, nodes.length));
+    listItems = [];
   };
-  const flushOrdered = () => {
-    if (!ordered.length) return;
+  const flushDefs = () => {
+    if (!defs.length) return;
     nodes.push(
-      <ol key={`o${nodes.length}`} className="my-2 list-decimal space-y-1 pl-5">
-        {ordered.map((item, idx) => (
-          <li key={idx}>{inline(item, ctx)}</li>
+      <dl key={`d${nodes.length}`} className="my-2 space-y-1">
+        {defs.map((row, idx) => (
+          <Fragment key={idx}>
+            <dt className="font-medium text-foreground">{inline(row.term, ctx)}</dt>
+            {row.defs.map((dd, j) => (
+              <dd key={j} className="mb-2 ml-4 text-muted-foreground">
+                {inline(dd, ctx)}
+              </dd>
+            ))}
+          </Fragment>
         ))}
-      </ol>,
+      </dl>,
     );
-    ordered = [];
-  };
-  const flushTasks = () => {
-    if (!tasks.length) return;
-    nodes.push(
-      <ul key={`k${nodes.length}`} className="my-2 space-y-1 pl-0">
-        {tasks.map((item, idx) => (
-          <li key={idx} className="flex items-start gap-2">
-            <input
-              type="checkbox"
-              checked={item.checked}
-              readOnly
-              disabled
-              className="mt-1 size-3.5 shrink-0"
-            />
-            <span
-              className={item.checked ? "text-muted-foreground line-through" : ""}
-            >
-              {inline(item.text, ctx)}
-            </span>
-          </li>
-        ))}
-      </ul>,
-    );
-    tasks = [];
+    defs = [];
   };
   const flushQuote = () => {
     if (!quote.length) return;
     nodes.push(
-      <blockquote
-        key={`q${nodes.length}`}
-        className="my-2 border-l-2 border-border pl-3 text-muted-foreground"
-      >
+      <blockquote key={`q${nodes.length}`} className="my-2 border-l-2 border-border pl-3 text-muted-foreground">
         {inline(quote.join("\n"), ctx)}
       </blockquote>,
     );
@@ -357,9 +513,8 @@ function renderProse(block: string, nodes: ReactNode[], ctx: MdCtx) {
   };
   const flushAll = () => {
     flushPara();
-    flushList();
-    flushOrdered();
-    flushTasks();
+    flushLists();
+    flushDefs();
     flushQuote();
   };
 
@@ -367,13 +522,11 @@ function renderProse(block: string, nodes: ReactNode[], ctx: MdCtx) {
     const table = parseTableAt(lines, i);
     if (table) {
       flushAll();
-      nodes.push(
-        <MarkdownTable key={`t${nodes.length}`} table={table.table} ctx={ctx} />,
-      );
+      nodes.push(<MarkdownTable key={`t${nodes.length}`} table={table.table} ctx={ctx} />);
       i += table.consumed - 1;
       continue;
     }
-    const peeled = takeNamedIds(lines[i] ?? "");
+    const peeled = takeNamedIds(decodeEntities(lines[i] ?? ""));
     const line = peeled.text;
     const extraId = peeled.ids[0];
     const note = line.match(/^\[\^([^\]]+)\]:\s*(.*)$/);
@@ -389,11 +542,7 @@ function renderProse(block: string, nodes: ReactNode[], ctx: MdCtx) {
       const raw = heading[2] ?? "";
       const Tag = (`h${level}` as unknown) as "h1";
       nodes.push(
-        <Tag
-          key={`h${nodes.length}`}
-          id={extraId || ctx.slug(raw)}
-          className={HEADING_CLASS[level - 1]}
-        >
+        <Tag key={`h${nodes.length}`} id={extraId || ctx.slug(raw)} className={HEADING_CLASS[level - 1]}>
           {inline(raw, ctx)}
         </Tag>,
       );
@@ -401,45 +550,48 @@ function renderProse(block: string, nodes: ReactNode[], ctx: MdCtx) {
     }
     if (/^ {0,3}(?:-{3,}|\*{3,}|_{3,})\s*$/.test(line)) {
       flushAll();
-      nodes.push(
-        <hr key={`r${nodes.length}`} className="my-4 border-border" />,
-      );
+      nodes.push(<hr key={`r${nodes.length}`} className="my-4 border-border" />);
       continue;
     }
     const quoted = line.match(/^ {0,3}>\s?(.*)$/);
     if (quoted) {
       flushPara();
-      flushList();
-      flushOrdered();
-      flushTasks();
+      flushLists();
+      flushDefs();
       quote.push(quoted[1] ?? "");
       continue;
     }
-    const task = line.match(/^\s*(?:[-*+]\s+)?\[([ xX])\]\s+(.*)$/);
-    if (task) {
-      flushPara();
-      flushList();
-      flushOrdered();
+    const dd = line.match(/^:\s+(.*)$/);
+    if (dd) {
+      flushLists();
       flushQuote();
-      tasks.push({ checked: task[1] !== " ", text: task[2] ?? "" });
+      if (para.length) {
+        const term = para.pop() ?? "";
+        flushPara();
+        defs.push({ term, defs: [dd[1] ?? ""] });
+      } else if (defs.length) {
+        defs[defs.length - 1].defs.push(dd[1] ?? "");
+      } else {
+        para.push(line);
+      }
       continue;
     }
-    const bullet = line.match(/^\s*[-*]\s+(.*)$/);
-    if (bullet) {
+    const listLine = line.match(
+      /^([ \t\u00a0]*)(?:([-*+])\s+(?:\[([ xX])\]\s+)?(.*)|(\d+)[.)]\s+(.*))$/,
+    );
+    if (listLine && !/^ {0,3}(?:-{3,}|\*{3,}|_{3,})\s*$/.test(line)) {
       flushPara();
-      flushOrdered();
-      flushTasks();
+      flushDefs();
       flushQuote();
-      list.push(bullet[1] ?? "");
-      continue;
-    }
-    const numbered = line.match(/^\s*\d+[.)]\s+(.*)$/);
-    if (numbered) {
-      flushPara();
-      flushList();
-      flushTasks();
-      flushQuote();
-      ordered.push(numbered[1] ?? "");
+      const taskMark = listLine[3];
+      const bulletText = listLine[2] != null ? (listLine[4] ?? "") : (listLine[6] ?? "");
+      listItems.push({
+        indent: indentOf(line),
+        ordered: listLine[5] != null,
+        task: taskMark != null,
+        checked: Boolean(taskMark && taskMark !== " "),
+        text: bulletText,
+      });
       continue;
     }
     if (line.trim() === "") {
@@ -447,27 +599,26 @@ function renderProse(block: string, nodes: ReactNode[], ctx: MdCtx) {
       continue;
     }
     const keycap = line.match(KEYCAP);
-    if (keycap && extraId) {
+    if (keycap) {
       flushAll();
+      const title = keycap[2] ?? "";
+      const slug = extraId || githubSlug(title);
+      const n = capSeen.get(slug) ?? 0;
+      capSeen.set(slug, n + 1);
+      const toc = !extraId && (capTotal.get(githubSlug(title)) ?? 0) > 1 && n === 0;
       nodes.push(
         <p
           key={`p${nodes.length}`}
-          id={extraId}
+          id={toc ? undefined : slug}
           className="my-2 scroll-mt-2 whitespace-pre-wrap leading-relaxed"
         >
-          {inline(line, ctx)}
-        </p>,
-      );
-      continue;
-    }
-    if (keycap && !extraId) {
-      flushAll();
-      const title = keycap[2] ?? "";
-      nodes.push(
-        <p key={`p${nodes.length}`} className="my-2 leading-relaxed">
-          <MdLink href={`#${githubSlug(title)}`} ctx={ctx}>
-            {line}
-          </MdLink>
+          {toc ? (
+            <MdLink href={`#${slug}`} ctx={ctx}>
+              {line}
+            </MdLink>
+          ) : (
+            inline(line, ctx)
+          )}
         </p>,
       );
       continue;
@@ -485,9 +636,8 @@ function renderProse(block: string, nodes: ReactNode[], ctx: MdCtx) {
       );
       continue;
     }
-    flushList();
-    flushOrdered();
-    flushTasks();
+    flushLists();
+    flushDefs();
     flushQuote();
     para.push(line);
   }
@@ -661,8 +811,18 @@ export function Markdown({
     jump(id: string) {
       const root = rootRef.current;
       if (!root) return;
-      const el = root.querySelector(`#${CSS.escape(id)}`);
-      el?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      const safe = CSS.escape(id);
+      let el: Element | null = root.querySelector(`#${safe}`) || root.querySelector(`[name="${safe}"]`);
+      if (!el) {
+        const want = id.toLowerCase();
+        el =
+          [...root.querySelectorAll("h1,h2,h3,h4,h5,h6,p,[id]")].find((n) => {
+            const nid = n.getAttribute("id") || "";
+            if (nid === id) return true;
+            return githubSlug(n.textContent || "") === want;
+          }) ?? null;
+      }
+      el?.scrollIntoView({ behavior: "smooth", block: "start" });
     },
   };
 
