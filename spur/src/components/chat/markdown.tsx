@@ -1,4 +1,4 @@
-import { Fragment, useState, type ReactNode } from "react";
+import { Fragment, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { Check, Copy, Download } from "lucide-react";
 import { downloadTextFile, parseFenceInfo } from "@/lib/chat/artifacts";
 import { highlightCode, normalizeLang } from "@/lib/chat/highlight";
@@ -10,6 +10,12 @@ import {
 import { parseTableAt, type MdTable, type TableAlign } from "@/lib/chat/md-table";
 import { ChatImage } from "@/components/chat/chat-image";
 import { cn } from "@/lib/utils";
+
+type MdCtx = {
+  jump: (id: string) => void;
+  slug: (text: string) => string;
+  notes: Map<string, string>;
+};
 
 function safeHref(raw: string): string | null {
   const url = raw.trim();
@@ -25,10 +31,90 @@ function safeImg(raw: string): string | null {
   return null;
 }
 
-function inline(text: string): ReactNode[] {
+/** `#intro` or `http://host/#intro` (path /) — stay inside this markdown. */
+function hashTarget(href: string): string | null {
+  const raw = href.trim();
+  if (raw.startsWith("#") && raw.length > 1) {
+    try {
+      return decodeURIComponent(raw.slice(1));
+    } catch {
+      return raw.slice(1);
+    }
+  }
+  try {
+    const u = new URL(raw);
+    if (!u.hash || u.hash.length < 2) return null;
+    if ((u.pathname || "/") === "/") {
+      try {
+        return decodeURIComponent(u.hash.slice(1));
+      } catch {
+        return u.hash.slice(1);
+      }
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function githubSlug(text: string): string {
+  return (
+    text
+      .toLowerCase()
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+      .replace(/!\[[^\]]*\]\([^)]+\)/g, "")
+      .replace(/\[\^[^\]]+\]/g, "")
+      .replace(/[`*_~]+/g, "")
+      .replace(/[^\p{L}\p{N}\s-]/gu, "")
+      .trim()
+      .replace(/\s+/g, "-") || "section"
+  );
+}
+
+function MdLink({
+  href,
+  title,
+  ctx,
+  children,
+}: {
+  href: string;
+  title?: string;
+  ctx: MdCtx;
+  children: ReactNode;
+}) {
+  const hash = hashTarget(href);
+  if (hash) {
+    return (
+      <a
+        href={`#${hash}`}
+        title={title}
+        className="underline underline-offset-2 hover:text-foreground"
+        onClick={(e: MouseEvent<HTMLAnchorElement>) => {
+          e.preventDefault();
+          ctx.jump(hash);
+        }}
+      >
+        {children}
+      </a>
+    );
+  }
+  return (
+    <a
+      href={href}
+      title={title}
+      target="_blank"
+      rel="noreferrer"
+      className="underline underline-offset-2 hover:text-foreground"
+    >
+      {children}
+    </a>
+  );
+}
+
+function inline(text: string, ctx: MdCtx): ReactNode[] {
   const parts: ReactNode[] = [];
   const re =
-    /(`[^`]+`)|(!\[([^\]]*)\]\(\s*<?([^)\s>]+)>?(?:\s+"([^"]*)")?\s*\))|(\[([^\]]+)\]\(\s*<?([^)\s>]+)>?(?:\s+"([^"]*)")?\s*\))|(\*\*[^*]+\*\*)|(\*[^*]+\*)/g;
+    /(`[^`]+`)|(!\[([^\]]*)\]\(\s*<?([^)\s>]+)>?(?:\s+"([^"]*)")?\s*\))|(\[\^([^\]]+)\])|(\[([^\]]+)\]\(\s*<?([^)\s>]+)>?(?:\s+"([^"]*)")?\s*\))|(\*\*[^*]+\*\*)|(\*[^*]+\*)/g;
   let last = 0;
   let m: RegExpExecArray | null;
   let k = 0;
@@ -54,34 +140,43 @@ function inline(text: string): ReactNode[] {
         parts.push(m[2]);
       }
     } else if (m[6]) {
-      const href = safeHref(m[8] ?? "");
-      const label = m[7] ?? "";
+      const id = m[7] ?? "";
+      parts.push(
+        <a
+          key={k++}
+          id={`fnref-${id}`}
+          href={`#fn-${id}`}
+          className="align-super text-[0.7em] text-muted-foreground hover:text-foreground"
+          onClick={(e: MouseEvent<HTMLAnchorElement>) => {
+            e.preventDefault();
+            ctx.jump(`fn-${id}`);
+          }}
+        >
+          [{id}]
+        </a>,
+      );
+    } else if (m[8]) {
+      const href = safeHref(m[10] ?? "");
+      const label = m[9] ?? "";
       if (href) {
         parts.push(
-          <a
-            key={k++}
-            href={href}
-            title={m[9] || undefined}
-            target="_blank"
-            rel="noreferrer"
-            className="underline underline-offset-2 hover:text-foreground"
-          >
+          <MdLink key={k++} href={href} title={m[11] || undefined} ctx={ctx}>
             {label}
-          </a>,
+          </MdLink>,
         );
       } else {
-        parts.push(m[6]);
+        parts.push(m[8]);
       }
-    } else if (m[10]) {
+    } else if (m[12]) {
       parts.push(
         <strong key={k++} className="font-medium text-foreground">
-          {m[10].slice(2, -2)}
+          {m[12].slice(2, -2)}
         </strong>,
       );
     } else {
       parts.push(
         <em key={k++} className="italic">
-          {(m[11] ?? "").slice(1, -1)}
+          {(m[13] ?? "").slice(1, -1)}
         </em>,
       );
     }
@@ -92,18 +187,20 @@ function inline(text: string): ReactNode[] {
 }
 
 const HEADING_CLASS = [
-  "mt-4 mb-2 text-xl font-semibold tracking-tight text-foreground first:mt-0",
-  "mt-4 mb-2 text-lg font-semibold text-foreground first:mt-0",
-  "mt-3 mb-1.5 text-base font-semibold text-foreground",
-  "mt-3 mb-1 text-sm font-semibold text-foreground",
-  "mt-2 mb-1 text-sm font-medium text-foreground",
-  "mt-2 mb-1 text-sm font-medium text-muted-foreground",
+  "mt-4 mb-2 scroll-mt-2 text-xl font-semibold tracking-tight text-foreground first:mt-0",
+  "mt-4 mb-2 scroll-mt-2 text-lg font-semibold text-foreground first:mt-0",
+  "mt-3 mb-1.5 scroll-mt-2 text-base font-semibold text-foreground",
+  "mt-3 mb-1 scroll-mt-2 text-sm font-semibold text-foreground",
+  "mt-2 mb-1 scroll-mt-2 text-sm font-medium text-foreground",
+  "mt-2 mb-1 scroll-mt-2 text-sm font-medium text-muted-foreground",
 ];
 
-function renderProse(block: string, nodes: ReactNode[]) {
+function renderProse(block: string, nodes: ReactNode[], ctx: MdCtx) {
   const lines = block.split("\n");
   let para: string[] = [];
   let list: string[] = [];
+  let ordered: string[] = [];
+  let tasks: { checked: boolean; text: string }[] = [];
   let quote: string[] = [];
   const flushPara = () => {
     if (!para.length) return;
@@ -112,7 +209,7 @@ function renderProse(block: string, nodes: ReactNode[]) {
         key={`p${nodes.length}`}
         className="my-2 whitespace-pre-wrap leading-relaxed"
       >
-        {inline(para.join("\n"))}
+        {inline(para.join("\n"), ctx)}
       </p>,
     );
     para = [];
@@ -122,11 +219,46 @@ function renderProse(block: string, nodes: ReactNode[]) {
     nodes.push(
       <ul key={`l${nodes.length}`} className="my-2 list-disc space-y-1 pl-5">
         {list.map((item, idx) => (
-          <li key={idx}>{inline(item)}</li>
+          <li key={idx}>{inline(item, ctx)}</li>
         ))}
       </ul>,
     );
     list = [];
+  };
+  const flushOrdered = () => {
+    if (!ordered.length) return;
+    nodes.push(
+      <ol key={`o${nodes.length}`} className="my-2 list-decimal space-y-1 pl-5">
+        {ordered.map((item, idx) => (
+          <li key={idx}>{inline(item, ctx)}</li>
+        ))}
+      </ol>,
+    );
+    ordered = [];
+  };
+  const flushTasks = () => {
+    if (!tasks.length) return;
+    nodes.push(
+      <ul key={`k${nodes.length}`} className="my-2 space-y-1 pl-0">
+        {tasks.map((item, idx) => (
+          <li key={idx} className="flex items-start gap-2">
+            <input
+              type="checkbox"
+              checked={item.checked}
+              readOnly
+              disabled
+              className="mt-1 size-3.5 shrink-0"
+            />
+            <span
+              className={item.checked ? "text-muted-foreground line-through" : ""}
+            >
+              {inline(item.text, ctx)}
+            </span>
+          </li>
+        ))}
+      </ul>,
+    );
+    tasks = [];
   };
   const flushQuote = () => {
     if (!quote.length) return;
@@ -135,43 +267,55 @@ function renderProse(block: string, nodes: ReactNode[]) {
         key={`q${nodes.length}`}
         className="my-2 border-l-2 border-border pl-3 text-muted-foreground"
       >
-        {inline(quote.join("\n"))}
+        {inline(quote.join("\n"), ctx)}
       </blockquote>,
     );
     quote = [];
+  };
+  const flushAll = () => {
+    flushPara();
+    flushList();
+    flushOrdered();
+    flushTasks();
+    flushQuote();
   };
 
   for (let i = 0; i < lines.length; i++) {
     const table = parseTableAt(lines, i);
     if (table) {
-      flushPara();
-      flushList();
-      flushQuote();
+      flushAll();
       nodes.push(
-        <MarkdownTable key={`t${nodes.length}`} table={table.table} />,
+        <MarkdownTable key={`t${nodes.length}`} table={table.table} ctx={ctx} />,
       );
       i += table.consumed - 1;
       continue;
     }
     const line = lines[i] ?? "";
+    const note = line.match(/^\[\^([^\]]+)\]:\s*(.*)$/);
+    if (note) {
+      flushAll();
+      ctx.notes.set(note[1], note[2] ?? "");
+      continue;
+    }
     const heading = line.match(/^ {0,3}(#{1,6})\s+(.*?)\s*#*\s*$/);
     if (heading) {
-      flushPara();
-      flushList();
-      flushQuote();
+      flushAll();
       const level = Math.min(6, heading[1].length);
+      const raw = heading[2] ?? "";
       const Tag = (`h${level}` as unknown) as "h1";
       nodes.push(
-        <Tag key={`h${nodes.length}`} className={HEADING_CLASS[level - 1]}>
-          {inline(heading[2] ?? "")}
+        <Tag
+          key={`h${nodes.length}`}
+          id={ctx.slug(raw)}
+          className={HEADING_CLASS[level - 1]}
+        >
+          {inline(raw, ctx)}
         </Tag>,
       );
       continue;
     }
     if (/^ {0,3}(?:-{3,}|\*{3,}|_{3,})\s*$/.test(line)) {
-      flushPara();
-      flushList();
-      flushQuote();
+      flushAll();
       nodes.push(
         <hr key={`r${nodes.length}`} className="my-4 border-border" />,
       );
@@ -181,29 +325,49 @@ function renderProse(block: string, nodes: ReactNode[]) {
     if (quoted) {
       flushPara();
       flushList();
+      flushOrdered();
+      flushTasks();
       quote.push(quoted[1] ?? "");
+      continue;
+    }
+    const task = line.match(/^\s*(?:[-*+]\s+)?\[([ xX])\]\s+(.*)$/);
+    if (task) {
+      flushPara();
+      flushList();
+      flushOrdered();
+      flushQuote();
+      tasks.push({ checked: task[1] !== " ", text: task[2] ?? "" });
       continue;
     }
     const bullet = line.match(/^\s*[-*]\s+(.*)$/);
     if (bullet) {
       flushPara();
+      flushOrdered();
+      flushTasks();
       flushQuote();
       list.push(bullet[1] ?? "");
       continue;
     }
-    if (line.trim() === "") {
-      flushList();
+    const numbered = line.match(/^\s*\d+[.)]\s+(.*)$/);
+    if (numbered) {
       flushPara();
+      flushList();
+      flushTasks();
       flushQuote();
+      ordered.push(numbered[1] ?? "");
+      continue;
+    }
+    if (line.trim() === "") {
+      flushAll();
       continue;
     }
     flushList();
+    flushOrdered();
+    flushTasks();
     flushQuote();
     para.push(line);
   }
-  flushList();
-  flushQuote();
-  flushPara();
+  flushAll();
 }
 
 function alignClass(align: TableAlign | undefined): string {
@@ -212,7 +376,7 @@ function alignClass(align: TableAlign | undefined): string {
   return "text-left";
 }
 
-function MarkdownTable({ table }: { table: MdTable }) {
+function MarkdownTable({ table, ctx }: { table: MdTable; ctx: MdCtx }) {
   return (
     <div className="my-3 overflow-x-auto rounded-md outline outline-1 -outline-offset-1 outline-white/10">
       <table className="w-full min-w-max border-collapse text-sm">
@@ -226,7 +390,7 @@ function MarkdownTable({ table }: { table: MdTable }) {
                   alignClass(table.align[i]),
                 )}
               >
-                {inline(h)}
+                {inline(h, ctx)}
               </th>
             ))}
           </tr>
@@ -245,7 +409,7 @@ function MarkdownTable({ table }: { table: MdTable }) {
                     alignClass(table.align[c]),
                   )}
                 >
-                  {inline(cell)}
+                  {inline(cell, ctx)}
                 </td>
               ))}
             </tr>
@@ -359,11 +523,29 @@ export function Markdown({
   let prose: string[] = [];
   let i = 0;
   let prevLine = "";
+  const rootRef = useRef<HTMLDivElement>(null);
+  const seen = new Map<string, number>();
+  const notes = new Map<string, string>();
+  const ctx: MdCtx = {
+    notes,
+    slug(text: string) {
+      const base = githubSlug(text);
+      const n = seen.get(base) ?? 0;
+      seen.set(base, n + 1);
+      return n ? `${base}-${n}` : base;
+    },
+    jump(id: string) {
+      const root = rootRef.current;
+      if (!root) return;
+      const el = root.querySelector(`#${CSS.escape(id)}`);
+      el?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    },
+  };
 
   const flushProse = () => {
     if (!prose.length) return;
     prevLine = prose[prose.length - 1] ?? "";
-    renderProse(prose.join("\n"), nodes);
+    renderProse(prose.join("\n"), nodes, ctx);
     prose = [];
   };
 
@@ -397,9 +579,38 @@ export function Markdown({
   }
   flushProse();
 
+  if (notes.size) {
+    nodes.push(<hr key="fn-rule" className="my-4 border-border" />);
+    nodes.push(
+      <ol
+        key="fn-list"
+        className="my-2 list-decimal space-y-1 pl-5 text-xs text-muted-foreground"
+      >
+        {[...notes.entries()].map(([id, body]) => (
+          <li key={id} id={`fn-${id}`} className="scroll-mt-2">
+            {inline(body, ctx)}{" "}
+            <a
+              href={`#fnref-${id}`}
+              className="text-muted-foreground hover:text-foreground"
+              onClick={(e: MouseEvent<HTMLAnchorElement>) => {
+                e.preventDefault();
+                ctx.jump(`fnref-${id}`);
+              }}
+            >
+              ↩
+            </a>
+          </li>
+        ))}
+      </ol>,
+    );
+  }
+
   return (
-    <div className={cn("text-pretty text-sm text-foreground/90", className)}>
-      {nodes.length ? nodes : <Fragment>{inline(source)}</Fragment>}
+    <div
+      ref={rootRef}
+      className={cn("text-pretty text-sm text-foreground/90", className)}
+    >
+      {nodes.length ? nodes : <Fragment>{inline(source, ctx)}</Fragment>}
     </div>
   );
 }
