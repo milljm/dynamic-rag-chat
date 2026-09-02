@@ -333,15 +333,36 @@ function htmlAnchor(html: string, ctx: MdCtx, key: number): ReactNode {
   return parsed.inner || html;
 }
 
+
+function parseSafeStyle(raw: string): { color?: string; backgroundColor?: string } | null {
+  const out: { color?: string; backgroundColor?: string } = {};
+  for (const part of raw.split(";")) {
+    const cut = part.indexOf(":");
+    if (cut < 0) continue;
+    const key = part.slice(0, cut).trim().toLowerCase();
+    const val = part.slice(cut + 1).trim();
+    if (!val || /url\s*\(|expression|javascript/i.test(val)) continue;
+    if (!SAFE_COLOR.test(val)) continue;
+    if (key === "color") out.color = val;
+    if (key === "background" || key === "background-color") out.backgroundColor = val;
+  }
+  return out.color || out.backgroundColor ? out : null;
+}
+
 function htmlInline(html: string, ctx: MdCtx, key: number): ReactNode {
   if (/^<br\s*\/?>$/i.test(html.trim())) return <br key={key} />;
-  const span = html.trim().match(/^<span\s+style=["']\s*color:\s*([^;"']+?)\s*["']\s*>([\s\S]*)<\/span>$/i);
-  if (span && SAFE_COLOR.test(span[1].trim())) {
-    return (
-      <span key={key} style={{ color: span[1].trim() }}>
-        {inlineMd(span[2], ctx, key + 1)}
-      </span>
-    );
+  const span = html.trim().match(/^<span\s+([^>]*)>([\s\S]*)<\/span>$/i);
+  if (span) {
+    const style = parseSafeStyle(attrOf(span[1] ?? "", "style") || "");
+    const inner = inlineMd(span[2] ?? "", ctx, key + 1);
+    if (style) {
+      return (
+        <span key={key} style={style}>
+          {inner}
+        </span>
+      );
+    }
+    return <Fragment key={key}>{inner}</Fragment>;
   }
   return htmlAnchor(html, ctx, key);
 }
@@ -350,7 +371,7 @@ function inline(text: string, ctx: MdCtx): ReactNode[] {
   const source = decodeEntities(text);
   const parts: ReactNode[] = [];
   const htmlRe =
-    /(<a\s+[^>]*?\/>|<a\s+[^>]*?>[\s\S]*?<\/a>|<span\s+style=["']\s*color:\s*[^;"']+["']\s*>[\s\S]*?<\/span>|<br\s*\/?>)/gi;
+    /(<a\s+[^>]*?\/>|<a\s+[^>]*?>[\s\S]*?<\/a>|<span\s+[^>]*>[\s\S]*?<\/span>|<br\s*\/?>)/gi;
   let last = 0;
   let k = 0;
   let tag: RegExpExecArray | null;
