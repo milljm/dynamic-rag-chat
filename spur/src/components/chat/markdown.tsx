@@ -64,12 +64,47 @@ function githubSlug(text: string): string {
       .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
       .replace(/!\[[^\]]*\]\([^)]+\)/g, "")
       .replace(/\[\^[^\]]+\]/g, "")
+      .replace(/<[^>]+>/g, "")
       .replace(/[`*_~]+/g, "")
       .replace(/[^\p{L}\p{N}\s-]/gu, "")
       .trim()
       .replace(/\s+/g, "-") || "section"
   );
 }
+
+function attrOf(attrs: string, name: string): string | undefined {
+  return attrs.match(new RegExp(`(?:^|\\s)${name}\\s*=\\s*["']([^"']+)["']`, "i"))?.[1];
+}
+
+function parseHtmlA(html: string): { href?: string; name?: string; id?: string; inner: string } | null {
+  const m = html.match(/^<a\s+([^>]*?)(?:\/>|>([\s\S]*)<\/a>)\s*$/i);
+  if (!m) return null;
+  return {
+    href: attrOf(m[1], "href"),
+    name: attrOf(m[1], "name"),
+    id: attrOf(m[1], "id"),
+    inner: (m[2] ?? "").trim(),
+  };
+}
+
+function takeNamedIds(line: string): { text: string; ids: string[] } {
+  const ids: string[] = [];
+  const text = line
+    .replace(/<a\s+([^>]*?)(?:\/>|><\/a>|>\s*<\/a>)/gi, (full, attrs: string) => {
+      if (attrOf(attrs, "href")) return full;
+      const id = attrOf(attrs, "name") || attrOf(attrs, "id");
+      if (id) {
+        ids.push(id);
+        return "";
+      }
+      return full;
+    })
+    .replace(/[ \t]+$/g, "")
+    .trimEnd();
+  return { text, ids };
+}
+
+const KEYCAP = /^((?:[0-9]\uFE0F?\u20E3)|🔟)\s+(.+)$/u;
 
 function MdLink({
   href,
@@ -111,13 +146,61 @@ function MdLink({
   );
 }
 
+function htmlAnchor(html: string, ctx: MdCtx, key: number): ReactNode {
+  const parsed = parseHtmlA(html.trim());
+  if (!parsed) return html;
+  const id = parsed.name || parsed.id;
+  if (parsed.href) {
+    const href = safeHref(parsed.href);
+    if (!href) return parsed.inner || html;
+    const link = (
+      <MdLink key={key} href={href} ctx={ctx}>
+        {parsed.inner || href}
+      </MdLink>
+    );
+    return id ? (
+      <span id={id} className="scroll-mt-2">
+        {link}
+      </span>
+    ) : (
+      link
+    );
+  }
+  if (id) {
+    return parsed.inner ? (
+      <span id={id} className="scroll-mt-2">
+        {parsed.inner}
+      </span>
+    ) : (
+      <span id={id} className="scroll-mt-2" />
+    );
+  }
+  return parsed.inner || html;
+}
+
 function inline(text: string, ctx: MdCtx): ReactNode[] {
+  const parts: ReactNode[] = [];
+  const htmlRe = /(<a\s+[^>]*?\/>|<a\s+[^>]*?>[\s\S]*?<\/a>)/gi;
+  let last = 0;
+  let k = 0;
+  let tag: RegExpExecArray | null;
+  while ((tag = htmlRe.exec(text))) {
+    if (tag.index > last) parts.push(...inlineMd(text.slice(last, tag.index), ctx, k));
+    k += 32;
+    parts.push(htmlAnchor(tag[0], ctx, k++));
+    last = tag.index + tag[0].length;
+  }
+  if (last < text.length) parts.push(...inlineMd(text.slice(last), ctx, k));
+  return parts;
+}
+
+function inlineMd(text: string, ctx: MdCtx, seed: number): ReactNode[] {
   const parts: ReactNode[] = [];
   const re =
     /(`[^`]+`)|(!\[([^\]]*)\]\(\s*<?([^)\s>]+)>?(?:\s+"([^"]*)")?\s*\))|(\[\^([^\]]+)\])|(\[([^\]]+)\]\(\s*<?([^)\s>]+)>?(?:\s+"([^"]*)")?\s*\))|(\*\*[^*]+\*\*)|(\*[^*]+\*)/g;
   let last = 0;
   let m: RegExpExecArray | null;
-  let k = 0;
+  let k = seed;
   while ((m = re.exec(text))) {
     if (m.index > last) parts.push(text.slice(last, m.index));
     if (m[1]) {
@@ -290,7 +373,9 @@ function renderProse(block: string, nodes: ReactNode[], ctx: MdCtx) {
       i += table.consumed - 1;
       continue;
     }
-    const line = lines[i] ?? "";
+    const peeled = takeNamedIds(lines[i] ?? "");
+    const line = peeled.text;
+    const extraId = peeled.ids[0];
     const note = line.match(/^\[\^([^\]]+)\]:\s*(.*)$/);
     if (note) {
       flushAll();
@@ -306,7 +391,7 @@ function renderProse(block: string, nodes: ReactNode[], ctx: MdCtx) {
       nodes.push(
         <Tag
           key={`h${nodes.length}`}
-          id={ctx.slug(raw)}
+          id={extraId || ctx.slug(raw)}
           className={HEADING_CLASS[level - 1]}
         >
           {inline(raw, ctx)}
@@ -359,6 +444,45 @@ function renderProse(block: string, nodes: ReactNode[], ctx: MdCtx) {
     }
     if (line.trim() === "") {
       flushAll();
+      continue;
+    }
+    const keycap = line.match(KEYCAP);
+    if (keycap && extraId) {
+      flushAll();
+      nodes.push(
+        <p
+          key={`p${nodes.length}`}
+          id={extraId}
+          className="my-2 scroll-mt-2 whitespace-pre-wrap leading-relaxed"
+        >
+          {inline(line, ctx)}
+        </p>,
+      );
+      continue;
+    }
+    if (keycap && !extraId) {
+      flushAll();
+      const title = keycap[2] ?? "";
+      nodes.push(
+        <p key={`p${nodes.length}`} className="my-2 leading-relaxed">
+          <MdLink href={`#${githubSlug(title)}`} ctx={ctx}>
+            {line}
+          </MdLink>
+        </p>,
+      );
+      continue;
+    }
+    if (extraId) {
+      flushAll();
+      nodes.push(
+        <p
+          key={`p${nodes.length}`}
+          id={extraId}
+          className="my-2 scroll-mt-2 whitespace-pre-wrap leading-relaxed"
+        >
+          {inline(line, ctx)}
+        </p>,
+      );
       continue;
     }
     flushList();
