@@ -37,13 +37,6 @@ THINK_END_RE = re.compile(
 )
 
 
-def tag_ns(match: re.Match[str] | None) -> str:
-    """Return the captured think-tag name (mm: vs bare), lowercased."""
-    if not match:
-        return ''
-    return (match.group(1) or '').lower()
-
-
 def _blank_content(piece: Any) -> bool:
     """LangChain sends None, '', or [] on reasoning-only chunks."""
     return piece is None or piece == '' or piece == []

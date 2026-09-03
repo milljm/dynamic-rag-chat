@@ -486,13 +486,6 @@ class CommonUtils():
         """ create dataclass with project attributes """
         self.attributes = StandardAttributes.attributes()
 
-    def if_importing(self):
-        """ return bool if we are importing documents """
-        return (self.opts.import_dir or
-                self.opts.import_web or
-                self.opts.import_pdf or
-                self.opts.import_txt)
-
     def sanitize_response(self, response: str, strip: bool = False)->str:
         """ remove emojis, metadata tagging, etc """
         response = self.remove_tags(response)
@@ -500,11 +493,6 @@ class CommonUtils():
         if strip:
             response = self.normalize_for_dedup(response)
         return response
-
-    @staticmethod
-    def tags_to_dict(tags: list[RAGTag])->dict:
-        """ Convert list of RAGTag objects to a dictionary """
-        return {tag.tag: tag.content for tag in tags}
 
     @staticmethod
     def history_line(msg: dict) -> str:
@@ -641,15 +629,6 @@ class CommonUtils():
             else:
                 result[key] = str(val)
         return result
-
-    @staticmethod
-    def sanitize_json_string(json_string):
-        r"""
-        Remove any characters with ASCII values less than 32, except for \n, \r, and \t
-        """
-        json_string = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', json_string)
-        json_string = re.sub(r'\n', '', json_string)
-        return json_string
 
     def removed_other(self, response: str)->str:
         """ remove other fluff that the LLM likes to add """
@@ -871,12 +850,6 @@ class CommonUtils():
             return self.chat_history_session
         self.chat_history_session = loaded
         return self.chat_history_session
-
-    def save_thinking(self, thinking_str: str)->None:
-        """ Save Thinking """
-        thinking_file = os.path.join(self.opts.vector_dir, 'thinking_debug.log')
-        with open(thinking_file, 'w', encoding='utf-8') as f:
-            f.write(thinking_str)
 
     def write_debug(self, prefix: str, message: str)->None:
         """ Write to vector_data/{prefix}_debug.log """
