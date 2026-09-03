@@ -144,16 +144,6 @@ class ContextManager(PromptManager):
             _token_cnt += len(context.split(' '))
         return int(_token_cnt * 1.3)
 
-    def no_entity(self, tags: list[RAGTag])->bool:
-        """ Bool check for entity == None """
-        entity_tag = next((item for item in tags if item.tag == self.mode), None)
-        if not entity_tag:
-            return True
-        entities = ''.join(entity_tag.content)
-        if entities.lower() in ['none', 'no ent', 'null']:
-            return True
-        return False
-
     def pre_processor(self,
                       query: str,
                       documents: dict,
