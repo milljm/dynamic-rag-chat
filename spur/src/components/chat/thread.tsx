@@ -3,6 +3,7 @@ import {
   ArrowDown,
   Bot,
   BookOpen,
+  ChevronRight,
   GitBranch,
   Globe,
   Lock,
@@ -243,17 +244,11 @@ function MessageBubble({
         )}
       >
         {isUser && turn != null && turn > 0 ? (
-          <span
-            className="pointer-events-none absolute -right-1 -top-2 z-10 rounded-md px-1.5 py-px font-mono text-[10px] tabular-nums tracking-tight text-turn"
-            style={{
-              background: "var(--spur-turn-bg)",
-              boxShadow: "var(--spur-turn-shadow)",
-            }}
-            title={`Turn ${turn}`}
-          >
+          <CornerChip side="right" title={`Turn ${turn}`}>
             {turn}
-          </span>
+          </CornerChip>
         ) : null}
+        {!isUser ? <TokenChip message={message} pending={pending} /> : null}
         {message.attachments && message.attachments.length > 0 && (
           <ul className="mb-2 space-y-1">
             {message.attachments.map((att) => (
@@ -297,21 +292,11 @@ function MessageBubble({
             {message.flags.ooc && <span>OOC</span>}
           </p>
         )}
-        {message.reasoning && (
-          <details
-            className="mb-2 text-xs text-muted-foreground"
-            onToggle={(e) => {
-              if (!(e.currentTarget as HTMLDetailsElement).open) return;
-              onInspect?.();
-              e.currentTarget.scrollIntoView({ block: "nearest" });
-            }}
-          >
-            <summary className="cursor-pointer select-none">Reasoning</summary>
-            <div className="mt-2 max-h-64 overflow-y-auto whitespace-pre-wrap leading-relaxed">
-              {message.reasoning}
-            </div>
-          </details>
-        )}
+        <ReasoningFrame
+          text={message.reasoning}
+          pending={pending}
+          onInspect={onInspect}
+        />
         {message.content ? (
           <Markdown text={message.content} />
         ) : null}
@@ -365,6 +350,107 @@ function MessageBubble({
   );
 }
 
+
+function CornerChip({
+  side,
+  title,
+  children,
+}: {
+  side: "left" | "right";
+  title?: string;
+  children: ReactNode;
+}) {
+  return (
+    <span
+      className={cn(
+        "pointer-events-none absolute -top-2 z-10 rounded-md px-1.5 py-px font-mono text-[10px] tabular-nums tracking-tight text-turn",
+        side === "right" ? "-right-1" : "-left-1",
+      )}
+      style={{
+        background: "var(--spur-turn-bg)",
+        boxShadow: "var(--spur-turn-shadow)",
+      }}
+      title={title}
+    >
+      {children}
+    </span>
+  );
+}
+
+function liveTokenCount(message: Message, pending: boolean): number {
+  if (!pending && message.metrics?.tokenCount) return message.metrics.tokenCount;
+  const text = `${message.content || ""}${message.reasoning || ""}`;
+  if (!text) return 0;
+  return Math.max(1, Math.round(text.length / 4));
+}
+
+function TokenChip({ message, pending }: { message: Message; pending: boolean }) {
+  const n = liveTokenCount(message, pending);
+  if (n <= 0) return null;
+  return (
+    <CornerChip side="left" title={`${n.toLocaleString("en-US")} tokens`}>
+      {n.toLocaleString("en-US")}
+    </CornerChip>
+  );
+}
+
+function ReasoningFrame({
+  text,
+  pending,
+  onInspect,
+}: {
+  text?: string;
+  pending: boolean;
+  onInspect?: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const autoOpened = useRef(false);
+  const skipInspect = useRef(false);
+
+  useEffect(() => {
+    if (pending && text && !autoOpened.current) {
+      autoOpened.current = true;
+      skipInspect.current = true;
+      setOpen(true);
+    }
+  }, [pending, text]);
+
+  if (!text) return null;
+
+  return (
+    <details
+      className="mb-3 overflow-hidden rounded-md border border-border/70 bg-background/50"
+      open={open}
+      onToggle={(e) => {
+        const next = (e.currentTarget as HTMLDetailsElement).open;
+        setOpen(next);
+        if (skipInspect.current) {
+          skipInspect.current = false;
+          return;
+        }
+        if (next) {
+          onInspect?.();
+          e.currentTarget.scrollIntoView({ block: "nearest" });
+        }
+      }}
+    >
+      <summary className="flex cursor-pointer list-none items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium tracking-wide text-muted-foreground select-none [&::-webkit-details-marker]:hidden">
+        <ChevronRight
+          className={cn("size-3 shrink-0 transition-transform", open && "rotate-90")}
+        />
+        Reasoning
+        {pending ? (
+          <span className="ml-auto text-[10px] font-normal tracking-normal text-muted-foreground/70">
+            live
+          </span>
+        ) : null}
+      </summary>
+      <div className="max-h-64 overflow-y-auto border-t border-border/60 px-2.5 py-2 text-xs leading-relaxed whitespace-pre-wrap text-muted-foreground">
+        {text}
+      </div>
+    </details>
+  );
+}
 
 function FootStat({
   tip,
