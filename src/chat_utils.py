@@ -207,6 +207,7 @@ class ChatOptions:
     structured_host: str | None = None
     general_host: str | None = None
     nsfw_host: str | None = None
+    rerank_host: str | None = None
 
     # ---------- Models
     model: str | None = None
@@ -221,6 +222,7 @@ class ChatOptions:
     structured_llm: str | None = None
     general_llm: str | None = None
     nsfw_llm: str | None = None
+    rerank_llm: Optional[str] = 'None'
 
     # ---------- model settings
     model_temp: float = 1.0
@@ -280,6 +282,7 @@ class ChatOptions:
     polisher_cnt: int = 1
     distrust_confidence: float = 0.6
     lookback: int | None = None
+    rerank_timeout: float = 8.0
 
     # ---------- UI ----------
     syntax_theme: str = 'coffee'
@@ -303,7 +306,9 @@ class ChatOptions:
 
         # Vision/agent/polisher/entity are opt-in. ChatOpenAI rejects model=None;
         # the rest of the code treats the string 'None' as "not configured".
-        for field_name in ('polisher_llm', 'entity_llm', 'agent_llm', 'vision_llm'):
+        for field_name in (
+            'polisher_llm', 'entity_llm', 'agent_llm', 'vision_llm', 'rerank_llm',
+        ):
             value = getattr(self, field_name)
             if value is None or str(value).strip() == '':
                 object.__setattr__(self, field_name, 'None')
@@ -322,6 +327,7 @@ class ChatOptions:
             'structured_host',
             'general_host',
             'nsfw_host',
+            'rerank_host',
         )
 
         for field_name in host_fields:
@@ -356,6 +362,8 @@ class ChatOptions:
         'pre_server':                'pre_host',
         'embedding_server':          'emb_host',
         'entity_server':             'entity_host',
+        'rerank_server':             'rerank_host',
+        'rerank_llm':                'rerank_llm',
         'nsfw_server':               'nsfw_host',
         'history_dir':               'vector_dir',
         'rag_matches':               'matches',
@@ -370,9 +378,11 @@ class ChatOptions:
         'sd_host':                   'sd_server',
         'stable_diffusion':          'sd_server',
         'sd_model':                  'sd_model',
+        'rerank_timeout':            'rerank_timeout',
     }
 
     _INT_FIELDS = {'matches', 'completion_tokens', 'chat_history', 'history_sessions'}
+    _FLOAT_FIELDS = {'rerank_timeout'}
     _IGNORED_FIELDS = {'color', 'use_rags', 'spur', 'spur_rebuild', 'serve'}
     @classmethod
     def _build(cls,
@@ -396,6 +406,8 @@ class ChatOptions:
                 continue
             if field_name in cls._INT_FIELDS:
                 value = int(value)
+            elif field_name in cls._FLOAT_FIELDS:
+                value = float(value)
             data[field_name] = value
 
         # vector directory default needs `current_dir`

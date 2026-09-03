@@ -111,6 +111,9 @@
    llm_server: https://api.openai.com/v1    # Or an OpenAI compatible API server address
    pre_server:                              # (OpenAI API capable server address)
    embedding_server:                        # (OpenAI API capable server address)
+   rerank_llm:                              # (Optional) Cross-encoder, e.g. bge-reranker
+   rerank_server:                           # (OpenAI / Edge /v1/rerank). Blank inherits llm_server.
+   rerank_timeout: 8                        # Seconds to wait on the rerank POST
    polisher_server:                         # (OpenAI API capable server address)
    entity_server:                           # (OpenAI API capable server address)
    nsfw_server:                             # (OpenAI API capable server address)

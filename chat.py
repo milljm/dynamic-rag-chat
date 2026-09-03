@@ -982,6 +982,25 @@ def _add_core_model_args(parser, D):
         default=D('emb_host'), help='Server address (default: %(default)s)',
     )
 
+    rerank = parser.add_argument_group(
+        'Rerank Model Options (optional RAG cross-encoder)',
+    )
+    rerank.add_argument(
+        '--rerank-llm', metavar='', dest='rerank_llm', type=str,
+        default=D('rerank_llm'),
+        help='Optional reranker (default: %(default)s). Blank = skip.',
+    )
+    rerank.add_argument(
+        '--rerank-server', metavar='', dest='rerank_host', type=str,
+        default=D('rerank_host'),
+        help='Rerank server (default: inherits --model-server)',
+    )
+    rerank.add_argument(
+        '--rerank-timeout', metavar='', dest='rerank_timeout', type=float,
+        default=D('rerank_timeout'),
+        help='Seconds to wait on /v1/rerank (default: %(default)s)',
+    )
+
 
 def _add_optional_model_args(parser, D):
     """Optional orchestrated models (polisher through structured)."""
