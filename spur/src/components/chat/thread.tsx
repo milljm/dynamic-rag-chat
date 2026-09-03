@@ -354,17 +354,20 @@ function MessageBubble({
 function CornerChip({
   side,
   title,
+  leaving,
   children,
 }: {
   side: "left" | "right";
   title?: string;
+  leaving?: boolean;
   children: ReactNode;
 }) {
   return (
     <span
       className={cn(
-        "pointer-events-none absolute -top-2 z-10 rounded-md px-1.5 py-px font-mono text-[10px] tabular-nums tracking-tight text-turn",
+        "pointer-events-none absolute -top-2 z-10 rounded-md px-1.5 py-px font-mono text-[10px] tabular-nums tracking-tight text-turn transition-[opacity,transform] duration-500",
         side === "right" ? "-right-1" : "-left-1",
+        leaving && "tok-chip-leave",
       )}
       style={{
         background: "var(--spur-turn-bg)",
@@ -384,12 +387,61 @@ function liveTokenCount(message: Message, pending: boolean): number {
   return Math.max(1, Math.round(text.length / 4));
 }
 
+function useTokenChip(liveTokens: number, generating: boolean) {
+  const [display, setDisplay] = useState(0);
+  const [phase, setPhase] = useState<"hidden" | "live" | "hold" | "leave">("hidden");
+  const last = useRef(0);
+  const timers = useRef<{ hold: number | null; leave: number | null }>({
+    hold: null,
+    leave: null,
+  });
+
+  function clearTimers() {
+    if (timers.current.hold != null) window.clearTimeout(timers.current.hold);
+    if (timers.current.leave != null) window.clearTimeout(timers.current.leave);
+    timers.current = { hold: null, leave: null };
+  }
+
+  useEffect(() => {
+    if (generating && liveTokens > 0) {
+      last.current = liveTokens;
+      setDisplay(liveTokens);
+      setPhase("live");
+      clearTimers();
+    }
+  }, [generating, liveTokens]);
+
+  useEffect(() => {
+    if (generating) return;
+    if (last.current <= 0) return;
+    setDisplay(last.current);
+    setPhase("hold");
+    clearTimers();
+    timers.current.hold = window.setTimeout(() => {
+      setPhase("leave");
+      timers.current.leave = window.setTimeout(() => {
+        setPhase("hidden");
+        setDisplay(0);
+        last.current = 0;
+      }, 500);
+    }, 2000);
+    return clearTimers;
+  }, [generating]);
+
+  return { display, phase };
+}
+
 function TokenChip({ message, pending }: { message: Message; pending: boolean }) {
   const n = liveTokenCount(message, pending);
-  if (n <= 0) return null;
+  const { display, phase } = useTokenChip(n, pending);
+  if (phase === "hidden" || display <= 0) return null;
   return (
-    <CornerChip side="left" title={`${n.toLocaleString("en-US")} tokens`}>
-      {n.toLocaleString("en-US")}
+    <CornerChip
+      side="left"
+      leaving={phase === "leave"}
+      title={`${display.toLocaleString("en-US")} tokens`}
+    >
+      {display.toLocaleString("en-US")}
     </CornerChip>
   );
 }
@@ -403,41 +455,18 @@ function ReasoningFrame({
   pending: boolean;
   onInspect?: () => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const autoOpened = useRef(false);
-  const skipInspect = useRef(false);
-
-  useEffect(() => {
-    if (pending && text && !autoOpened.current) {
-      autoOpened.current = true;
-      skipInspect.current = true;
-      setOpen(true);
-    }
-  }, [pending, text]);
-
   if (!text) return null;
-
   return (
     <details
-      className="mb-3 overflow-hidden rounded-md border border-border/70 bg-background/50"
-      open={open}
+      className="group mb-3 overflow-hidden rounded-md border border-border/70 bg-background/50"
       onToggle={(e) => {
-        const next = (e.currentTarget as HTMLDetailsElement).open;
-        setOpen(next);
-        if (skipInspect.current) {
-          skipInspect.current = false;
-          return;
-        }
-        if (next) {
-          onInspect?.();
-          e.currentTarget.scrollIntoView({ block: "nearest" });
-        }
+        if (!(e.currentTarget as HTMLDetailsElement).open) return;
+        onInspect?.();
+        e.currentTarget.scrollIntoView({ block: "nearest" });
       }}
     >
       <summary className="flex cursor-pointer list-none items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium tracking-wide text-muted-foreground select-none [&::-webkit-details-marker]:hidden">
-        <ChevronRight
-          className={cn("size-3 shrink-0 transition-transform", open && "rotate-90")}
-        />
+        <ChevronRight className="size-3 shrink-0 transition-transform group-open:rotate-90" />
         Reasoning
         {pending ? (
           <span className="ml-auto text-[10px] font-normal tracking-normal text-muted-foreground/70">
