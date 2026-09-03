@@ -995,6 +995,11 @@ def _add_core_model_args(parser, D):
         default=D('rerank_host'),
         help='Rerank server (default: inherits --model-server)',
     )
+    rerank.add_argument(
+        '--rerank-timeout', metavar='', dest='rerank_timeout', type=float,
+        default=D('rerank_timeout'),
+        help='Seconds to wait on /v1/rerank (default: %(default)s)',
+    )
 
 
 def _add_optional_model_args(parser, D):

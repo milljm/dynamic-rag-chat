@@ -282,6 +282,7 @@ class ChatOptions:
     polisher_cnt: int = 1
     distrust_confidence: float = 0.6
     lookback: int | None = None
+    rerank_timeout: float = 8.0
 
     # ---------- UI ----------
     syntax_theme: str = 'coffee'
@@ -377,9 +378,11 @@ class ChatOptions:
         'sd_host':                   'sd_server',
         'stable_diffusion':          'sd_server',
         'sd_model':                  'sd_model',
+        'rerank_timeout':            'rerank_timeout',
     }
 
     _INT_FIELDS = {'matches', 'completion_tokens', 'chat_history', 'history_sessions'}
+    _FLOAT_FIELDS = {'rerank_timeout'}
     _IGNORED_FIELDS = {'color', 'use_rags', 'spur', 'spur_rebuild', 'serve'}
     @classmethod
     def _build(cls,
@@ -403,6 +406,8 @@ class ChatOptions:
                 continue
             if field_name in cls._INT_FIELDS:
                 value = int(value)
+            elif field_name in cls._FLOAT_FIELDS:
+                value = float(value)
             data[field_name] = value
 
         # vector directory default needs `current_dir`

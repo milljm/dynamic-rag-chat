@@ -9,7 +9,7 @@ from uuid import uuid4
 from typing import Any, List
 from rank_bm25 import BM25Okapi
 from pydantic import ConfigDict, Field
-from langchain_classic.retrievers import EnsembleRetriever, ParentDocumentRetriever
+from langchain_classic.retrievers import ParentDocumentRetriever
 from langchain_classic.storage import LocalFileStore, create_kv_docstore
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
@@ -41,13 +41,18 @@ class BM25Retriever(BaseRetriever):
     docs: list[Document] = Field(default_factory=list)
     k: int = 4
 
+    @staticmethod
+    def tokenize(text: str) -> list[str]:
+        """Case-fold alphanumerics; 'Login,' and 'login' are the same token."""
+        return re.findall(r'\w+', (text or '').lower())
+
     @classmethod
     def from_documents(cls, documents: list[Document], **kwargs) -> 'BM25Retriever':
         """Build a BM25 index over Document.page_content."""
         docs = list(documents)
         if not docs:
             return cls(vectorizer=None, docs=[], **kwargs)
-        tokenized = [d.page_content.split() for d in docs]
+        tokenized = [cls.tokenize(d.page_content) for d in docs]
         return cls(vectorizer=BM25Okapi(tokenized), docs=docs, **kwargs)
 
     def _get_relevant_documents(self, query: str, *, run_manager=None) -> list[Document]:
@@ -55,7 +60,7 @@ class BM25Retriever(BaseRetriever):
         del run_manager
         if not self.docs:
             return []
-        return list(self.vectorizer.get_top_n(query.split(), self.docs, n=self.k))
+        return list(self.vectorizer.get_top_n(self.tokenize(query), self.docs, n=self.k))
 
 class RAG():
     """
@@ -167,6 +172,7 @@ class RAG():
             texts,
             keep,
             api_key=getattr(self.opts, 'api_key', 'none') or 'none',
+            timeout=float(getattr(self.opts, 'rerank_timeout', 8.0) or 8.0),
         )
         if self.opts.debug and self.console:
             self.console.print(
@@ -381,31 +387,11 @@ class RAG():
         self._chroma[collection] = chroma
         return chroma
 
-    def _ensemble_retriever(self, retriever: list[object],
-                                  weights: list[float],
-                                  query: str)->list[Document]:
-        """
-        ### Ensemble Retriever
-
-        Combined search results with weights for each retriever object.
-
-        *Key init args:*
-            .. code-block:: python
-                retrievers: list[retrievers]  # a list of LangChain retrievers
-                weights: list[float]          # weights for each retriever supplied
-                query: str                    # the users query
-        *Returns:*
-            .. code-block:: python
-                return list[Document]
-        """
-        ensemble_retriever = EnsembleRetriever(retrievers=retriever, weights=weights)
-        return ensemble_retriever.invoke(query)
-
     def _bm25_retriever(self, documents: list[Document])->BM25Retriever:
         """
         ### BM25 Retriever
 
-        Returns a BM25 retriever object for use with ensemble_retriever.
+        Returns a BM25 retriever object.
 
         *Key init args:*
             .. code-block:: python
@@ -424,7 +410,7 @@ class RAG():
         """
         ### Chroma Retriever
 
-        Returns a Chroma retriever object for use with ensemble_retriever.
+        Returns a Chroma retriever object.
 
         *Key init args:*
             .. code-block:: python
@@ -469,25 +455,48 @@ class RAG():
             ids.append(pid)
         return ids
 
-    def _parents_of(self, children: list[Document], collection: str) -> list[Document]:
-        """Load parent docs for these children. No extra embed_query."""
+    def _promote_parents(self, children: list[Document], collection: str) -> list[Document]:
+        """Swap winners for their parent docs. One parent per doc_id.
+
+        Rerank (and BM25) score *children*. Promoting after the cut stops a
+        parent from crowding siblings out of ``matches``.
+        """
+        parents = {}
         ids = self._parent_ids(children)
-        if not ids:
-            return []
-        try:
-            got = self._docstore(collection).mget(ids)
-        except Exception:  # pylint: disable=broad-exception-caught
-            return []
-        return [p for p in got if p is not None]
+        if ids:
+            try:
+                got = self._docstore(collection).mget(ids)
+            except Exception:  # pylint: disable=broad-exception-caught
+                got = []
+            for pid, parent in zip(ids, got or []):
+                if parent is not None:
+                    parents[pid] = parent
+        out: list[Document] = []
+        seen: set[str] = set()
+        for child in children:
+            meta = getattr(child, 'metadata', None) or {}
+            pid = meta.get('doc_id')
+            if pid and pid in parents:
+                if pid in seen:
+                    continue
+                seen.add(pid)
+                out.append(parents[pid])
+                continue
+            key = f'child:{id(child)}'
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(child)
+        return out
 
     def retrieve(self, query: str, collection: str, metadatas: dict = None) -> list[Document]:
-        """Similarity, then Python-side field membership, then BM25 + parents.
+        """Similarity, then Python-side field membership, then BM25.
 
         List tags are stored as comma-joined strings, so Chroma `$in` never
         matches a single name. Filter those in Python instead.
 
-        Parents are loaded from child ``doc_id`` metadata — a second
-        ParentDocumentRetriever.invoke would embed the query again.
+        Cross-encoder rerank (optional) cuts to ``matches``, then each winner
+        is swapped for its parent document when one exists.
         """
         if not self._embeddings_ready() or self.opts.matches == 0:
             return []
@@ -503,12 +512,12 @@ class RAG():
             if not documents:
                 return documents
             documents = self._bm25_retriever(documents).invoke(query)
-            documents.extend(self._parents_of(documents, collection))
         except ValueError:
             if metadatas:
                 return self.retrieve(query, collection, metadatas=None)
             return []
-        return self._apply_rerank(query, documents)
+        documents = self._apply_rerank(query, documents)
+        return self._promote_parents(documents, collection)
 
     def store_data(self, data,
                          tags_metadata: list[RAGTag[str,str|list]] = None,
