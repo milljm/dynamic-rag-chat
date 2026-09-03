@@ -13,16 +13,18 @@ export function ModeToggle({
   branchId,
   mode,
   onChange,
+  onEditPrompt,
 }: {
   branchId: string;
   mode: Mode;
   onChange: (mode: Mode) => void;
+  onEditPrompt?: (kind: "system" | "human") => void;
 }) {
   const locked = isLockedBranch(branchId);
   const effective = modeOf({ id: branchId, mode });
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-1">
       <div
         role="radiogroup"
         aria-label="Conversation mode"
@@ -46,6 +48,18 @@ export function ModeToggle({
           label="Story"
         />
       </div>
+      {onEditPrompt && (
+        <div className="grid gap-px">
+          <PromptEditButton
+            label="Edit system prompt"
+            onClick={() => onEditPrompt("system")}
+          />
+          <PromptEditButton
+            label="Edit human prompt"
+            onClick={() => onEditPrompt("human")}
+          />
+        </div>
+      )}
       <p className="flex items-start gap-1.5 text-xs leading-snug text-muted-foreground">
         {locked ? (
           <>
@@ -57,6 +71,24 @@ export function ModeToggle({
         )}
       </p>
     </div>
+  );
+}
+
+function PromptEditButton({
+  label,
+  onClick,
+}: {
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="h-6 w-full rounded-sm bg-secondary/70 px-2 text-[10px] font-medium tracking-wide text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+    >
+      {label}
+    </button>
   );
 }
 

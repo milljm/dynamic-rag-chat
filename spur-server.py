@@ -955,6 +955,77 @@ def api_generated(name: str):
     return FileResponse(path, media_type='image/png', filename=safe)
 
 
+def _reload_all_prompts(chat: Chat) -> None:
+    renderer = chat.session.renderer
+    renderer.prompts.reload()
+    renderer.build_prompts()
+    ctx = chat.session.context
+    ctx.prompts.reload()
+    ctx.build_prompts()
+
+
+@app.get('/api/prompts')
+def api_prompts_get(mode: str = 'assistant', kind: str = 'system') -> JSONResponse:
+    """The plot system/human file Spur will send this flavor."""
+    chat = get_chat()
+    try:
+        path = chat.session.renderer.prompts.plot_file(mode, kind)
+    except ValueError as exc:
+        return JSONResponse({'ok': False, 'error': str(exc)}, status_code=400)
+    if not os.path.isfile(path):
+        return JSONResponse(
+            {'ok': False, 'error': 'Prompt file missing', 'path': path},
+            status_code=404,
+        )
+    with open(path, 'r', encoding='utf-8') as handle:
+        content = handle.read()
+    return JSONResponse({
+        'ok': True,
+        'mode': mode,
+        'kind': kind,
+        'path': os.path.relpath(path, ROOT),
+        'content': content,
+    })
+
+
+@app.put('/api/prompts')
+async def api_prompts_save(request: Request) -> JSONResponse:
+    """Write a plot prompt and reload PromptManager without restarting."""
+    if _streams > 0:
+        return JSONResponse(
+            {'ok': False, 'error': 'Wait for the current turn to finish.'},
+            status_code=409,
+        )
+    body = await request.json()
+    mode = str(body.get('mode') or '')
+    kind = str(body.get('kind') or '')
+    content = body.get('content')
+    if not isinstance(content, str):
+        return JSONResponse({'ok': False, 'error': 'Need content.'}, status_code=400)
+    if len(content) > 400_000:
+        return JSONResponse({'ok': False, 'error': 'Prompt is too large.'}, status_code=400)
+    chat = get_chat()
+    try:
+        path = chat.session.renderer.prompts.plot_file(mode, kind)
+    except ValueError as exc:
+        return JSONResponse({'ok': False, 'error': str(exc)}, status_code=400)
+    prompts_root = os.path.abspath(os.path.join(ROOT, 'prompts'))
+    real = os.path.abspath(path)
+    if os.path.commonpath([prompts_root, real]) != prompts_root:
+        return JSONResponse({'ok': False, 'error': 'Refusing that path.'}, status_code=400)
+    os.makedirs(os.path.dirname(real), exist_ok=True)
+    with open(real, 'w', encoding='utf-8') as handle:
+        handle.write(content)
+    _reload_all_prompts(chat)
+    return JSONResponse({
+        'ok': True,
+        'mode': mode,
+        'kind': kind,
+        'path': os.path.relpath(real, ROOT),
+        'message': 'Saved. Next turn uses this prompt.',
+    })
+
+
 def _prepare_chat_documents(chat, body: dict) -> tuple[dict, list]:
     """Run prepare_turn / no-context and stamp uploads, includes, agent flags."""
     prompt = str(body.get('text') or '')

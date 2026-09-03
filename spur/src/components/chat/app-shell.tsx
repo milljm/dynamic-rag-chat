@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { Composer } from "./composer";
+import { PromptEditor } from "./prompt-editor";
 import { Sidebar } from "./sidebar";
 import { Thread } from "./thread";
 
@@ -19,6 +20,7 @@ export function AppShell() {
   const ready = useHydrateChat();
   const { send, stop, regenerate, illustrate, streaming } = useSend();
   const [navOpen, setNavOpen] = useState(false);
+  const [promptKind, setPromptKind] = useState<"system" | "human" | null>(null);
   const sidebar = useSidebarLayout();
 
   if (!ready) {
@@ -50,7 +52,7 @@ export function AppShell() {
           }}
         >
           <div className="h-full min-w-0 overflow-hidden" style={{ width: sidebar.width }}>
-            <Sidebar streaming={streaming} onCollapse={() => sidebar.setOpen(false)} />
+            <Sidebar streaming={streaming} onCollapse={() => sidebar.setOpen(false)} onEditPrompt={setPromptKind} />
           </div>
           {sidebar.open && (
             <div
@@ -110,7 +112,7 @@ export function AppShell() {
                   <X />
                 </Button>
               </div>
-              <Sidebar streaming={streaming} onNavigate={() => setNavOpen(false)} />
+              <Sidebar streaming={streaming} onNavigate={() => setNavOpen(false)} onEditPrompt={setPromptKind} />
             </div>
           </div>
         )}
@@ -127,19 +129,25 @@ export function AppShell() {
             </Button>
             <span className="font-display text-lg italic">Spur</span>
           </div>
-          <Thread
-            streaming={streaming}
-            onRevealSidebar={
-              sidebar.open ? undefined : () => sidebar.setOpen(true)
-            }
-          />
-          <Composer
-            streaming={streaming}
-            onSend={send}
-            onStop={stop}
-            onRegenerate={regenerate}
-            onIllustrate={illustrate}
-          />
+          {promptKind ? (
+            <PromptEditor kind={promptKind} onClose={() => setPromptKind(null)} />
+          ) : (
+            <>
+              <Thread
+                streaming={streaming}
+                onRevealSidebar={
+                  sidebar.open ? undefined : () => sidebar.setOpen(true)
+                }
+              />
+              <Composer
+                streaming={streaming}
+                onSend={send}
+                onStop={stop}
+                onRegenerate={regenerate}
+                onIllustrate={illustrate}
+              />
+            </>
+          )}
         </div>
       </div>
       <ThemeToaster />

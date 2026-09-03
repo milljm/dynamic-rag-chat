@@ -186,3 +186,43 @@ export async function listDocuments(): Promise<GoldDocument[]> {
 export async function deleteDocument(name: string): Promise<RemoteOp> {
   return postOp("/api/documents/delete", { name });
 }
+
+export type PromptKind = "system" | "human";
+export type PromptSlot = {
+  ok: boolean;
+  mode: Mode;
+  kind: PromptKind;
+  path: string;
+  content: string;
+  error?: string;
+  message?: string;
+};
+
+export async function fetchPrompt(
+  mode: Mode,
+  kind: PromptKind,
+): Promise<PromptSlot> {
+  const res = await fetch(
+    url(`/api/prompts?mode=${encodeURIComponent(mode)}&kind=${encodeURIComponent(kind)}`),
+  );
+  const json = (await res.json()) as PromptSlot;
+  json.ok = Boolean(json.ok);
+  if (!res.ok && !json.error) json.error = `Request failed (${res.status})`;
+  return json;
+}
+
+export async function savePrompt(
+  mode: Mode,
+  kind: PromptKind,
+  content: string,
+): Promise<PromptSlot> {
+  const res = await fetch(url("/api/prompts"), {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ mode, kind, content }),
+  });
+  const json = (await res.json()) as PromptSlot;
+  json.ok = Boolean(json.ok);
+  if (!res.ok && !json.error) json.error = `Request failed (${res.status})`;
+  return json;
+}
