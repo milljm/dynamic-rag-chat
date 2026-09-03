@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 from types import SimpleNamespace
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 try:
@@ -67,6 +68,34 @@ class RagManagerTest(unittest.TestCase):
             rag._forget_collection('col-one')
             third = rag._vector_store('col-one')
             self.assertIsNot(first, third)
+
+    def test_recall_k_widens_when_reranker_set(self):
+        rag = RAG(None, None, _opts(
+            matches=1,
+            rerank_llm='bge-reranker',
+            rerank_host='http://127.0.0.1:8080/v1',
+        ))
+        self.assertEqual(rag._recall_k(False), 24)
+        self.assertGreaterEqual(rag._recall_k(True, 2), 24)
+
+    def test_recall_k_stays_matches_without_reranker(self):
+        rag = RAG(None, None, _opts(matches=1, rerank_llm='None', rerank_host=''))
+        self.assertEqual(rag._recall_k(False), 1)
+
+    def test_apply_rerank_reorders(self):
+        rag = RAG(None, None, _opts(
+            matches=2,
+            rerank_llm='bge',
+            rerank_host='http://x/v1',
+        ))
+        docs = [
+            Document(page_content='noise'),
+            Document(page_content='hit'),
+            Document(page_content='other'),
+        ]
+        with patch('rag_manager.post_rerank', return_value=[1, 0]):
+            out = rag._apply_rerank('q', docs)
+        self.assertEqual([d.page_content for d in out], ['hit', 'noise'])
 
 
 if __name__ == '__main__':

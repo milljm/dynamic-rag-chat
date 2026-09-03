@@ -40,6 +40,8 @@ export const SETTINGS_KEYS = [
   "polisher_server",
   "entity_llm",
   "entity_server",
+  "rerank_llm",
+  "rerank_server",
   "tavily_key",
   "sd_server",
   "sd_model",
@@ -66,6 +68,12 @@ export const ROUTE_GROUPS: {
       { id: "general", label: "General", llm: "general_llm", server: "general_server" },
       { id: "coder", label: "Coder", llm: "coder_llm", server: "coder_server" },
       { id: "structured", label: "Structured", llm: "structured_llm", server: "structured_server" },
+    ],
+  },
+  {
+    title: "RAG:",
+    rows: [
+      { id: "rerank", label: "Rerank", llm: "rerank_llm", server: "rerank_server" },
     ],
   },
   {

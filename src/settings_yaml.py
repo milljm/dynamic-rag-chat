@@ -23,6 +23,7 @@ ROUTE_ROWS: tuple[tuple[str, str, str], ...] = (
     ('nsfw', 'nsfw_llm', 'nsfw_server'),
     ('polisher', 'polisher_llm', 'polisher_server'),
     ('entity', 'entity_llm', 'entity_server'),
+    ('rerank', 'rerank_llm', 'rerank_server'),
     ('pre', 'pre_llm', 'pre_server'),
     ('embedding', 'embedding_llm', 'embedding_server'),
 )

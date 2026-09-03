@@ -210,7 +210,9 @@ Chunking is parent/child:
 
 **Required (3):** generator (`--model`), pre-conditioner (`--pre-llm`), embeddings (`--embedding-llm`).
 
-**Optional routes** (only if configured): vision, agent/web-search, casual, general, coder, structured. Story extras: polisher, NSFW, entity/NPC writer.
+**Optional routes** (only if configured): vision, agent/web-search, casual, general, coder, structured, **rerank**. Story extras: polisher, NSFW, entity/NPC writer.
+
+Rerank (`--rerank-llm`, Edge `POST /v1/rerank`): pull a wider net, score `(query, passage)` pairs, keep `--rag-matches`. Unset = today's embed+BM25 only. TUI and Spur share this.
 
 You do not need seven models running. Three is enough.
 

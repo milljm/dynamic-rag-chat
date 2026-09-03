@@ -142,6 +142,8 @@ def _opts_snapshot(opts: ChatOptions) -> dict[str, str]:
         'polisher_server': blank(opts.polisher_host),
         'entity_llm': blank(opts.entity_llm),
         'entity_server': blank(opts.entity_host),
+        'rerank_llm': blank(getattr(opts, 'rerank_llm', '')),
+        'rerank_server': blank(getattr(opts, 'rerank_host', '')),
         'tavily_key': blank(opts.tavily_key),
         'sd_server': blank(getattr(opts, 'sd_server', '')),
         'sd_model': blank(getattr(opts, 'sd_model', '')),

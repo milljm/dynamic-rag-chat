@@ -21,10 +21,14 @@ try:
     from .chat_utils import CommonUtils, ChatOptions, RAGTag  # for Type Hinting
     from .filter_builder import metadata_matches
     from .attachment_store import get_attachment, put_attachment, delete_attachment
+    from .rerank import configured as rerank_configured
+    from .rerank import post_rerank, reorder as rerank_reorder
 except ImportError:
     from chat_utils import CommonUtils, ChatOptions, RAGTag
     from filter_builder import metadata_matches
     from attachment_store import get_attachment, put_attachment, delete_attachment
+    from rerank import configured as rerank_configured
+    from rerank import post_rerank, reorder as rerank_reorder
 # Silence initial RAG database being empty
 logging.getLogger('chromadb').setLevel(logging.ERROR)
 
@@ -137,6 +141,42 @@ class RAG():
     def _embeddings_ready(self) -> bool:
         """False until Settings fills in an embedding server."""
         return self.embeddings is not None
+
+    def _rerank_ready(self) -> bool:
+        return rerank_configured(self.opts)
+
+    def _recall_k(self, tagged: bool, n_values: int = 1) -> int:
+        """Wide net when a reranker will cut back to ``matches``."""
+        k = max(int(self.opts.matches), 0)
+        if tagged:
+            k = max(k * 4 * max(n_values, 1), 8)
+        if self._rerank_ready() and k > 0:
+            return min(50, max(k, int(self.opts.matches) * 12, 24))
+        return k
+
+    def _apply_rerank(self, query: str, documents: list[Document]) -> list[Document]:
+        """Cross-encoder reorder. On failure, keep the first ``matches``."""
+        keep = max(int(self.opts.matches), 0)
+        if not documents or keep <= 0 or not self._rerank_ready():
+            return documents
+        texts = [d.page_content[:1500] for d in documents]
+        order = post_rerank(
+            self.opts.rerank_host,
+            self.opts.rerank_llm,
+            query,
+            texts,
+            keep,
+            api_key=getattr(self.opts, 'api_key', 'none') or 'none',
+        )
+        if self.opts.debug and self.console:
+            self.console.print(
+                f'Rerank {len(documents)} → {keep} ({"ok" if order else "skip"})',
+                style=f'color({self.opts.color})',
+                highlight=False,
+            )
+        if not order:
+            return documents if len(documents) <= keep else documents[:keep]
+        return rerank_reorder(documents, order, keep)
 
     @staticmethod
     def _normalize_collection_name(name: str,
@@ -375,7 +415,9 @@ class RAG():
                 return retrievers
         """
         _retriever = BM25Retriever.from_documents(documents)
-        _retriever.k = self.opts.matches
+        _retriever.k = (
+            len(documents) if self._rerank_ready() else self.opts.matches
+        )
         return _retriever
 
     def _chroma_retriever(self, collection: str, kwargs)->BaseRetriever:
@@ -450,9 +492,7 @@ class RAG():
         if not self._embeddings_ready() or self.opts.matches == 0:
             return []
         field, values = self._filter_spec(metadatas)
-        k = self.opts.matches
-        if values:
-            k = max(k * 4 * max(len(values), 1), 8)
+        k = self._recall_k(bool(values), len(values) if values else 1)
         try:
             documents = self._similar_docs(query, collection, k)
             if values:
@@ -468,7 +508,7 @@ class RAG():
             if metadatas:
                 return self.retrieve(query, collection, metadatas=None)
             return []
-        return documents
+        return self._apply_rerank(query, documents)
 
     def store_data(self, data,
                          tags_metadata: list[RAGTag[str,str|list]] = None,
