@@ -103,11 +103,13 @@ export function Sidebar({
   onNavigate,
   onCollapse,
   streaming = false,
+  onEditPrompt,
 }: {
   className?: string;
   onNavigate?: () => void;
   onCollapse?: () => void;
   streaming?: boolean;
+  onEditPrompt?: () => void;
 }) {
   const currentId = useChatStore((s) => s.currentId);
   const branches = useChatStore((s) => s.branches);
@@ -184,6 +186,7 @@ export function Sidebar({
                 const ok = setMode(mode);
                 if (!ok) toast.message("Mode is locked on this branch.");
               }}
+              onEditPrompt={usesChatPy() ? onEditPrompt : undefined}
             />
           )}
         </SidebarSection>

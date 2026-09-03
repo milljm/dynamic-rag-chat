@@ -843,6 +843,7 @@ class ContextManager(PromptManager):
         if direction != 'query':
             return self.post_process(documents)
 
+        self.prompts.reload()
         history = documents['history']
         branch = self._active_branch(history)
         if not self.opts.assistant_mode:

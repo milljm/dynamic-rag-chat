@@ -1,8 +1,11 @@
 """ An inherited class for handling prompts """
 import os
 import sys
-from .chat_utils import ChatOptions # For Type Hinting
-from .sd_client import has_generated_images
+# ChatOptions is a type hint only — avoid importing chat_utils at module load.
+try:
+    from .sd_client import has_generated_images
+except ImportError:
+    from sd_client import has_generated_images
 
 # pylint: disable=no-member  # (build_prompts construct members on class init)
 class PromptManager():
@@ -12,7 +15,7 @@ class PromptManager():
     Most can be handled by a default. But This class is here so we can support possibly\n
     more nuanced LLMs.
     """
-    def __init__(self, console, current_dir, args: ChatOptions, prompt_model: str = 'default'):
+    def __init__(self, console, current_dir, args, prompt_model: str = 'default'):
         self.console = console
         self.assistant_prompt = args.assistant_mode
         self.args = args
@@ -53,9 +56,107 @@ class PromptManager():
             setattr(self, f'{prompt_key}_human',
                     self.get_prompt(f'{prompt_dir}_human.md'))
 
+    def overlay_root(self) -> str:
+        """User prompt edits live here so repo templates stay intact."""
+        vd = getattr(self.args, 'vector_dir', None) or ''
+        if not vd:
+            return ''
+        return os.path.join(os.path.abspath(vd), 'prompt_overrides')
+
+    def overlay_path(self, stock_path: str) -> str:
+        root = self.overlay_root()
+        if not root or not stock_path:
+            return ''
+        return os.path.join(root, os.path.basename(stock_path))
+
+    def reload(self) -> None:
+        """Re-read prompt files from disk (Spur editor / live edits)."""
+        self.build_prompts()
+
+    def plot_file(self, flavor: str, kind: str) -> str:
+        """Absolute path for the plot system/human file Spur should edit.
+
+        Assistant always uses the nostory pair. Story uses the model-matched
+        file when it exists, otherwise plot_prompt_default_*.md.
+        Independent of the live assistant_mode flag so the editor can open
+        the other flavor without switching branches.
+        """
+        if flavor not in ('assistant', 'story') or kind not in ('system', 'human'):
+            raise ValueError('Unknown prompt slot')
+        if flavor == 'assistant':
+            stem = 'plot_prompt_nostory'
+        else:
+            model = next(
+                (name for name in ('gemma', 'llama', 'qwen', 'deepseek', 'mixtral')
+                 if name in (self.prompt_model or '').lower()),
+                'default',
+            )
+            stem = f'plot_prompt_{model}'
+        path = os.path.abspath(
+            os.path.join(self.current_dir, 'prompts', f'{stem}_{kind}.md')
+        )
+        if os.path.isfile(path):
+            return path
+        if flavor == 'story' and 'default' not in stem:
+            fallback = os.path.abspath(
+                os.path.join(self.current_dir, 'prompts', f'plot_prompt_default_{kind}.md')
+            )
+            if os.path.isfile(fallback):
+                return fallback
+        return path
+
+    def read_plot(self, flavor: str, kind: str) -> dict:
+        """Stock file plus optional overlay contents for the Spur editor."""
+        stock = self.plot_file(flavor, kind)
+        overlay = self.overlay_path(stock)
+        if overlay and os.path.isfile(overlay):
+            with open(overlay, 'r', encoding='utf-8') as handle:
+                content = handle.read()
+            return {
+                'stock': stock,
+                'path': overlay,
+                'overlaid': True,
+                'content': content,
+            }
+        if not os.path.isfile(stock):
+            raise FileNotFoundError(stock)
+        with open(stock, 'r', encoding='utf-8') as handle:
+            content = handle.read()
+        return {
+            'stock': stock,
+            'path': stock,
+            'overlaid': False,
+            'content': content,
+        }
+
+    def write_plot(self, flavor: str, kind: str, content: str) -> str:
+        """Write an overlay. Never clobbers the shipped template."""
+        if kind != 'system':
+            raise ValueError('Human prompt is not editable')
+        stock = self.plot_file(flavor, kind)
+        overlay = self.overlay_path(stock)
+        if not overlay:
+            raise RuntimeError('No vector_dir for prompt overrides')
+        os.makedirs(os.path.dirname(overlay), exist_ok=True)
+        with open(overlay, 'w', encoding='utf-8') as handle:
+            handle.write(content)
+        return overlay
+
+    def restore_plot(self, flavor: str, kind: str) -> dict:
+        """Drop the overlay so the shipped template is used again."""
+        stock = self.plot_file(flavor, kind)
+        overlay = self.overlay_path(stock)
+        if overlay and os.path.isfile(overlay):
+            os.remove(overlay)
+        return self.read_plot(flavor, kind)
+
     def get_prompt(self, path):
         """ Keep the prompts as files for easier manipulation """
         self.model = self._match_model(self.prompt_model)
+        overlay = self.overlay_path(path)
+        if overlay and os.path.isfile(overlay):
+            with open(overlay, 'r', encoding='utf-8') as prompt:
+                return prompt.read()
         if os.path.exists(path):
             with open(path, 'r', encoding='utf-8') as prompt:
                 return prompt.read()

@@ -807,6 +807,7 @@ class RenderWindow(PromptManager):
                      polish: bool = False)->list[Document]:
         """ return formatted message to be sent to LLM stream """
         prompts = self.prompts
+        prompts.reload()
         self._note_last_image(documents)
         if polish:
             self.llm = self.orchestrator.get_model('polisher')
