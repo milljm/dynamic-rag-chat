@@ -260,6 +260,45 @@ function renderListTree(items: ListItem[], ctx: MdCtx, key: number): ReactNode {
   return <div key={key}>{out}</div>;
 }
 
+function collectHtmlDl(lines: string[], start: number): { html: string; consumed: number } | null {
+  const first = lines[start] ?? "";
+  if (!/^\s*<dl\b/i.test(first)) return null;
+  if (/<\/dl>/i.test(first)) return { html: first, consumed: 1 };
+  const chunk = [first];
+  let i = start + 1;
+  while (i < lines.length) {
+    chunk.push(lines[i] ?? "");
+    if (/<\/dl>/i.test(lines[i] ?? "")) break;
+    i += 1;
+  }
+  return { html: chunk.join("\n"), consumed: i - start + 1 };
+}
+
+function renderHtmlDl(html: string, ctx: MdCtx, key: number): ReactNode {
+  const items: { dt: string; dds: string[] }[] = [];
+  const re = /<dt\b[^>]*>([\s\S]*?)<\/dt>|<dd\b[^>]*>([\s\S]*?)<\/dd>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html))) {
+    if (m[1] != null) items.push({ dt: m[1].trim(), dds: [] });
+    else if (m[2] != null && items.length) items[items.length - 1].dds.push(m[2].trim());
+  }
+  if (!items.length) return null;
+  return (
+    <dl key={`hdl${key}`} className="my-2 space-y-1">
+      {items.map((row, idx) => (
+        <Fragment key={idx}>
+          <dt className="font-medium text-foreground">{inline(row.dt, ctx)}</dt>
+          {row.dds.map((dd, j) => (
+            <dd key={j} className="mb-2 ml-4 text-muted-foreground">
+              {inline(dd, ctx)}
+            </dd>
+          ))}
+        </Fragment>
+      ))}
+    </dl>
+  );
+}
+
 
 function MdLink({
   href,
@@ -540,6 +579,14 @@ function renderProse(block: string, nodes: ReactNode[], ctx: MdCtx) {
   };
 
   for (let i = 0; i < lines.length; i++) {
+    const dl = collectHtmlDl(lines, i);
+    if (dl) {
+      flushAll();
+      const node = renderHtmlDl(dl.html, ctx, nodes.length);
+      if (node) nodes.push(node);
+      i += dl.consumed - 1;
+      continue;
+    }
     const table = parseTableAt(lines, i);
     if (table) {
       flushAll();
