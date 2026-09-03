@@ -3,6 +3,9 @@ import re
 from langchain_openai import ChatOpenAI
 from .chat_utils import ChatOptions, RAGTag # For Type Hinting
 from .sd_client import sd_enabled
+from .think_tags import install_reasoning_patches
+
+install_reasoning_patches()
 
 MAX_AGENT_CALLS = 2
 # Tagger often scores these 1.0 anyway; force a search when the query is live.

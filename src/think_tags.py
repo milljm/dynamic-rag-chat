@@ -18,7 +18,7 @@ Reset the parser when the user sends a new turn.
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import Any, Mapping
 
 # Namespaced (MiniMax). Do not make `mm:` optional — that is what used to
 # treat an inner <think> as a real tag.
@@ -49,20 +49,99 @@ def _blank_content(piece: Any) -> bool:
     return piece is None or piece == '' or piece == []
 
 
+def _delta_reasoning(delta: Any) -> str:
+    """Pull reasoning_content off an OpenAI delta dict or pydantic object."""
+    if delta is None:
+        return ''
+    if not isinstance(delta, dict):
+        extra = getattr(delta, 'reasoning_content', None) or getattr(
+            delta, 'reasoning', None
+        )
+        if not extra:
+            dumped = getattr(delta, 'model_extra', None) or {}
+            if isinstance(dumped, dict):
+                extra = dumped.get('reasoning_content') or dumped.get('reasoning')
+        if not extra:
+            try:
+                dumped = delta.model_dump()
+            except Exception:  # pylint: disable=broad-exception-caught
+                dumped = None
+            if isinstance(dumped, dict):
+                extra = dumped.get('reasoning_content') or dumped.get('reasoning')
+        return extra if isinstance(extra, str) else ''
+    extra = delta.get('reasoning_content') or delta.get('reasoning') or ''
+    return extra if isinstance(extra, str) else ''
+
+
+def reasoning_from_openai_chunk(chunk: Any) -> str:
+    """Read delta.reasoning_content from a Chat Completions chunk dict."""
+    if chunk is None:
+        return ''
+    if not isinstance(chunk, dict):
+        try:
+            chunk = chunk.model_dump()
+        except Exception:  # pylint: disable=broad-exception-caught
+            return _delta_reasoning(getattr(chunk, 'delta', None))
+    if not isinstance(chunk, dict):
+        return ''
+    choices = chunk.get('choices') or []
+    if not choices or not isinstance(choices[0], dict):
+        return _delta_reasoning(chunk)
+    return _delta_reasoning(choices[0].get('delta'))
+
+
+def _as_text(value: Any) -> str:
+    if value is None:
+        return ''
+    if isinstance(value, str):
+        return value
+    return str(value)
+
+
+def _split_content_parts(piece: Any) -> tuple[str, str]:
+    """LangChain v1 blocks: type=text vs type=reasoning."""
+    if not isinstance(piece, list):
+        return _as_text(piece), ''
+    texts: list[str] = []
+    thoughts: list[str] = []
+    for part in piece:
+        if isinstance(part, dict):
+            typ = str(part.get('type') or '').lower()
+            body = _as_text(
+                part.get('text') or part.get('reasoning') or part.get('content')
+            )
+            if typ in {'reasoning', 'thinking', 'thought', 'reasoning_content'}:
+                thoughts.append(body)
+            else:
+                texts.append(body)
+        elif part is not None:
+            texts.append(_as_text(part))
+    return ''.join(texts), ''.join(thoughts)
+
+
 def chunk_text(chunk: Any) -> tuple[str, str]:
     """Return (content, reasoning_extra) even when LangChain sends content=None."""
     piece = getattr(chunk, 'content', None)
+    extra = ''
     if _blank_content(piece):
         piece = ''
+    elif isinstance(piece, list):
+        piece, extra = _split_content_parts(piece)
     elif not isinstance(piece, str):
         piece = str(piece)
-    extra = getattr(chunk, 'reasoning_content', None)
-    if not extra:
+    found = getattr(chunk, 'reasoning_content', None)
+    if not found:
         kwargs = getattr(chunk, 'additional_kwargs', None) or {}
         if isinstance(kwargs, dict):
-            extra = kwargs.get('reasoning_content') or kwargs.get('reasoning')
-    if not isinstance(extra, str):
-        extra = '' if extra is None else str(extra)
+            found = kwargs.get('reasoning_content') or kwargs.get('reasoning')
+    if not found:
+        meta = getattr(chunk, 'response_metadata', None) or {}
+        if isinstance(meta, dict):
+            found = meta.get('reasoning_content') or meta.get('reasoning')
+    if isinstance(found, str) and found:
+        extra = found + extra
+    elif found and not extra:
+        extra = str(found)
     return piece, extra
 
 
@@ -168,3 +247,97 @@ class ThinkFeed:
         if extra:
             thought = extra + thought
         return visible, thought
+
+
+def _attach_reasoning(message: Any, extra: str) -> None:
+    if not extra or message is None:
+        return
+    kwargs = getattr(message, 'additional_kwargs', None)
+    if not isinstance(kwargs, dict):
+        try:
+            message.additional_kwargs = {'reasoning_content': extra}
+        except Exception:  # pylint: disable=broad-exception-caught
+            return
+        return
+    prev = kwargs.get('reasoning_content') or ''
+    if extra not in prev:
+        kwargs['reasoning_content'] = prev + extra if prev else extra
+
+
+def _patch_openai_choice_delta() -> None:
+    """Keep non-OpenAI delta fields (reasoning_content) on the pydantic model."""
+    try:
+        from openai.types.chat.chat_completion_chunk import ChoiceDelta
+    except Exception:  # pylint: disable=broad-exception-caught
+        return
+    if getattr(ChoiceDelta, '_spur_reasoning', False):
+        return
+    try:
+        cfg = ChoiceDelta.model_config
+        extra = cfg.get('extra') if hasattr(cfg, 'get') else getattr(cfg, 'extra', None)
+        if extra != 'allow':
+            if isinstance(cfg, dict):
+                cfg['extra'] = 'allow'
+            else:
+                try:
+                    cfg.extra = 'allow'
+                except Exception:  # pylint: disable=broad-exception-caught
+                    pass
+            if hasattr(ChoiceDelta, 'model_rebuild'):
+                ChoiceDelta.model_rebuild(force=True)
+        ChoiceDelta._spur_reasoning = True  # type: ignore[attr-defined]
+    except Exception:  # pylint: disable=broad-exception-caught
+        pass
+
+
+def _patch_langchain_delta() -> None:
+    """LangChain drops delta.reasoning_content; copy it onto additional_kwargs."""
+    try:
+        import langchain_openai.chat_models.base as base
+    except Exception:  # pylint: disable=broad-exception-caught
+        return
+    orig = getattr(base, '_convert_delta_to_message_chunk', None)
+    if orig is None or getattr(orig, '_spur_patched', False):
+        return
+
+    def wrapped(_dict: Mapping[str, Any], default_class: Any) -> Any:
+        msg = orig(_dict, default_class)
+        _attach_reasoning(msg, _delta_reasoning(_dict))
+        return msg
+
+    wrapped._spur_patched = True  # type: ignore[attr-defined]
+    base._convert_delta_to_message_chunk = wrapped
+
+
+def _patch_langchain_chunk() -> None:
+    try:
+        from langchain_openai.chat_models.base import BaseChatOpenAI
+    except Exception:  # pylint: disable=broad-exception-caught
+        try:
+            from langchain_openai.chat_models.base import ChatOpenAI as BaseChatOpenAI
+        except Exception:  # pylint: disable=broad-exception-caught
+            return
+    orig = getattr(BaseChatOpenAI, '_convert_chunk_to_generation_chunk', None)
+    if orig is None or getattr(orig, '_spur_patched', False):
+        return
+
+    def wrapped(self: Any, chunk: Any, default_chunk_class: Any,
+                base_generation_info: Any = None) -> Any:
+        gen = orig(self, chunk, default_chunk_class, base_generation_info)
+        extra = reasoning_from_openai_chunk(chunk)
+        if gen is not None and extra:
+            _attach_reasoning(getattr(gen, 'message', None), extra)
+        return gen
+
+    wrapped._spur_patched = True  # type: ignore[attr-defined]
+    BaseChatOpenAI._convert_chunk_to_generation_chunk = wrapped
+
+
+def install_reasoning_patches() -> None:
+    """Idempotent: keep OpenAI-compat reasoning_content through LangChain."""
+    _patch_openai_choice_delta()
+    _patch_langchain_delta()
+    _patch_langchain_chunk()
+
+
+install_reasoning_patches()

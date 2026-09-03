@@ -9,10 +9,20 @@ import sys
 import unittest
 
 try:
-    from .think_tags import ThinkFeed, chunk_text, split_think
+    from .think_tags import (
+        ThinkFeed,
+        chunk_text,
+        reasoning_from_openai_chunk,
+        split_think,
+    )
 except ImportError:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-    from think_tags import ThinkFeed, chunk_text, split_think
+    from think_tags import (  # type: ignore
+        ThinkFeed,
+        chunk_text,
+        reasoning_from_openai_chunk,
+        split_think,
+    )
 
 
 class _Chunk:
@@ -285,6 +295,40 @@ class ThinkTagsTest(unittest.TestCase):
         self.assertEqual(vis, 'Hello there')
         self.assertEqual(thought, '')
         self.assertTrue(feed.never_think)
+
+    def test_openai_chunk_delta_reasoning_content(self):
+        extra = reasoning_from_openai_chunk({
+            'choices': [{
+                'index': 0,
+                'delta': {'reasoning_content': 'step one'},
+            }],
+        })
+        self.assertEqual(extra, 'step one')
+        extra = reasoning_from_openai_chunk({
+            'choices': [{'delta': {'content': 'hi'}}],
+        })
+        self.assertEqual(extra, '')
+
+    def test_chunk_text_reads_content_blocks(self):
+        piece, extra = chunk_text(_Chunk(content=[
+            {'type': 'reasoning', 'text': 'plan'},
+            {'type': 'text', 'text': 'answer'},
+        ]))
+        self.assertEqual(piece, 'answer')
+        self.assertEqual(extra, 'plan')
+
+    def test_langchain_delta_patch_copies_reasoning(self):
+        try:
+            import langchain_openai.chat_models.base as base
+            from langchain_core.messages import AIMessageChunk
+        except ImportError:
+            self.skipTest('langchain_openai not installed')
+        convert = getattr(base, '_convert_delta_to_message_chunk', None)
+        if convert is None:
+            self.skipTest('langchain_openai has no delta converter')
+        msg = convert({'role': 'assistant', 'reasoning_content': 'why'}, AIMessageChunk)
+        extra = (getattr(msg, 'additional_kwargs', None) or {}).get('reasoning_content')
+        self.assertEqual(extra, 'why')
 
 
 if __name__ == '__main__':
