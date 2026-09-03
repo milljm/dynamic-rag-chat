@@ -261,14 +261,14 @@ function renderListTree(items: ListItem[], ctx: MdCtx, key: number): ReactNode {
 }
 
 function collectHtmlDl(lines: string[], start: number): { html: string; consumed: number } | null {
-  const first = lines[start] ?? "";
+  const first = decodeEntities(lines[start] ?? "");
   if (!/^\s*<dl\b/i.test(first)) return null;
   if (/<\/dl>/i.test(first)) return { html: first, consumed: 1 };
   const chunk = [first];
   let i = start + 1;
   while (i < lines.length) {
-    chunk.push(lines[i] ?? "");
-    if (/<\/dl>/i.test(lines[i] ?? "")) break;
+    chunk.push(decodeEntities(lines[i] ?? ""));
+    if (/<\/dl>/i.test(chunk[chunk.length - 1] ?? "")) break;
     i += 1;
   }
   return { html: chunk.join("\n"), consumed: i - start + 1 };
@@ -403,6 +403,23 @@ function htmlInline(html: string, ctx: MdCtx, key: number): ReactNode {
     }
     return <Fragment key={key}>{inner}</Fragment>;
   }
+  const wrap = html.trim().match(/^<(strong|b|em|i)\b[^>]*>([\s\S]*)<\/\1>$/i);
+  if (wrap) {
+    const inner = inlineMd(wrap[2] ?? "", ctx, key + 1);
+    const tag = (wrap[1] ?? "").toLowerCase();
+    if (tag === "strong" || tag === "b") {
+      return (
+        <strong key={key} className="font-medium text-foreground">
+          {inner}
+        </strong>
+      );
+    }
+    return (
+      <em key={key} className="italic">
+        {inner}
+      </em>
+    );
+  }
   return htmlAnchor(html, ctx, key);
 }
 
@@ -410,7 +427,7 @@ function inline(text: string, ctx: MdCtx): ReactNode[] {
   const source = decodeEntities(text);
   const parts: ReactNode[] = [];
   const htmlRe =
-    /(<a\s+[^>]*?\/>|<a\s+[^>]*?>[\s\S]*?<\/a>|<span\s+[^>]*>[\s\S]*?<\/span>|<br\s*\/?>)/gi;
+    /(<a\s+[^>]*?\/>|<a\s+[^>]*?>[\s\S]*?<\/a>|<span\s+[^>]*>[\s\S]*?<\/span>|<(strong|b|em|i)\b[^>]*>[\s\S]*?<\/\2>|<br\s*\/?>)/gi;
   let last = 0;
   let k = 0;
   let tag: RegExpExecArray | null;
