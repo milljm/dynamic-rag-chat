@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import os
 import sys
+import tempfile
 import unittest
 from types import SimpleNamespace
 
@@ -21,8 +22,10 @@ class _Console:
         return None
 
 
-def _args(assistant=False):
-    return SimpleNamespace(assistant_mode=assistant, debug=False)
+def _args(assistant=False, vector_dir=''):
+    return SimpleNamespace(
+        assistant_mode=assistant, debug=False, vector_dir=vector_dir,
+    )
 
 
 class PlotFileTests(unittest.TestCase):
@@ -50,6 +53,32 @@ class PlotFileTests(unittest.TestCase):
         first = pm.plot_prompt_system
         pm.reload()
         self.assertEqual(first, pm.plot_prompt_system)
+
+    def test_overlay_does_not_touch_stock(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            pm = PromptManager(
+                _Console(), ROOT, _args(True, tmp), prompt_model='qwen',
+            )
+            stock = pm.plot_file('assistant', 'system')
+            with open(stock, encoding='utf-8') as handle:
+                before = handle.read()
+            pm.write_plot('assistant', 'system', 'CUSTOM SYSTEM\n')
+            pm.reload()
+            self.assertEqual(pm.plot_prompt_system, 'CUSTOM SYSTEM\n')
+            with open(stock, encoding='utf-8') as handle:
+                self.assertEqual(handle.read(), before)
+            restored = pm.restore_plot('assistant', 'system')
+            self.assertFalse(restored['overlaid'])
+            pm.reload()
+            self.assertEqual(pm.plot_prompt_system, before)
+
+    def test_write_plot_rejects_human(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            pm = PromptManager(
+                _Console(), ROOT, _args(False, tmp), prompt_model='qwen',
+            )
+            with self.assertRaises(ValueError):
+                pm.write_plot('story', 'human', 'nope')
 
 
 if __name__ == '__main__':

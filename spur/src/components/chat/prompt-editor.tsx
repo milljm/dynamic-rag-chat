@@ -3,27 +3,33 @@ import { toast } from "sonner";
 import { modeOf } from "@/lib/chat/branch-mode";
 import {
   fetchPrompt,
+  restorePrompt,
   savePrompt,
   usesChatPy,
-  type PromptKind,
 } from "@/lib/chat/remote";
 import { useChatStore } from "@/lib/chat/store";
 import { Button } from "@/components/ui/button";
 
-export function PromptEditor({
-  kind,
-  onClose,
-}: {
-  kind: PromptKind;
-  onClose: () => void;
-}) {
+export function PromptEditor({ onClose }: { onClose: () => void }) {
   const branch = useChatStore((s) => s.branches[s.currentId]);
   const mode = branch ? modeOf(branch) : "story";
   const [content, setContent] = useState("");
   const [path, setPath] = useState("");
+  const [overlaid, setOverlaid] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const savedRef = useRef("");
+
+  function applySlot(slot: {
+    content?: string;
+    path?: string;
+    overlaid?: boolean;
+  }) {
+    setContent(slot.content ?? "");
+    savedRef.current = slot.content ?? "";
+    setPath(slot.path || "");
+    setOverlaid(Boolean(slot.overlaid));
+  }
 
   useEffect(() => {
     if (!usesChatPy()) {
@@ -33,34 +39,53 @@ export function PromptEditor({
     }
     let cancelled = false;
     setLoading(true);
-    void fetchPrompt(mode, kind).then((slot) => {
+    void fetchPrompt(mode).then((slot) => {
       if (cancelled) return;
       setLoading(false);
       if (!slot.ok) {
         toast.error(slot.error || "Could not load prompt.");
         return;
       }
-      setContent(slot.content ?? "");
-      savedRef.current = slot.content ?? "";
-      setPath(slot.path || "");
+      applySlot(slot);
     });
     return () => {
       cancelled = true;
     };
-  }, [mode, kind]);
+  }, [mode]);
 
   const dirty = content !== savedRef.current;
 
   async function save() {
     setSaving(true);
-    const slot = await savePrompt(mode, kind, content);
+    const slot = await savePrompt(mode, content);
     setSaving(false);
     if (!slot.ok) {
       toast.error(slot.error || "Save failed.");
       return;
     }
     savedRef.current = content;
+    setOverlaid(true);
+    if (slot.path) setPath(slot.path);
     toast.success(slot.message || "Saved.");
+  }
+
+  async function restore() {
+    if (
+      !window.confirm(
+        "Restore the original system prompt? Your edited copy will be discarded.",
+      )
+    ) {
+      return;
+    }
+    setSaving(true);
+    const slot = await restorePrompt(mode);
+    setSaving(false);
+    if (!slot.ok) {
+      toast.error(slot.error || "Restore failed.");
+      return;
+    }
+    applySlot(slot);
+    toast.success(slot.message || "Restored.");
   }
 
   function close() {
@@ -68,7 +93,7 @@ export function PromptEditor({
     onClose();
   }
 
-  const title = `${mode === "assistant" ? "Assistant" : "Story"} · ${kind === "system" ? "system" : "human"} prompt`;
+  const title = `${mode === "assistant" ? "Assistant" : "Story"} · system prompt`;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -77,8 +102,18 @@ export function PromptEditor({
           <h1 className="truncate text-sm font-medium">{title}</h1>
           <p className="truncate font-mono text-[11px] text-muted-foreground">
             {path || "prompts/…"}
+            {overlaid ? " · overlay" : ""}
           </p>
         </div>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          disabled={saving || loading || (!overlaid && !dirty)}
+          onClick={() => void restore()}
+        >
+          Restore original
+        </Button>
         <Button
           type="button"
           variant="secondary"

@@ -193,17 +193,16 @@ export type PromptSlot = {
   mode: Mode;
   kind: PromptKind;
   path: string;
+  stock?: string;
+  overlaid?: boolean;
   content: string;
   error?: string;
   message?: string;
 };
 
-export async function fetchPrompt(
-  mode: Mode,
-  kind: PromptKind,
-): Promise<PromptSlot> {
+export async function fetchPrompt(mode: Mode): Promise<PromptSlot> {
   const res = await fetch(
-    url(`/api/prompts?mode=${encodeURIComponent(mode)}&kind=${encodeURIComponent(kind)}`),
+    url(`/api/prompts?mode=${encodeURIComponent(mode)}&kind=system`),
   );
   const json = (await res.json()) as PromptSlot;
   json.ok = Boolean(json.ok);
@@ -211,15 +210,23 @@ export async function fetchPrompt(
   return json;
 }
 
-export async function savePrompt(
-  mode: Mode,
-  kind: PromptKind,
-  content: string,
-): Promise<PromptSlot> {
+export async function savePrompt(mode: Mode, content: string): Promise<PromptSlot> {
   const res = await fetch(url("/api/prompts"), {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ mode, kind, content }),
+    body: JSON.stringify({ mode, kind: "system", content }),
+  });
+  const json = (await res.json()) as PromptSlot;
+  json.ok = Boolean(json.ok);
+  if (!res.ok && !json.error) json.error = `Request failed (${res.status})`;
+  return json;
+}
+
+export async function restorePrompt(mode: Mode): Promise<PromptSlot> {
+  const res = await fetch(url("/api/prompts/restore"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ mode, kind: "system" }),
   });
   const json = (await res.json()) as PromptSlot;
   json.ok = Boolean(json.ok);

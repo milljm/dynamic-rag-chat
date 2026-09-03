@@ -20,7 +20,7 @@ export function AppShell() {
   const ready = useHydrateChat();
   const { send, stop, regenerate, illustrate, streaming } = useSend();
   const [navOpen, setNavOpen] = useState(false);
-  const [promptKind, setPromptKind] = useState<"system" | "human" | null>(null);
+  const [promptOpen, setPromptOpen] = useState(false);
   const sidebar = useSidebarLayout();
 
   if (!ready) {
@@ -52,7 +52,7 @@ export function AppShell() {
           }}
         >
           <div className="h-full min-w-0 overflow-hidden" style={{ width: sidebar.width }}>
-            <Sidebar streaming={streaming} onCollapse={() => sidebar.setOpen(false)} onEditPrompt={setPromptKind} />
+            <Sidebar streaming={streaming} onCollapse={() => sidebar.setOpen(false)} onEditPrompt={() => setPromptOpen(true)} />
           </div>
           {sidebar.open && (
             <div
@@ -112,7 +112,7 @@ export function AppShell() {
                   <X />
                 </Button>
               </div>
-              <Sidebar streaming={streaming} onNavigate={() => setNavOpen(false)} onEditPrompt={setPromptKind} />
+              <Sidebar streaming={streaming} onNavigate={() => setNavOpen(false)} onEditPrompt={() => setPromptOpen(true)} />
             </div>
           </div>
         )}
@@ -129,8 +129,8 @@ export function AppShell() {
             </Button>
             <span className="font-display text-lg italic">Spur</span>
           </div>
-          {promptKind ? (
-            <PromptEditor kind={promptKind} onClose={() => setPromptKind(null)} />
+          {promptOpen ? (
+            <PromptEditor onClose={() => setPromptOpen(false)} />
           ) : (
             <>
               <Thread

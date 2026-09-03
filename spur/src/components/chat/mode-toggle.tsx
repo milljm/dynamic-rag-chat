@@ -18,7 +18,7 @@ export function ModeToggle({
   branchId: string;
   mode: Mode;
   onChange: (mode: Mode) => void;
-  onEditPrompt?: (kind: "system" | "human") => void;
+  onEditPrompt?: () => void;
 }) {
   const locked = isLockedBranch(branchId);
   const effective = modeOf({ id: branchId, mode });
@@ -49,16 +49,10 @@ export function ModeToggle({
         />
       </div>
       {onEditPrompt && (
-        <div className="grid gap-px">
-          <PromptEditButton
-            label="Edit system prompt"
-            onClick={() => onEditPrompt("system")}
-          />
-          <PromptEditButton
-            label="Edit human prompt"
-            onClick={() => onEditPrompt("human")}
-          />
-        </div>
+        <PromptEditButton
+          label="Edit system prompt"
+          onClick={onEditPrompt}
+        />
       )}
       <p className="flex items-start gap-1.5 text-xs leading-snug text-muted-foreground">
         {locked ? (

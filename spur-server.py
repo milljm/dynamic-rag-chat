@@ -966,31 +966,33 @@ def _reload_all_prompts(chat: Chat) -> None:
 
 @app.get('/api/prompts')
 def api_prompts_get(mode: str = 'assistant', kind: str = 'system') -> JSONResponse:
-    """The plot system/human file Spur will send this flavor."""
+    """The plot system file Spur will send this flavor (overlay if present)."""
     chat = get_chat()
     try:
-        path = chat.session.renderer.prompts.plot_file(mode, kind)
+        slot = chat.session.renderer.prompts.read_plot(mode, kind)
     except ValueError as exc:
         return JSONResponse({'ok': False, 'error': str(exc)}, status_code=400)
-    if not os.path.isfile(path):
+    except FileNotFoundError as exc:
         return JSONResponse(
-            {'ok': False, 'error': 'Prompt file missing', 'path': path},
+            {'ok': False, 'error': 'Prompt file missing', 'path': str(exc)},
             status_code=404,
         )
-    with open(path, 'r', encoding='utf-8') as handle:
-        content = handle.read()
+    stock = slot['stock']
+    path = slot['path']
     return JSONResponse({
         'ok': True,
         'mode': mode,
         'kind': kind,
-        'path': os.path.relpath(path, ROOT),
-        'content': content,
+        'path': os.path.relpath(path, ROOT if not slot['overlaid'] else chat.opts.vector_dir),
+        'stock': os.path.relpath(stock, ROOT),
+        'overlaid': slot['overlaid'],
+        'content': slot['content'],
     })
 
 
 @app.put('/api/prompts')
 async def api_prompts_save(request: Request) -> JSONResponse:
-    """Write a plot prompt and reload PromptManager without restarting."""
+    """Write a system-prompt overlay. Shipped templates are not touched."""
     if _streams > 0:
         return JSONResponse(
             {'ok': False, 'error': 'Wait for the current turn to finish.'},
@@ -998,7 +1000,7 @@ async def api_prompts_save(request: Request) -> JSONResponse:
         )
     body = await request.json()
     mode = str(body.get('mode') or '')
-    kind = str(body.get('kind') or '')
+    kind = str(body.get('kind') or 'system')
     content = body.get('content')
     if not isinstance(content, str):
         return JSONResponse({'ok': False, 'error': 'Need content.'}, status_code=400)
@@ -1006,23 +1008,47 @@ async def api_prompts_save(request: Request) -> JSONResponse:
         return JSONResponse({'ok': False, 'error': 'Prompt is too large.'}, status_code=400)
     chat = get_chat()
     try:
-        path = chat.session.renderer.prompts.plot_file(mode, kind)
+        path = chat.session.renderer.prompts.write_plot(mode, kind, content)
     except ValueError as exc:
         return JSONResponse({'ok': False, 'error': str(exc)}, status_code=400)
-    prompts_root = os.path.abspath(os.path.join(ROOT, 'prompts'))
-    real = os.path.abspath(path)
-    if os.path.commonpath([prompts_root, real]) != prompts_root:
-        return JSONResponse({'ok': False, 'error': 'Refusing that path.'}, status_code=400)
-    os.makedirs(os.path.dirname(real), exist_ok=True)
-    with open(real, 'w', encoding='utf-8') as handle:
-        handle.write(content)
+    except RuntimeError as exc:
+        return JSONResponse({'ok': False, 'error': str(exc)}, status_code=400)
     _reload_all_prompts(chat)
     return JSONResponse({
         'ok': True,
         'mode': mode,
         'kind': kind,
-        'path': os.path.relpath(real, ROOT),
+        'path': os.path.relpath(path, chat.opts.vector_dir),
+        'overlaid': True,
         'message': 'Saved. Next turn uses this prompt.',
+    })
+
+
+@app.post('/api/prompts/restore')
+async def api_prompts_restore(request: Request) -> JSONResponse:
+    """Delete the overlay and return the shipped template."""
+    if _streams > 0:
+        return JSONResponse(
+            {'ok': False, 'error': 'Wait for the current turn to finish.'},
+            status_code=409,
+        )
+    body = await request.json()
+    mode = str(body.get('mode') or '')
+    kind = str(body.get('kind') or 'system')
+    chat = get_chat()
+    try:
+        slot = chat.session.renderer.prompts.restore_plot(mode, kind)
+    except ValueError as exc:
+        return JSONResponse({'ok': False, 'error': str(exc)}, status_code=400)
+    _reload_all_prompts(chat)
+    return JSONResponse({
+        'ok': True,
+        'mode': mode,
+        'kind': kind,
+        'path': os.path.relpath(slot['stock'], ROOT),
+        'overlaid': False,
+        'content': slot['content'],
+        'message': 'Restored the original prompt.',
     })
 
 

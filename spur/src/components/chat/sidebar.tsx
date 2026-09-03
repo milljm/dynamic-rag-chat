@@ -109,7 +109,7 @@ export function Sidebar({
   onNavigate?: () => void;
   onCollapse?: () => void;
   streaming?: boolean;
-  onEditPrompt?: (kind: "system" | "human") => void;
+  onEditPrompt?: () => void;
 }) {
   const currentId = useChatStore((s) => s.currentId);
   const branches = useChatStore((s) => s.branches);
