@@ -213,6 +213,11 @@ html[data-theme="dark"] .hx-nu {
     background-size: 220px 220px;
   }
 
+  .tok-chip-leave {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+
   .shimmer-text {
     background-image: linear-gradient(
       90deg,

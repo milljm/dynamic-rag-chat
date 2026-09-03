@@ -587,6 +587,7 @@ async function generateViaChatPy(
   let recalling = false;
   let recalled: string[] = [];
   let attachments: Attachment[] = [];
+  const think = { inThink: false, neverThink: false };
 
   const ac = new AbortController();
   abortRef.current = ac;
@@ -641,14 +642,20 @@ async function generateViaChatPy(
             ttft = (performance.now() - started) / 1000;
             first = false;
           }
-          content += event.content;
+          const split = feedThink(event.content, think);
+          content += split.content;
+          reasoning += split.reasoning;
           patch({
             content,
             reasoning: reasoning || undefined,
             ...(recalling
               ? {}
               : {
-                  status: "Streaming…",
+                  status: content
+                    ? "Streaming…"
+                    : reasoning
+                      ? "Reasoning…"
+                      : "Streaming…",
                   streamingModel: model || undefined,
                   streamingRoute: route || undefined,
                   streamingContext: context || undefined,

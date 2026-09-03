@@ -3,6 +3,7 @@ import {
   ArrowDown,
   Bot,
   BookOpen,
+  ChevronRight,
   GitBranch,
   Globe,
   Lock,
@@ -243,17 +244,11 @@ function MessageBubble({
         )}
       >
         {isUser && turn != null && turn > 0 ? (
-          <span
-            className="pointer-events-none absolute -right-1 -top-2 z-10 rounded-md px-1.5 py-px font-mono text-[10px] tabular-nums tracking-tight text-turn"
-            style={{
-              background: "var(--spur-turn-bg)",
-              boxShadow: "var(--spur-turn-shadow)",
-            }}
-            title={`Turn ${turn}`}
-          >
+          <CornerChip side="right" title={`Turn ${turn}`}>
             {turn}
-          </span>
+          </CornerChip>
         ) : null}
+        {!isUser ? <TokenChip message={message} pending={pending} /> : null}
         {message.attachments && message.attachments.length > 0 && (
           <ul className="mb-2 space-y-1">
             {message.attachments.map((att) => (
@@ -297,21 +292,11 @@ function MessageBubble({
             {message.flags.ooc && <span>OOC</span>}
           </p>
         )}
-        {message.reasoning && (
-          <details
-            className="mb-2 text-xs text-muted-foreground"
-            onToggle={(e) => {
-              if (!(e.currentTarget as HTMLDetailsElement).open) return;
-              onInspect?.();
-              e.currentTarget.scrollIntoView({ block: "nearest" });
-            }}
-          >
-            <summary className="cursor-pointer select-none">Reasoning</summary>
-            <div className="mt-2 max-h-64 overflow-y-auto whitespace-pre-wrap leading-relaxed">
-              {message.reasoning}
-            </div>
-          </details>
-        )}
+        <ReasoningFrame
+          text={message.reasoning}
+          pending={pending}
+          onInspect={onInspect}
+        />
         {message.content ? (
           <Markdown text={message.content} />
         ) : null}
@@ -365,6 +350,136 @@ function MessageBubble({
   );
 }
 
+
+function CornerChip({
+  side,
+  title,
+  leaving,
+  children,
+}: {
+  side: "left" | "right";
+  title?: string;
+  leaving?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <span
+      className={cn(
+        "pointer-events-none absolute -top-2 z-10 rounded-md px-1.5 py-px font-mono text-[10px] tabular-nums tracking-tight text-turn transition-[opacity,transform] duration-500",
+        side === "right" ? "-right-1" : "-left-1",
+        leaving && "tok-chip-leave",
+      )}
+      style={{
+        background: "var(--spur-turn-bg)",
+        boxShadow: "var(--spur-turn-shadow)",
+      }}
+      title={title}
+    >
+      {children}
+    </span>
+  );
+}
+
+function liveTokenCount(message: Message, pending: boolean): number {
+  if (!pending && message.metrics?.tokenCount) return message.metrics.tokenCount;
+  const text = `${message.content || ""}${message.reasoning || ""}`;
+  if (!text) return 0;
+  return Math.max(1, Math.round(text.length / 4));
+}
+
+function useTokenChip(liveTokens: number, generating: boolean) {
+  const [display, setDisplay] = useState(0);
+  const [phase, setPhase] = useState<"hidden" | "live" | "hold" | "leave">("hidden");
+  const last = useRef(0);
+  const timers = useRef<{ hold: number | null; leave: number | null }>({
+    hold: null,
+    leave: null,
+  });
+
+  function clearTimers() {
+    if (timers.current.hold != null) window.clearTimeout(timers.current.hold);
+    if (timers.current.leave != null) window.clearTimeout(timers.current.leave);
+    timers.current = { hold: null, leave: null };
+  }
+
+  useEffect(() => {
+    if (generating && liveTokens > 0) {
+      last.current = liveTokens;
+      setDisplay(liveTokens);
+      setPhase("live");
+      clearTimers();
+    }
+  }, [generating, liveTokens]);
+
+  useEffect(() => {
+    if (generating) return;
+    if (last.current <= 0) return;
+    setDisplay(last.current);
+    setPhase("hold");
+    clearTimers();
+    timers.current.hold = window.setTimeout(() => {
+      setPhase("leave");
+      timers.current.leave = window.setTimeout(() => {
+        setPhase("hidden");
+        setDisplay(0);
+        last.current = 0;
+      }, 500);
+    }, 2000);
+    return clearTimers;
+  }, [generating]);
+
+  return { display, phase };
+}
+
+function TokenChip({ message, pending }: { message: Message; pending: boolean }) {
+  const n = liveTokenCount(message, pending);
+  const { display, phase } = useTokenChip(n, pending);
+  if (phase === "hidden" || display <= 0) return null;
+  return (
+    <CornerChip
+      side="left"
+      leaving={phase === "leave"}
+      title={`${display.toLocaleString("en-US")} tokens`}
+    >
+      {display.toLocaleString("en-US")}
+    </CornerChip>
+  );
+}
+
+function ReasoningFrame({
+  text,
+  pending,
+  onInspect,
+}: {
+  text?: string;
+  pending: boolean;
+  onInspect?: () => void;
+}) {
+  if (!text) return null;
+  return (
+    <details
+      className="group mb-3 overflow-hidden rounded-md border border-border/70 bg-background/50"
+      onToggle={(e) => {
+        if (!(e.currentTarget as HTMLDetailsElement).open) return;
+        onInspect?.();
+        e.currentTarget.scrollIntoView({ block: "nearest" });
+      }}
+    >
+      <summary className="flex cursor-pointer list-none items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium tracking-wide text-muted-foreground select-none [&::-webkit-details-marker]:hidden">
+        <ChevronRight className="size-3 shrink-0 transition-transform group-open:rotate-90" />
+        Reasoning
+        {pending ? (
+          <span className="ml-auto text-[10px] font-normal tracking-normal text-muted-foreground/70">
+            live
+          </span>
+        ) : null}
+      </summary>
+      <div className="max-h-64 overflow-y-auto border-t border-border/60 px-2.5 py-2 text-xs leading-relaxed whitespace-pre-wrap text-muted-foreground">
+        {text}
+      </div>
+    </details>
+  );
+}
 
 function FootStat({
   tip,
