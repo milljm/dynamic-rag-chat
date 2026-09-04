@@ -47,7 +47,7 @@ Then:
 
 ```bash
 ./chat.py --spur
-./chat.py --spur --serve          # same Wi-Fi: iPad / phone. No login — don't port-forward.
+./chat.py --spur --serve          # allow remote network connections
 ```
 *Your favorite browser should open. If not, visit [http://localhost:8765](http://localhost:8765).*
 
@@ -85,23 +85,33 @@ ollama pull gemma3:12b               # generator
 
 LM Studio works the same way — point `--model-server` at its OpenAI-compatible URL.
 
-### OpenAI for generation, local for the rest
+### OpenAI Example
 
 `.chat.yaml`:
 
 ```yaml
 chat:
-  model: gpt-4o
+  model: gpt-5.6
   llm_server: https://api.openai.com/v1
+
+  # Local RAG preprocessing
   pre_llm: gemma3:1b
   pre_server: http://localhost:11434/v1
+
+  # Local semantic embeddings
   embedding_llm: nomic-embed-text
   embedding_server: http://localhost:11434/v1
+
   time_zone: America/Denver
   name: Mr. Knowitall
-  context_window: 16384
+
+  # Maximum completion tokens allowed from model (1.05M is max for gpt-5.6)
+  completion_tokens: 1005000
+
   api_key: YOUR_API_KEY
 ```
+*Note: You are still required to have a pre-processor and embeddings model available*
+
 
 ```bash
 conda activate dynamic-rag
@@ -152,8 +162,6 @@ Same in Spur, Streamlit, and the terminal.
 {{https://example.com}}     scrape that page into this turn
 {{/absolute/path/to/file}}  include a local file
 ```
-
-Protected branch names: `story`, `assistant`.
 
 ---
 
