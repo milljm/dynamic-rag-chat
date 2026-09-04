@@ -1,26 +1,34 @@
+export type Mode = "assistant" | "story";
 export type Role = "user" | "assistant";
-export type Mode = "story" | "assistant";
 
 export type Attachment = {
   id: string;
   name: string;
   mime: string;
-  kind: "image" | "text" | "file";
+  kind: "image" | "text";
   text?: string;
   dataUrl?: string;
-  file?: string;
+  size: number;
+  prompt?: string;
+  negative?: string;
 };
 
 export type StreamMetrics = {
-  model?: string;
-  tokenCount?: number;
-  generationTime?: number;
-  promptTokens?: number;
-  tokenSavings?: number;
-  ttft?: number;
+  model: string;
+  tokenCount: number;
+  generationTime: number;
+  promptTokens: number;
+  tokenSavings: number;
+  ttft: number;
 };
 
-export type TurnFlags = Record<string, unknown>;
+export type TurnFlags = {
+  agent?: boolean;
+  image?: boolean;
+  noContext?: boolean;
+  ooc?: boolean;
+  includeBranch?: string;
+};
 
 export type Message = {
   id: string;
@@ -31,11 +39,17 @@ export type Message = {
   metrics?: StreamMetrics;
   flags?: TurnFlags;
   status?: string;
+  /** Quiet model label next to Processing Prompt / Streaming once picked. */
   streamingModel?: string;
+  /** Orchestrator role: story, nsfw, coding, agent, … */
   streamingRoute?: string;
+  /** Packed prompt size (tokens) next to Processing Prompt / Streaming. */
   streamingContext?: number;
+  /** Basenames fetched via NEED_GOLD this turn. */
   recalled?: string[];
+  /** Gold/cabinet filenames used as RAG this turn (deletable from Documents). */
   ragIds?: string[];
+  /** Turn-collection parent ids (`collection:id`) so rewind can purge them. */
   ragEntryIds?: string[];
   createdAt: number;
 };
@@ -50,13 +64,20 @@ export type Branch = {
   id: string;
   name: string;
   mode: Mode;
-  locked?: boolean;
+  locked: boolean;
   messages: Message[];
-  rag?: unknown[];
+  rag: RagChunk[];
   createdAt: number;
+  updatedAt: number;
 };
 
 export type ChatSnapshot = {
   currentId: string;
   branches: Record<string, Branch>;
+  pendingAttachments: Attachment[];
+  forceAgent: boolean;
+  forceSd: boolean;
+  sdEnabled: boolean;
+  needsSetup: boolean;
+  pendingOoc: string;
 };
