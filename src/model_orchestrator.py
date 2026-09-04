@@ -25,7 +25,32 @@ _TRIVIAL_QUERY = re.compile(
 )
 
 class Orchestration():
-    """ Responsible for instantiating all ChatOpenAI objects """
+    """
+    ### Orchestration
+
+    One ``ChatOpenAI`` client per role (story, polisher, vision, agent,
+    coder, casual, …). ``route()`` picks who answers this turn from
+    tags plus ``documents`` flags (agent, SD, images).
+
+    *Class init args:*
+        .. code-block:: python
+            console: Console
+            args: ChatOptions  # hosts, model names, temps, thinking flags
+
+    *Usage:*
+        - construct once per session:
+            .. code-block:: python
+                orch = Orchestration(console, args)
+
+        - pick the live LLM:
+            .. code-block:: python
+                llm = orch.route(meta_tags, documents)
+                name = orch.get_route_name(meta_tags, documents)
+
+        - fetch a specific role:
+            .. code-block:: python
+                story = orch.get_model('story')
+    """
     def __init__(self, console, args: ChatOptions):
         """Build one ChatOpenAI client per orchestrated role."""
         self.console = console

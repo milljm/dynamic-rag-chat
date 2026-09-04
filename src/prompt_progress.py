@@ -57,7 +57,26 @@ _GEN_STOP = threading.Event()
 
 @dataclass
 class PromptProgress:
-    """Fraction of the prompt mlx-edge has prefills (0..1)."""
+    """
+    ### PromptProgress
+
+    Snapshot of how far mlx-edge (or a compatible server) has prefilled
+    the prompt. Spur's status line reads ``fraction`` 0..1.
+
+    *Class init args:*
+        .. code-block:: python
+            fraction: float
+            phase: str = 'prefill'
+            model: str = ''
+            processed: int | None = None
+            total: int | None = None
+
+    *Usage:*
+        - produced by pick_progress / stream helpers; not constructed
+          by feature code:
+            .. code-block:: python
+                status = format_prompt_status(progress.fraction)
+    """
 
     fraction: float
     phase: str = 'prefill'

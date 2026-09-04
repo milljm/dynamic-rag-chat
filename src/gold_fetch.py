@@ -104,7 +104,26 @@ def take_need_gold(text: str) -> tuple[str, str | None]:
 
 
 class GoldNeedFeed:
-    """Hold back an in-progress own-line <NEED_GOLD:…> so the tag is not streamed."""
+    """
+    ### GoldNeedFeed
+
+    Hold back an in-progress own-line ``<NEED_GOLD:file>`` so the tag is
+    not streamed to the user. When a complete tag lands, Spur / the TUI
+    fetches the cabinet file and resumes the same turn.
+
+    *Class init args:*
+        .. code-block:: python
+            (none)
+
+    *Usage:*
+        - per stream:
+            .. code-block:: python
+                feed = GoldNeedFeed()
+                visible, done = feed.feed(chunk)
+                if done:
+                    filename = feed.filename
+                leftover = feed.flush()
+    """
 
     def __init__(self):
         self.buf = ''

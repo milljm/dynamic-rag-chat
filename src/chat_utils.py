@@ -35,8 +35,22 @@ def load_pdf(path: str) -> list:
 
 class RAGTag(NamedTuple):
     """
-    namedtuple class constructor
-      RAGTag(tag: str, content: str|list)
+    ### RAGTag
+
+    One pre-processor metadata field. ``content`` is a string or a list
+    of strings (entities, topics). Stored on Chroma children as scalars
+    (lists joined with ``, ``).
+
+    *Class init args:*
+        .. code-block:: python
+            tag: str              # field name (entity, document_topics, …)
+            content: str | list   # value(s)
+
+    *Usage:*
+        - construct / unpack:
+            .. code-block:: python
+                tag = RAGTag('entity', ['alice', 'bob'])
+                tags = CommonUtils.parse_tags({'entity': 'alice, bob'})
     """
     tag: str
     content: str|list
@@ -436,7 +450,21 @@ def _ensure_version(data: dict, path: str) -> dict:
 
 @dataclass
 class StandardAttributes:
-    """ Data class to hold immutable project attributes """
+    """
+    ### StandardAttributes
+
+    Immutable collection name map shared by RAG, import, and history
+    prefixes (``user_documents`` / ``ai_documents`` / ``gold_documents``).
+
+    *Class init args:*
+        .. code-block:: python
+            collections: dict  # {'user': 'user_documents', ...}
+
+    *Usage:*
+        - always via the classmethod:
+            .. code-block:: python
+                names = StandardAttributes.attributes().collections
+    """
     collections: dict   # RAG Collection name to collection id
 
     @classmethod
@@ -450,7 +478,27 @@ class StandardAttributes:
 # pylint: disable=too-many-instance-attributes  # thats what dataclasses are for
 @dataclass(slots=True, kw_only=True)
 class ChatOptions:
-    """ Chat arguments dataclass """
+    """
+    ### ChatOptions
+
+    Session flags: LLM/embedding hosts, model names, RAG knobs, UI.
+    Built from ``.chat.yaml`` and/or argparse; specialized hosts inherit
+    ``host`` when left blank.
+
+    *Class init args:*
+        .. code-block:: python
+            (kw-only dataclass — see field groups below)
+            # servers: host, pre_host, emb_host, agent_host, …
+            # models:  model, preconditioner, embeddings, *_llm
+            # rag:     matches, no_rags, history_sessions, vector_dir
+            # ui:      assistant_mode, debug, color, light_mode
+
+    *Usage:*
+        - from yaml / argv:
+            .. code-block:: python
+                opts = ChatOptions.from_yaml(current_dir)
+                opts = ChatOptions.from_args(current_dir, args, base)
+    """
     # ---------- Servers
     # host: str = 'http://localhost:11434/v1'
     host: str | None = None
@@ -695,7 +743,24 @@ class ChatOptions:
 
 @dataclass
 class RegExp:
-    """ regular expression in use throughout the project """
+    """
+    ### RegExp
+
+    Compiled patterns used by tagging, ``{{include}}``, OOC detection,
+    think-block stripping, and safe filenames. Instantiated once on
+    ``CommonUtils``.
+
+    *Class init args:*
+        .. code-block:: python
+            (none — defaults are the compiled patterns)
+
+    *Usage:*
+        - via CommonUtils:
+            .. code-block:: python
+                paths = common.regex.curly_match.findall(user_input)
+                if common.regex.ooc_prefix.match(line):
+                    ...
+    """
     # model_re = re.compile(r'(\w+)\W+')
     model_re = re.compile(r'([a-zA-Z]+\d*[a-zA-Z]*)[-_]?(\w*)?[-_](\d+[a-z]*)', flags=re.IGNORECASE)
     meta_start_re = re.compile(r'{\W*(metadata)\W+:', re.IGNORECASE)
@@ -713,7 +778,31 @@ class RegExp:
     metadata_key = 'metadata'
 
 class CommonUtils():
-    """ method holder for command methods used throughout the project """
+    """
+    ### CommonUtils
+
+    Session glue: history JSON, sanitize/dedup text, RAG tag parse,
+    attachment bookkeeping, debug logs, heat-map colors. Module-level
+    helpers (``append_turn``, ``purge_rag_entries``, ``dedupe_rag_chunks``)
+    live next to this class in the same file.
+
+    *Class init args:*
+        .. code-block:: python
+            console: Console
+            args: ChatOptions  # creates vector_dir if missing
+
+    *Usage:*
+        - construct once per Chat:
+            .. code-block:: python
+                common = CommonUtils(console, opts)
+                hist = common.load_chat()
+                common.save_chat(hist)
+
+        - before store_data:
+            .. code-block:: python
+                body = common.sanitize_response(text, strip=True)
+                tags = common.get_tags(preprocessor_output)
+    """
     def __init__(self, console, args):
         self.console = console
         self.__set_project_attributes()

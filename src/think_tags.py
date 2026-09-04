@@ -189,7 +189,27 @@ def split_think(
 
 
 class ThinkFeed:
-    """Turn-scoped parser for null-token and namespaced think modes."""
+    """
+    ### ThinkFeed
+
+    Turn-scoped parser for null-token (gpt-oss) and namespaced
+    (``<mm:think>``) reasoning. Splits each stream piece into visible
+    answer vs thought so the TUI can hide or reveal thinking.
+
+    *Class init args:*
+        .. code-block:: python
+            in_think: bool = False
+            ns: str = ''              # '' or 'mm:'
+            never_think: bool = False
+            shadow_think: bool = False  # waiting on first non-null token
+
+    *Usage:*
+        - one instance per completion:
+            .. code-block:: python
+                feed = ThinkFeed()
+                visible, thought = feed.feed(piece)
+                visible, thought = feed.feed_chunk(chunk)
+    """
 
     def __init__(
         self,

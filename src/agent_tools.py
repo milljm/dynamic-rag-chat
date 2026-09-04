@@ -6,11 +6,40 @@ from pydantic import BaseModel, Field
 import yfinance as yf
 
 class DuckDuckGoSearchInput(BaseModel):
-    """Input schema for DuckDuckGo web search"""
+    """
+    ### DuckDuckGoSearchInput
+
+    Pydantic args schema for ``DuckDuckGoSearchTool``.
+
+    *Class init args:*
+        .. code-block:: python
+            query: str  # search query to look up
+
+    *Usage:*
+        - ``BaseTool.args_schema``; AgentExecutor fills this, not you.
+    """
     query: str = Field(description='Search query to look up')
 
 class DuckDuckGoSearchTool(BaseTool):
-    """Search DuckDuckGo for current information"""
+    """
+    ### DuckDuckGoSearchTool
+
+    LangChain tool: DuckDuckGo text search, five hits, markdown with
+    title / snippet / URL. Bound on the agent LLM when
+    ``Orchestration.requires_agent`` is true.
+
+    *Class init args:*
+        .. code-block:: python
+            (none — BaseTool; construct with DuckDuckGoSearchTool())
+
+    *Usage:*
+        - via AgentExecutor (preferred):
+            .. code-block:: python
+                tools = [DuckDuckGoSearchTool(), StockPriceTool()]
+        - direct:
+            .. code-block:: python
+                DuckDuckGoSearchTool()._run('query')
+    """
     name: str = 'duckduckgo_search'
     description: str = 'Search DuckDuckGo for current information'
     args_schema: typing.Type[BaseModel] = DuckDuckGoSearchInput
@@ -27,19 +56,35 @@ class DuckDuckGoSearchTool(BaseTool):
 
 
 class StockPriceInput(BaseModel):
-    """Input schema for stock price lookup"""
+    """
+    ### StockPriceInput
+
+    Pydantic args schema for ``StockPriceTool``.
+
+    *Class init args:*
+        .. code-block:: python
+            ticker: str  # AAPL, PANW, GOOGL, …
+
+    *Usage:*
+        - ``BaseTool.args_schema``; AgentExecutor fills this, not you.
+    """
     ticker: str = Field(description='Stock ticker symbol (e.g., AAPL, PANW, GOOGL)')
 
 class StockPriceTool(BaseTool):
-    """Get current stock price and market data using Yahoo Finance.
+    """
+    ### StockPriceTool
 
-    Use this tool when users ask about:
-    - Stock prices
-    - Share prices
-    - Ticker values
-    - Current market data for a specific company
+    Yahoo Finance quote (price, change, open/high/low, volume). Prefer
+    this over web search for ticker questions — it is free and faster.
 
-    This is FREE and fast compared to web search.
+    *Class init args:*
+        .. code-block:: python
+            (none — BaseTool; construct with StockPriceTool())
+
+    *Usage:*
+        - via AgentExecutor:
+            .. code-block:: python
+                StockPriceTool()._run('AAPL')
     """
     name: str = 'stock_price'
     description: str = (
