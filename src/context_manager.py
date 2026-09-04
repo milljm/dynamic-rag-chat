@@ -8,7 +8,6 @@ being supplied to the LLM. It utilizing several methods:
     ParentDocument/ChildDocument retrieval (return one large response with many small one)
 """
 import os
-from difflib import SequenceMatcher
 import threading
 from langchain_core.documents import Document
 from langchain_core.prompts import ChatPromptTemplate, PromptTemplate
@@ -16,7 +15,7 @@ from langchain_core.prompts import HumanMessagePromptTemplate, SystemMessageProm
 from langchain_openai import ChatOpenAI
 from openai import APITimeoutError
 from .rag_manager import RAG, RAGTag
-from .chat_utils import CommonUtils, ChatOptions, remember_rag_entry_ids
+from .chat_utils import CommonUtils, ChatOptions, remember_rag_entry_ids, dedupe_rag_chunks
 from .prompt_manager import PromptManager
 from .filter_builder import FilterBuilder
 from .scene_manager import SceneManager
@@ -98,37 +97,25 @@ class ContextManager(PromptManager):
 
     # pylint: enable=too-many-positional-arguments,too-many-arguments
     def deduplication(self, base_reference: list, response_list: list) -> list[str]:
+        """Drop RAG chunks already covered by chat history.
+
+        RAG parents are stored through ``sanitize_response(..., strip=True)``
+        — lowercase, whitespace collapsed, markdown fences stripped.
+        CHAT_HISTORY still has the original reply. Comparing those raw
+        strings with SequenceMatcher missed the previous turn almost
+        every time (case on the user question, fences/newlines on the
+        AI reply), so USER_RAG / AI_RAG were pasted next to history.
+
+        Containment is *chunk in history*, never the reverse, so a short
+        user turn quoting a filename cannot wipe a gold file.
+
+        Accepts list[str] or list[dict] (role/content). Returns list[str].
         """
-        Deduplicate response_list by checking for overlap containment.
-        Accepts either list[str] or list[dict] (role/content format).
-        Returns cleaned RAG chunks (list[str]).
-        """
-        def to_text(item) -> str:
-            if isinstance(item, dict):
-                return item.get('content', '') or ''
-            return str(item) if item is not None else ''
-
-        def is_overlap_duplicate(a: str, b: str) -> bool:
-            s, l = (a, b) if len(a) < len(b) else (b, a)
-            if not s.strip():
-                return False
-            matcher = SequenceMatcher(None, s, l)
-            match = matcher.find_longest_match(0, len(s), 0, len(l))
-            containment_ratio = match.size / len(s)
-            return containment_ratio > 0.65
-
-        # Normalize the base reference once
-        base_texts = [to_text(x) for x in base_reference]
-
-        cleaned_chunks = []
-        for chunk in response_list:
-            chunk_text = to_text(chunk)
-            if any(is_overlap_duplicate(chunk_text, base) for base in base_texts):
-                continue
-            if any(is_overlap_duplicate(chunk_text, prior) for prior in cleaned_chunks):
-                continue
-            cleaned_chunks.append(chunk_text)   # always store as string
-        return cleaned_chunks
+        return dedupe_rag_chunks(
+            response_list,
+            base_reference,
+            sanitize=lambda text: self.common.sanitize_response(text, strip=True),
+        )
 
     @staticmethod
     def token_retriever(context: str|list[str])->int:
@@ -697,7 +684,12 @@ class ContextManager(PromptManager):
         return self.rag.delete_named_file(gold, filename)
 
     def _fill_rag_collections(self, documents, meta_tags, query, branch):
-        """Retrieve, dedupe, and stringify each RAG collection.
+        """Retrieve, dedupe against history, and stringify each RAG collection.
+
+        Dedup happens *after* stagger, so older turns that fell out of
+        CHAT_HISTORY can still arrive via USER_RAG / AI_RAG. Recent turns
+        already in the window are stripped so the model is not asked to
+        reconcile two copies of the same reply.
 
         Returns (pre_tokens, post_tokens).
         """

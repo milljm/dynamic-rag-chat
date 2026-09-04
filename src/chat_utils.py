@@ -13,6 +13,7 @@ import fcntl
 from uuid import uuid4
 from contextlib import contextmanager
 from dataclasses import dataclass, field, asdict
+from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any, Mapping, Optional
 from typing import NamedTuple
@@ -239,6 +240,69 @@ def reserve_ai_rag_entry(documents: dict, collection: str) -> list[str]:
     documents['ai_rag_collection'] = collection
     documents['ai_rag_parent_ids'] = [parent_id]
     return [format_rag_entry_ref(collection, parent_id)]
+
+
+def item_text(item) -> str:
+    """Content of a history message or a RAG page. Empty for None."""
+    if isinstance(item, dict):
+        return str(item.get('content', '') or '')
+    return str(item) if item is not None else ''
+
+
+def overlap_ratio(needle: str, haystack: str) -> float:
+    """How much of ``needle`` appears as one contiguous run in ``haystack``.
+
+    1.0 means ``needle`` is already in the conversation. Asymmetric on
+    purpose: a short user turn that happens to appear inside a gold file
+    must not drop that file from DOCUMENTS. ``autojunk`` is off — spaces
+    and common letters would otherwise be treated as junk on anything
+    longer than ~200 characters, which is every real reply.
+    """
+    if not needle:
+        return 0.0
+    if needle in haystack:
+        return 1.0
+    matcher = SequenceMatcher(None, needle, haystack, autojunk=False)
+    match = matcher.find_longest_match(0, len(needle), 0, len(haystack))
+    return match.size / len(needle)
+
+
+def dedupe_rag_chunks(
+    chunks: list,
+    history_items: list,
+    sanitize,
+    threshold: float = 0.65,
+) -> list[str]:
+    """Drop RAG pages that chat history already covers.
+
+    ``store_data`` writes parents through ``sanitize_response(..., strip=True)``
+    (lowercase, collapsed whitespace, ``` fences stripped). History still
+    has the original markdown. Comparing those raw strings with
+    SequenceMatcher was case-sensitive and fence-sensitive, so the previous
+    turn's USER_RAG / AI_RAG were pasted next to CHAT_HISTORY almost
+    verbatim.
+
+    ``sanitize`` must be that same function. Gold files only drop when the
+    *file* is largely already in history — never because history is a
+    subset of the file.
+    """
+    hay = '\n'.join(
+        sanitize(item_text(item)) for item in (history_items or [])
+    )
+    cleaned: list[str] = []
+    seen_norm: list[str] = []
+    for chunk in chunks or []:
+        text = item_text(chunk)
+        needle = sanitize(text)
+        if not needle.strip():
+            continue
+        if hay and overlap_ratio(needle, hay) > threshold:
+            continue
+        if any(overlap_ratio(needle, prior) > threshold for prior in seen_norm):
+            continue
+        cleaned.append(text)
+        seen_norm.append(needle)
+    return cleaned
 
 
 def active_branch(assistant_mode: bool, history: dict | None) -> str:

@@ -4,10 +4,18 @@ from __future__ import annotations
 import os
 import sys
 import unittest
+from types import SimpleNamespace
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from chat_utils import ChatOptions, active_branch  # noqa: C0413
+from chat_utils import (  # noqa: C0413
+    ChatOptions,
+    CommonUtils,
+    RegExp,
+    active_branch,
+    dedupe_rag_chunks,
+    overlap_ratio,
+)
 
 
 class ActiveBranchTest(unittest.TestCase):
@@ -99,6 +107,101 @@ class ChatOptionsYamlTest(unittest.TestCase):
         })
         self.assertEqual(opts.coder_llm, 'coder-model')
         self.assertEqual(opts.coder_host, 'http://main:1234/v1')
+
+
+def _store_sanitize(text: str) -> str:
+    """Same transforms store_data applies: drop fences, lowercase, collapse space."""
+    return CommonUtils.normalize_for_dedup(text.replace('```', ''))
+
+
+class DedupeRagChunksTest(unittest.TestCase):
+    """USER_RAG / AI_RAG must not echo CHAT_HISTORY."""
+
+    def test_user_question_case_was_just_under_threshold(self):
+        hist = 'Can you create a matplotlib python example that uses Streamlit as a GUI front-end?'
+        rag = 'can you create a matplotlib python example that uses streamlit as a gui front-end?'
+        raw = overlap_ratio(rag, hist)
+        self.assertLess(raw, 0.65)
+        self.assertGreater(
+            overlap_ratio(_store_sanitize(rag), _store_sanitize(hist)),
+            0.65,
+        )
+        self.assertEqual(
+            dedupe_rag_chunks(
+                [rag],
+                [{'role': 'user', 'content': hist}],
+                sanitize=_store_sanitize,
+            ),
+            [],
+        )
+
+    def test_ai_reply_with_fences_vs_stored_parent(self):
+        history_ai = (
+            "Sure thing. Here's a self-contained example that gives you "
+            'interactive controls in the sidebar and two live matplotlib charts. '
+            'Save it and run with `streamlit run matplotlib_streamlit_app.py`.\n\n'
+            '```python matplotlib_streamlit_app.py\n'
+            'import streamlit as st\n'
+            'import matplotlib.pyplot as plt\n'
+            'import numpy as np\n'
+            '```\n'
+        )
+        stored = _store_sanitize(history_ai)
+        self.assertEqual(
+            dedupe_rag_chunks(
+                [stored],
+                [
+                    {'role': 'user', 'content': 'Can you create a matplotlib example?'},
+                    {'role': 'assistant', 'content': history_ai},
+                ],
+                sanitize=_store_sanitize,
+            ),
+            [],
+        )
+
+    def test_keeps_older_turn_not_in_window(self):
+        kept = dedupe_rag_chunks(
+            ['the wizard left town three sessions ago'],
+            [{'role': 'assistant', 'content': 'Hello. What now?'}],
+            sanitize=_store_sanitize,
+        )
+        self.assertEqual(kept, ['the wizard left town three sessions ago'])
+
+    def test_short_history_does_not_drop_gold_file(self):
+        gold = (
+            'matplotlib cookbook\n' * 40
+            + 'Can you create a matplotlib python example that uses Streamlit as a GUI front-end?'
+        )
+        kept = dedupe_rag_chunks(
+            [gold],
+            [{'role': 'user', 'content':
+              'Can you create a matplotlib python example that uses Streamlit as a GUI front-end?'}],
+            sanitize=_store_sanitize,
+        )
+        self.assertEqual(kept, [gold])
+
+    def test_empty_history_keeps_chunks(self):
+        self.assertEqual(
+            dedupe_rag_chunks(['fresh fact'], [], sanitize=_store_sanitize),
+            ['fresh fact'],
+        )
+
+    def test_sanitize_response_matches_store_data(self):
+        util = CommonUtils.__new__(CommonUtils)
+        util.opts = SimpleNamespace(assistant_mode=True, debug=False)
+        util.regex = RegExp()
+        history = 'Sure thing.\n\n```python hello.py\nprint("hi")\n```\n'
+        stored = util.sanitize_response(history, strip=True)
+        self.assertNotIn('```', stored)
+        self.assertEqual(stored, stored.lower())
+        self.assertEqual(
+            dedupe_rag_chunks(
+                [stored],
+                [{'role': 'assistant', 'content': history}],
+                sanitize=lambda text: util.sanitize_response(text, strip=True),
+            ),
+            [],
+        )
 
 
 if __name__ == '__main__':
