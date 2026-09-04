@@ -18,7 +18,7 @@ const SIDEBAR_DEFAULT = 350;
 
 export function AppShell() {
   const ready = useHydrateChat();
-  const { send, stop, regenerate, illustrate, streaming } = useSend();
+  const { send, stop, regenerate, editUser, illustrate, streaming } = useSend();
   const [navOpen, setNavOpen] = useState(false);
   const [promptOpen, setPromptOpen] = useState(false);
   const sidebar = useSidebarLayout();
@@ -135,6 +135,7 @@ export function AppShell() {
             <>
               <Thread
                 streaming={streaming}
+                onEditUser={editUser}
                 onRevealSidebar={
                   sidebar.open ? undefined : () => sidebar.setOpen(true)
                 }

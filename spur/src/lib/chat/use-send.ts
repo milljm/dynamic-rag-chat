@@ -6,6 +6,7 @@ import {
   modeOf,
   stringifyBranch,
   turnCount,
+  userTurnNumber,
 } from "./branch-mode";
 import { parseComposerInput, parseIncludes, SLASH_HELP } from "./commands";
 import { retrieve } from "./rag";
@@ -121,6 +122,13 @@ export function useSend() {
 
       inflight.current = true;
       const assistantId = crypto.randomUUID();
+      const latestBranch = useChatStore.getState().branches[originId];
+      const collection = noContext ? [] : (latestBranch?.rag ?? []);
+      const query = opts.text.trim();
+      const hits = noContext ? [] : retrieve(collection, query, 4);
+      const ragIds = [
+        ...new Set(hits.map((h) => h.source).filter(Boolean)),
+      ];
       const assistantMsg: Message = {
         id: assistantId,
         role: "assistant",
@@ -130,6 +138,7 @@ export function useSend() {
           : agent
             ? "Agent Web Search…"
             : "Processing Prompt… 0%",
+        ragIds: ragIds.length ? ragIds : undefined,
         createdAt: Date.now(),
       };
       store.appendMessage(assistantMsg, [], originId);
@@ -140,9 +149,6 @@ export function useSend() {
         .slice(-16)
         .map((m) => ({ role: m.role, content: m.content }));
 
-      const collection = noContext ? [] : (latest?.rag ?? []);
-      const query = opts.text.trim();
-      const hits = noContext ? [] : retrieve(collection, query, 4);
       const images = pending
         .filter((a) => a.kind === "image" && a.dataUrl)
         .map((a) => a.dataUrl!)
@@ -373,6 +379,59 @@ export function useSend() {
     });
   }, [generate]);
 
+  const editUser = useCallback(
+    async (messageId: string, text: string) => {
+      if (inflight.current) return;
+      const store = useChatStore.getState();
+      const branch = store.branches[store.currentId];
+      if (!branch) return;
+      const msg = branch.messages.find((m) => m.id === messageId);
+      if (!msg || msg.role !== "user") return;
+      const trimmed = text.trim();
+      if (!trimmed && !msg.attachments?.length) {
+        toast.message("Nothing to send.");
+        return;
+      }
+      const nextText = trimmed || msg.content;
+      const idx = branch.messages.findIndex((m) => m.id === messageId);
+      const laterUsers =
+        idx >= 0
+          ? branch.messages.slice(idx + 1).filter((m) => m.role === "user").length
+          : 0;
+      if (
+        laterUsers > 0 &&
+        !window.confirm("Drop later turns and re-run from this message?")
+      ) {
+        return;
+      }
+      const n = userTurnNumber(branch.messages, messageId);
+      const flags = msg.flags;
+      const result = store.editUserTurn(messageId, nextText);
+      if (!result.ok) {
+        toast.error(result.error);
+        return;
+      }
+      if (usesChatPy()) {
+        const op = await postOp("/api/history/edit-user", { n, text: nextText });
+        if (!op.ok) {
+          toast.error(op.error || "Could not edit that turn.");
+          await store.hydrateFromServer();
+          return;
+        }
+      }
+      await generate({
+        text: nextText,
+        regenerate: true,
+        agent: Boolean(flags?.agent || store.forceAgent),
+        image: Boolean(flags?.image || store.forceSd),
+        noContext: Boolean(flags?.noContext),
+        includeBranch: flags?.includeBranch,
+        ooc: Boolean(flags?.ooc),
+      });
+    },
+    [generate],
+  );
+
   const illustrate = useCallback(async () => {
     const store = useChatStore.getState();
     const branch = store.branches[store.currentId];
@@ -395,7 +454,7 @@ export function useSend() {
     });
   }, [generate]);
 
-  return { send, stop, regenerate, illustrate, streaming };
+  return { send, stop, regenerate, editUser, illustrate, streaming };
 }
 
 function handleLocalCommand(
@@ -586,6 +645,7 @@ async function generateViaChatPy(
   let context = 0;
   let recalling = false;
   let recalled: string[] = [];
+  let ragIds: string[] = [];
   let attachments: Attachment[] = [];
   const think = { inThink: false, neverThink: false };
 
@@ -624,6 +684,11 @@ async function generateViaChatPy(
       (event) => {
         if (event.type === "documents") {
           window.dispatchEvent(new Event("spur-documents"));
+        } else if (event.type === "rag") {
+          if (event.ids?.length) {
+            ragIds = event.ids;
+            patch({ ragIds });
+          }
         } else if (event.type === "status") {
           if (event.model) model = event.model;
           if (event.route) route = event.route;
@@ -717,6 +782,7 @@ async function generateViaChatPy(
   } finally {
     const generationTime = (performance.now() - started) / 1000;
     const tokenCount = completionTokens || estimateTokens(content);
+    const ids = [...new Set([...ragIds, ...recalled])];
     useChatStore.getState().replaceMessage(
       assistantId,
       {
@@ -730,8 +796,9 @@ async function generateViaChatPy(
           tokenSavings,
           ttft,
         },
-        recalled: recalled.length ? recalled : undefined,
-        attachments: attachments.length ? attachments : undefined,
+        ...(recalled.length ? { recalled } : {}),
+        ...(ids.length ? { ragIds: ids } : {}),
+        ...(attachments.length ? { attachments } : {}),
         status: undefined,
       },
       originId,

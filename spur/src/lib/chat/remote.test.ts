@@ -129,3 +129,28 @@ test("mergeRemoteSnapshot does not drop a branch the client already streamed", (
   assert.equal(merged.currentId, "assistant");
   assert.equal(merged.branches.story.messages[0].content.includes("```js"), true);
 });
+
+test("session snapshot keeps ragIds and recalled", () => {
+  const snap = sessionToSnapshot({
+    currentId: "story",
+    branches: {
+      story: {
+        id: "story",
+        name: "story",
+        mode: "story",
+        locked: true,
+        messages: [
+          { role: "user", content: "see notes.md" },
+          {
+            role: "assistant",
+            content: "ok",
+            ragIds: ["notes.md"],
+            recalled: ["notes.md"],
+          },
+        ],
+      },
+    },
+  });
+  assert.deepEqual(snap.branches.story.messages[1].ragIds, ["notes.md"]);
+  assert.deepEqual(snap.branches.story.messages[1].recalled, ["notes.md"]);
+});

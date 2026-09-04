@@ -46,6 +46,77 @@ HISTORY_META_KEYS = frozenset({
     'current', 'assistant_mode', 'branch_modes', 'version',
 })
 
+_USER_TURN_RE = re.compile(r'USER:\s*(.*?)\s*(?:\n\nAI:|\Z)', re.S)
+
+
+def drop_last_assistant(messages: list) -> bool:
+    """Remove the last AI reply only. Keep the user text. True if changed."""
+    if not messages:
+        return False
+    last = messages[-1]
+    if isinstance(last, dict):
+        if last.get('role') == 'assistant':
+            messages.pop()
+            return True
+        return False
+    if isinstance(last, str):
+        match = _USER_TURN_RE.search(last)
+        if match and '\n\nAI:' in last:
+            messages[-1] = f"USER: {match.group(1).strip()}\n\n"
+            return True
+        if match:
+            return False
+        messages.pop()
+        return True
+    return False
+
+
+def last_user_text(messages: list) -> str:
+    """Content of the most recent user turn."""
+    if not messages:
+        return ''
+    for item in reversed(messages):
+        if isinstance(item, dict) and item.get('role') == 'user':
+            return str(item.get('content') or '')
+        if isinstance(item, str):
+            match = _USER_TURN_RE.search(item)
+            if match:
+                return match.group(1).strip()
+    return ''
+
+
+def edit_user_turn(messages: list, n: int, text: str) -> list | None:
+    """Keep through the nth user message (1-based), replace text, drop later turns."""
+    if not isinstance(messages, list) or n < 1:
+        return None
+    seen = 0
+    for i, item in enumerate(messages):
+        if isinstance(item, dict) and item.get('role') == 'user':
+            seen += 1
+            if seen == n:
+                item['content'] = text
+                return messages[: i + 1]
+    return None
+
+
+def append_turn(
+    messages: list,
+    user_content: str,
+    assistant_content: str,
+    extra: dict | None = None,
+    regenerate: bool = False,
+) -> None:
+    """Append a user/assistant pair, or only a new assistant when regenerating."""
+    assistant_msg: dict = {'role': 'assistant', 'content': assistant_content}
+    if extra:
+        assistant_msg.update({k: v for k, v in extra.items() if k not in ('role',)})
+    if regenerate:
+        drop_last_assistant(messages)
+        messages.append(assistant_msg)
+        return
+    messages.append({'role': 'user', 'content': user_content})
+    messages.append(assistant_msg)
+
 
 def active_branch(assistant_mode: bool, history: dict | None) -> str:
     """Which history list to read/write.

@@ -19,6 +19,10 @@ try:
         _atomic_write_json,
         _read_json_dict,
         CommonUtils,
+        append_turn,
+        drop_last_assistant,
+        edit_user_turn,
+        last_user_text,
     )
 except ImportError:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -29,6 +33,10 @@ except ImportError:
         _atomic_write_json,
         _read_json_dict,
         CommonUtils,
+        append_turn,
+        drop_last_assistant,
+        edit_user_turn,
+        last_user_text,
     )
 
 
@@ -191,6 +199,56 @@ class AttachmentHelpersTest(unittest.TestCase):
         # Original documents must keep the bodies for the generator.
         self.assertIn('SECRET_BODY', docs['dynamic_files'])
         self.assertEqual(docs['attachment_texts'][0]['text'], 'SECRET_BODY')
+
+
+class HistoryTurnOpsTest(unittest.TestCase):
+    """Regenerate / edit helpers must not drop user turns."""
+
+    def test_drop_last_assistant_keeps_user(self):
+        msgs = [
+            {'role': 'user', 'content': 'q1'},
+            {'role': 'assistant', 'content': 'a1'},
+            {'role': 'user', 'content': 'q2'},
+            {'role': 'assistant', 'content': 'a2'},
+        ]
+        self.assertTrue(drop_last_assistant(msgs))
+        self.assertEqual([m['role'] for m in msgs], ['user', 'assistant', 'user'])
+        self.assertEqual(last_user_text(msgs), 'q2')
+        self.assertFalse(drop_last_assistant(msgs))
+
+    def test_drop_last_assistant_old_string_keeps_user(self):
+        msgs = ['USER: hello\n\nAI: hi there\n\n']
+        self.assertTrue(drop_last_assistant(msgs))
+        self.assertIn('USER: hello', msgs[-1])
+        self.assertNotIn('AI:', msgs[-1])
+        self.assertEqual(last_user_text(msgs), 'hello')
+
+    def test_append_turn_regenerate_does_not_duplicate_user(self):
+        msgs = [
+            {'role': 'user', 'content': 'q1'},
+            {'role': 'assistant', 'content': 'a1'},
+            {'role': 'user', 'content': 'q2'},
+            {'role': 'assistant', 'content': 'old'},
+        ]
+        append_turn(msgs, 'q2', 'new', extra={'ragIds': ['notes.md']}, regenerate=True)
+        self.assertEqual([m['role'] for m in msgs], [
+            'user', 'assistant', 'user', 'assistant',
+        ])
+        self.assertEqual(msgs[-2]['content'], 'q2')
+        self.assertEqual(msgs[-1]['content'], 'new')
+        self.assertEqual(msgs[-1]['ragIds'], ['notes.md'])
+
+    def test_edit_user_turn_truncates_later(self):
+        msgs = [
+            {'role': 'user', 'content': 'q1'},
+            {'role': 'assistant', 'content': 'a1'},
+            {'role': 'user', 'content': 'q2'},
+            {'role': 'assistant', 'content': 'a2'},
+        ]
+        out = edit_user_turn(msgs, 1, 'q1-edit')
+        self.assertIsNotNone(out)
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0]['content'], 'q1-edit')
 
 
 if __name__ == '__main__':

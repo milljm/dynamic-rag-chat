@@ -50,6 +50,17 @@ export function lastUserMessage(messages: Message[]): Message | undefined {
   return undefined;
 }
 
+/** 1-based user-turn index of `messageId`, or 0 if it is not a user turn. */
+export function userTurnNumber(messages: Message[], messageId: string): number {
+  let n = 0;
+  for (const msg of messages) {
+    if (msg.role !== "user") continue;
+    n += 1;
+    if (msg.id === messageId) return n;
+  }
+  return 0;
+}
+
 export function lastUserInputs(messages: Message[], n = 5): string[] {
   const out: string[] = [];
   for (let i = messages.length - 1; i >= 0 && out.length < n; i--) {
@@ -321,6 +332,32 @@ export function applyPopLastAssistant(state: ChatSnapshot): ChatSnapshot {
   };
 }
 
+export function applyEditUserTurn(
+  state: ChatSnapshot,
+  messageId: string,
+  text: string,
+): { ok: true; state: ChatSnapshot } | { ok: false; error: string } {
+  const current = state.branches[state.currentId];
+  if (!current) return { ok: false, error: "No active branch." };
+  const idx = current.messages.findIndex((m) => m.id === messageId);
+  if (idx < 0 || current.messages[idx]?.role !== "user") {
+    return { ok: false, error: "Not a user turn." };
+  }
+  const next = current.messages.slice(0, idx + 1).map((m, i) =>
+    i === idx ? { ...m, content: text } : m,
+  );
+  return {
+    ok: true,
+    state: {
+      ...state,
+      branches: {
+        ...state.branches,
+        [current.id]: { ...current, messages: next, updatedAt: Date.now() },
+      },
+    },
+  };
+}
+
 export function applyAppendMessage(
   state: ChatSnapshot,
   message: Message,
@@ -393,6 +430,8 @@ function cloneMessage(m: Message): Message {
     attachments: m.attachments?.map((a) => ({ ...a })),
     metrics: m.metrics ? { ...m.metrics } : undefined,
     flags: m.flags ? { ...m.flags } : undefined,
+    recalled: m.recalled ? [...m.recalled] : undefined,
+    ragIds: m.ragIds ? [...m.ragIds] : undefined,
   };
 }
 

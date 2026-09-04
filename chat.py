@@ -62,7 +62,7 @@ from src import ImportData
 from src import SceneManager
 from src import Orchestration
 from src.sd_session import clear_session
-from src.chat_utils import load_pdf, HISTORY_META_KEYS
+from src.chat_utils import load_pdf, HISTORY_META_KEYS, drop_last_assistant, last_user_text
 posthog.disabled = True
 dark_rich_142_styles = {
     'markdown.h1': 'bold #FFFFFF',
@@ -764,19 +764,19 @@ class Chat():
         console.print()
 
     def _cmd_regenerate(self, history: dict):
-        """Pop the last assistant message and re-parse the previous user text.
+        """Drop the last assistant reply and re-send the previous user text.
 
-        Returns a ParsedInput to send, or None if history is empty.
+        Returns a ParsedInput to send, or None if there is no user turn.
         """
-        try:
-            last = history[self.chat_branch].pop()
-            match = re.findall(r'USER:(.*\n\n)', last)
-            self.session.common.save_chat(history)
-            return parse_user_input(match[0])
-        except IndexError:
-            console.print('[yellow]History empty.[/yellow]')
+        msgs = history.get(self.chat_branch) or []
+        drop_last_assistant(msgs)
+        history[self.chat_branch] = msgs
+        text = last_user_text(msgs)
+        if not text:
+            console.print('[yellow]Nothing to regenerate.[/yellow]')
             return None
-
+        self.session.common.save_chat(history)
+        return parse_user_input(text)
     def _dispatch_command(self, parsed, history: dict):
         """Handle slash commands.
 
@@ -892,6 +892,7 @@ class Chat():
                     continue
                 history = self.session.common.load_chat()
                 parsed = parse_user_input(raw)
+                regenerate = parsed.command == 'regenerate'
                 if parsed.command:
                     parsed, skip = self._dispatch_command(parsed, history)
                     if skip:
@@ -901,6 +902,8 @@ class Chat():
                 )
                 if not documents:
                     continue
+                if regenerate:
+                    documents['regenerate'] = True
                 self.session.renderer.live_stream(documents, meta_data)
         except (KeyboardInterrupt, EOFError):
             sys.exit()

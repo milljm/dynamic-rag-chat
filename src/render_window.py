@@ -26,7 +26,7 @@ from langchain_tavily import TavilySearch
 from langchain_openai import ChatOpenAI # For Type Hinting
 from .prompt_manager import PromptManager
 from .context_manager import ContextManager # For Type Hinting
-from .chat_utils import CommonUtils, ChatOptions, RAGTag # For Type Hinting
+from .chat_utils import CommonUtils, ChatOptions, RAGTag, append_turn
 from .model_orchestrator import Orchestration, MAX_AGENT_CALLS
 from .agent_tools import DuckDuckGoSearchTool, StockPriceTool
 from .sd_client import MAGICK_QUERY, has_generated_images, is_new_scene, ping_sd, vision_thumb_data_url
@@ -1291,12 +1291,17 @@ class RenderWindow(PromptManager):
             documents['user_query'] = documents['user_query'].replace('', '')
 
         # ── Append user/assistant pair to active branch ─────
-        assistant_msg: dict = {'role': 'assistant', 'content': current_response}
+        assistant_extra: dict = {}
         thought = (reasoning or getattr(self, 'thinking_chunk', '') or '').strip()
         if thought:
-            assistant_msg['reasoning'] = thought
-        history[branch].append({'role': 'user', 'content': documents['user_query']})
-        history[branch].append(assistant_msg)
+            assistant_extra['reasoning'] = thought
+        append_turn(
+            history[branch],
+            documents['user_query'],
+            current_response,
+            extra=assistant_extra or None,
+            regenerate=bool(documents.get('regenerate')),
+        )
 
         stream.meta_capture = ''
         if self.debug:
