@@ -136,6 +136,98 @@ class RagManagerTest(unittest.TestCase):
             rag._apply_rerank('q', docs)
         self.assertEqual(posted.call_args.kwargs['timeout'], 2.5)
 
+    def test_delete_entries_removes_children_and_parents(self):
+        rag = RAG(None, None, _opts())
+
+        class _Col:
+            def __init__(self):
+                self.deleted = []
+
+            def get(self, include=None):
+                del include
+                return {
+                    'ids': ['child-1', 'other'],
+                    'metadatas': [{'doc_id': 'p1'}, {'doc_id': 'p2'}],
+                }
+
+            def delete(self, ids=None):
+                self.deleted.extend(ids or [])
+
+        class _Vec:
+            def __init__(self):
+                self._collection = _Col()
+
+        class _Store:
+            def __init__(self):
+                self.deleted = []
+
+            def mdelete(self, ids):
+                self.deleted.extend(ids)
+
+        vec = _Vec()
+        store = _Store()
+        rag._vector_store = lambda collection: vec
+        rag._docstore = lambda collection: store
+        n = rag.delete_entries('story_user_documents', ['p1'])
+        self.assertEqual(n, 1)
+        self.assertEqual(vec._collection.deleted, ['child-1'])
+        self.assertEqual(store.deleted, ['p1'])
+
+    def test_delete_entries_skips_gold(self):
+        rag = RAG(None, None, _opts())
+        called = []
+        rag._vector_store = lambda collection: called.append(collection)
+        self.assertEqual(rag.delete_entries('gold_documents', ['p1']), 0)
+        self.assertEqual(called, [])
+
+    def test_purge_entry_refs_groups_and_skips_gold(self):
+        rag = RAG(None, None, _opts())
+        seen = []
+
+        def fake_delete(collection, ids):
+            seen.append((collection, list(ids)))
+            return len(ids)
+
+        rag.delete_entries = fake_delete
+        n = rag.purge_entry_refs([
+            ('story_user_documents', 'u1'),
+            ('story_ai_documents', 'a1'),
+            ('gold_documents', 'g1'),
+            ('story_user_documents', 'u2'),
+        ])
+        self.assertEqual(n, 3)
+        self.assertEqual(seen, [
+            ('story_user_documents', ['u1', 'u2']),
+            ('story_ai_documents', ['a1']),
+        ])
+
+    def test_store_data_uses_supplied_ids(self):
+        rag = RAG(None, None, _opts())
+        rag._embeddings_ready = lambda: True
+        rag.common = SimpleNamespace(
+            sanitize_response=lambda data, strip=True: data,
+            normalize_metadata_for_rag=lambda meta: meta,
+            attributes=SimpleNamespace(collections={'ai': 'ai_documents'}),
+        )
+        captured = {}
+
+        class _Ret:
+            def add_documents(self, docs, ids=None):
+                captured['ids'] = ids
+                captured['docs'] = docs
+
+        rag._parent_retriever = lambda collection: _Ret()
+        rag.console = SimpleNamespace(print=lambda *a, **k: None)
+        out = rag.store_data(
+            'hello',
+            tags_metadata=[],
+            collection='story_ai_documents',
+            ids=['fixed-id'],
+        )
+        self.assertEqual(out, ['fixed-id'])
+        self.assertEqual(captured['ids'], ['fixed-id'])
+        self.assertEqual(captured['docs'][0].metadata.get('doc_id'), 'fixed-id')
+
 
 if __name__ == '__main__':
     unittest.main()

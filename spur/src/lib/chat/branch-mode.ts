@@ -432,6 +432,7 @@ function cloneMessage(m: Message): Message {
     flags: m.flags ? { ...m.flags } : undefined,
     recalled: m.recalled ? [...m.recalled] : undefined,
     ragIds: m.ragIds ? [...m.ragIds] : undefined,
+    ragEntryIds: m.ragEntryIds ? [...m.ragEntryIds] : undefined,
   };
 }
 

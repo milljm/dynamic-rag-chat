@@ -16,7 +16,7 @@ from langchain_core.prompts import HumanMessagePromptTemplate, SystemMessageProm
 from langchain_openai import ChatOpenAI
 from openai import APITimeoutError
 from .rag_manager import RAG, RAGTag
-from .chat_utils import CommonUtils, ChatOptions
+from .chat_utils import CommonUtils, ChatOptions, remember_rag_entry_ids
 from .prompt_manager import PromptManager
 from .filter_builder import FilterBuilder
 from .scene_manager import SceneManager
@@ -262,13 +262,22 @@ class ContextManager(PromptManager):
         if not self.opts.assistant_mode:
             list_rag_tags = self.scene.ground_scene(list_rag_tags)
 
-        branch = self._active_branch(history)
-        collection = f'{branch}_{collection}'
+        reserved_collection = documents.get('ai_rag_collection')
+        reserved_ids = documents.get('ai_rag_parent_ids')
+        if reserved_collection:
+            collection = reserved_collection
+        else:
+            collection = f'{self._active_branch(history)}_{collection}'
         if self.debug:
             self.console.print(f'THREADED META TAGS PARSED: {list_rag_tags}',
                                style=f'color({self.opts.color})',
                                highlight=False)
-        self.rag.store_data(response, tags_metadata=list_rag_tags, collection=collection)
+        self.rag.store_data(
+            response,
+            tags_metadata=list_rag_tags,
+            collection=collection,
+            ids=list(reserved_ids) if reserved_ids else None,
+        )
 
     def _mint_new_characters(self, documents: dict) -> None:
         """Write NPC sheets for anyone new in the current scene entity list."""
@@ -827,6 +836,43 @@ class ContextManager(PromptManager):
             'Never ask them to attach these files again.'
         )
 
+    def _reuse_user_rag(self, documents: dict) -> bool:
+        """Reuse the last user embedding on regenerate instead of writing another.
+
+        Pre-process meta-tags store the user query into
+        ``{branch}_user_documents``. Regenerating the *same* question must
+        not duplicate that parent — the LLM would retrieve both the old and
+        new snippet and spend tokens reconciling the leak. Editing the user
+        text clears ``ragEntryIds`` first, so a new store runs.
+        """
+        if not documents.get('regenerate'):
+            return False
+        for item in reversed(documents.get('chat_history') or []):
+            if isinstance(item, dict) and item.get('role') == 'user':
+                refs = [
+                    str(x) for x in (item.get('ragEntryIds') or [])
+                    if str(x).strip()
+                ]
+                if refs:
+                    documents['user_rag_entry_ids'] = refs
+                    return True
+                return False
+        return False
+
+    def _store_user_query(
+        self, documents: dict, meta_tags, query: str, branch: str,
+    ) -> None:
+        """Persist this turn's tagged user query and remember the parent ids."""
+        if self._reuse_user_rag(documents):
+            return
+        collection = f'{branch}_{self.common.attributes.collections["user"]}'
+        ids = self.rag.store_data(
+            query, tags_metadata=meta_tags, collection=collection,
+        )
+        remember_rag_entry_ids(
+            documents, collection, ids, slot='user_rag_entry_ids',
+        )
+
     def handle_context(self, documents: dict,
                              direction='query')->tuple[dict[str,list], int, list]:
         """Assemble RAG + history for a query, or post-process a reply."""
@@ -854,11 +900,7 @@ class ContextManager(PromptManager):
             pre_tokens, post_tokens = self._fill_rag_collections(
                 documents, meta_tags, query, branch,
             )
-            self.rag.store_data(
-                query,
-                tags_metadata=meta_tags,
-                collection=f'{branch}_{self.common.attributes.collections["user"]}',
-            )
+            self._store_user_query(documents, meta_tags, query, branch)
         else:
             documents.setdefault('user_documents', '')
             documents.setdefault('ai_documents', '')

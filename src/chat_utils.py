@@ -10,6 +10,7 @@ import secrets
 import tempfile
 import shutil
 import fcntl
+from uuid import uuid4
 from contextlib import contextmanager
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
@@ -116,6 +117,128 @@ def append_turn(
         return
     messages.append({'role': 'user', 'content': user_content})
     messages.append(assistant_msg)
+
+
+_GOLD_SUFFIX = 'gold_documents'
+
+
+def format_rag_entry_ref(collection: str, parent_id: str) -> str:
+    """Encode a stored parent as ``collection:id`` for history ``ragEntryIds``.
+
+    Spur and the TUI stamp these on each turn so rewind / regenerate / edit
+    can delete *this turn's* pre-processor snippets without touching the gold
+    cabinet (Documents). Collection names have no colon; parent ids are uuids.
+    """
+    return f'{str(collection).strip()}:{str(parent_id).strip()}'
+
+
+def parse_rag_entry_ref(ref: str) -> tuple[str, str] | None:
+    """Split ``collection:id``. Gold cabinet refs are ignored (never auto-deleted)."""
+    text = str(ref or '').strip()
+    if ':' not in text:
+        return None
+    collection, parent_id = text.split(':', 1)
+    collection = collection.strip()
+    parent_id = parent_id.strip()
+    if not collection or not parent_id:
+        return None
+    if collection == _GOLD_SUFFIX or collection.endswith(f'_{_GOLD_SUFFIX}'):
+        return None
+    return collection, parent_id
+
+
+def collect_rag_entry_refs(messages: list) -> list[tuple[str, str]]:
+    """Pull ``(collection, parent_id)`` pairs off dropped history messages.
+
+    Each message may carry ``ragEntryIds`` written at store time: the user
+    query lives on the user bubble (``{branch}_user_documents:uuid``) and the
+    tagged assistant reply lives on the AI bubble. Call this *before* the
+    messages are discarded, then ``purge_rag_entries``. Duplicate refs across
+    a user/assistant pair are collapsed so ``delete_entries`` runs once.
+    """
+    refs: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for item in messages or []:
+        if not isinstance(item, dict):
+            continue
+        for raw in item.get('ragEntryIds') or []:
+            parsed = parse_rag_entry_ref(raw)
+            if parsed and parsed not in seen:
+                seen.add(parsed)
+                refs.append(parsed)
+    return refs
+
+
+def purge_rag_entries(rag, messages: list) -> int:
+    """Delete Chroma parents listed on ``messages``.
+
+    ``rag`` is duck-typed (needs ``purge_entry_refs``). Empty / None / missing
+    method is a no-op so tests and ``--no-rags`` sessions stay quiet. Returns
+    the number of child chunks ``delete_entries`` removed.
+
+    Gold cabinet files are never in the collected refs, so Documents stays
+    put even if a turn mentioned an attached file.
+    """
+    refs = collect_rag_entry_refs(messages)
+    if not refs or rag is None:
+        return 0
+    purge = getattr(rag, 'purge_entry_refs', None)
+    if not callable(purge):
+        return 0
+    return int(purge(refs) or 0)
+
+
+def remember_rag_entry_ids(
+    target: dict,
+    collection: str,
+    parent_ids: list[str] | None,
+    slot: str = 'ragEntryIds',
+) -> list[str]:
+    """Append ``collection:id`` refs onto ``target[slot]``. Returns the slot list.
+
+    Used both on history messages (``ragEntryIds``) and on the in-flight
+    ``documents`` dict (``user_rag_entry_ids``) so ``save_history`` can stamp
+    the user bubble after ``store_data`` returns.
+    """
+    current = [str(x) for x in (target.get(slot) or []) if str(x).strip()]
+    seen = set(current)
+    for parent_id in parent_ids or []:
+        parent_id = str(parent_id).strip()
+        if not collection or not parent_id:
+            continue
+        ref = format_rag_entry_ref(collection, parent_id)
+        if ref not in seen:
+            seen.add(ref)
+            current.append(ref)
+    if current:
+        target[slot] = current
+    return current
+
+
+def stamp_user_rag_entry_ids(messages: list, refs: list[str] | None) -> None:
+    """Write ``ragEntryIds`` onto the latest user message (this turn's query)."""
+    if not refs:
+        return
+    for item in reversed(messages or []):
+        if isinstance(item, dict) and item.get('role') == 'user':
+            item['ragEntryIds'] = list(refs)
+            return
+
+
+def reserve_ai_rag_entry(documents: dict, collection: str) -> list[str]:
+    """Mint the assistant parent id now; ``store_data`` consumes it later.
+
+    ``save_response`` tags the reply on a daemon thread so the prompt can
+    return. History has to know the parent id *before* that thread finishes,
+    otherwise a quick regenerate cannot call ``delete_entries`` and the old
+    snippet leaks into the next retrieve.
+
+    Stashes ``ai_rag_collection`` / ``ai_rag_parent_ids`` on ``documents``.
+    """
+    parent_id = str(uuid4())
+    documents['ai_rag_collection'] = collection
+    documents['ai_rag_parent_ids'] = [parent_id]
+    return [format_rag_entry_ref(collection, parent_id)]
 
 
 def active_branch(assistant_mode: bool, history: dict | None) -> str:

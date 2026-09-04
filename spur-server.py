@@ -61,6 +61,8 @@ from src.chat_utils import (
     load_history_from_dir,
     drop_last_assistant,
     edit_user_turn as slice_edit_user_turn,
+    purge_rag_entries,
+    stamp_user_rag_entry_ids,
 )
 from src.settings_yaml import (
     ALL_KEYS,
@@ -432,6 +434,8 @@ def session_payload(chat: Chat | None = None) -> dict[str, Any]:
                     row['recalled'] = list(m['recalled'])
                 if m.get('ragIds'):
                     row['ragIds'] = list(m['ragIds'])
+                if m.get('ragEntryIds'):
+                    row['ragEntryIds'] = list(m['ragEntryIds'])
                 clean.append(row)
             elif isinstance(m, str) and m.strip():
                 clean.append({'role': 'assistant', 'content': m})
@@ -594,16 +598,29 @@ def reset_branch(chat: Chat) -> tuple[bool, str]:
     return True, f"Reset '{branch}'."
 
 
+def _purge_chat_rag(chat: Chat, messages: list) -> None:
+    """Drop turn-scoped RAG parents listed on ``messages``.
+
+    Called from rewind / delete-last / edit-user / regenerate so the next
+    retrieve no longer sees the discarded turn's pre-processor snippets.
+    Gold cabinet files are never in those refs.
+    """
+    rag = getattr(getattr(chat, 'session', None), 'rag', None)
+    purge_rag_entries(rag, messages)
+
+
 def delete_last_turn(chat: Chat) -> tuple[bool, str]:
     hist = _history(chat)
     branch = hist.get('current', 'story')
     msgs = hist.get(branch, [])
     if not msgs:
         return False, 'History empty.'
+    dropped = []
     if msgs and isinstance(msgs[-1], dict) and msgs[-1].get('role') == 'assistant':
-        msgs.pop()
-    if msgs and msgs[-1].get('role') == 'user':
-        msgs.pop()
+        dropped.append(msgs.pop())
+    if msgs and isinstance(msgs[-1], dict) and msgs[-1].get('role') == 'user':
+        dropped.append(msgs.pop())
+    _purge_chat_rag(chat, dropped)
     hist[branch] = msgs
     chat.session.common.save_chat(hist)
     if hasattr(chat.session.renderer, 'clear_ooc'):
@@ -616,7 +633,11 @@ def pop_last_assistant(chat: Chat) -> tuple[bool, str]:
     hist = _history(chat)
     branch = hist.get('current', 'story')
     msgs = hist.get(branch, []) or []
+    dropped = []
+    if msgs and isinstance(msgs[-1], dict) and msgs[-1].get('role') == 'assistant':
+        dropped.append(msgs[-1])
     if drop_last_assistant(msgs):
+        _purge_chat_rag(chat, dropped)
         hist[branch] = msgs
         chat.session.common.save_chat(hist)
     if hasattr(chat.session.renderer, 'clear_ooc'):
@@ -632,6 +653,12 @@ def edit_user_turn(chat: Chat, n: int, text: str) -> tuple[bool, str]:
     sliced = slice_edit_user_turn(msgs, n, text)
     if sliced is None:
         return False, 'No such user turn.'
+    dropped = msgs[len(sliced):]
+    # The kept user turn is a new query — drop its old embedding too.
+    stale = [sliced[-1]] if sliced else []
+    _purge_chat_rag(chat, stale + dropped)
+    if sliced and isinstance(sliced[-1], dict):
+        sliced[-1].pop('ragEntryIds', None)
     hist[branch] = sliced
     chat.session.common.save_chat(hist)
     if hasattr(chat.session.renderer, 'clear_ooc'):
@@ -646,7 +673,9 @@ def rewind_to(chat: Chat, n: int) -> tuple[bool, str]:
     total = _turn_count(msgs)
     if not 1 <= n <= total:
         return False, f'Rewind needs 1 ≤ N ≤ {total}.'
-    hist[branch] = msgs[: n * 2]
+    kept = msgs[: n * 2]
+    _purge_chat_rag(chat, msgs[n * 2:])
+    hist[branch] = kept
     chat.session.common.save_chat(hist)
     if hasattr(chat.session.renderer, 'clear_ooc'):
         chat.session.renderer.clear_ooc()
@@ -774,6 +803,7 @@ def persist_turn(
             if isinstance(m, dict) and m.get('role') == 'user':
                 m['attachments'] = slim
                 break
+    stamp_user_rag_entry_ids(msgs, documents.get('user_rag_entry_ids'))
     extra = {}
     if reasoning and reasoning.strip():
         extra['reasoning'] = reasoning
@@ -1175,8 +1205,11 @@ def _prepare_chat_documents(chat, body: dict) -> tuple[dict, list]:
                 'attached_filenames': CommonUtils.collect_filenames(
                     atts, body.get('files') or [], parsed.includes,
                 ),
+                **({'regenerate': True} if body.get('regenerate') else {}),
             },
         )
+    if body.get('regenerate'):
+        documents['regenerate'] = True
     documents = apply_includes(chat, documents, prompt)
     documents = fold_uploads(
         documents,

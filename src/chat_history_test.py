@@ -23,6 +23,12 @@ try:
         drop_last_assistant,
         edit_user_turn,
         last_user_text,
+        collect_rag_entry_refs,
+        parse_rag_entry_ref,
+        purge_rag_entries,
+        remember_rag_entry_ids,
+        reserve_ai_rag_entry,
+        stamp_user_rag_entry_ids,
     )
 except ImportError:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -37,6 +43,12 @@ except ImportError:
         drop_last_assistant,
         edit_user_turn,
         last_user_text,
+        collect_rag_entry_refs,
+        parse_rag_entry_ref,
+        purge_rag_entries,
+        remember_rag_entry_ids,
+        reserve_ai_rag_entry,
+        stamp_user_rag_entry_ids,
     )
 
 
@@ -249,6 +261,109 @@ class HistoryTurnOpsTest(unittest.TestCase):
         self.assertIsNotNone(out)
         self.assertEqual(len(out), 1)
         self.assertEqual(out[0]['content'], 'q1-edit')
+
+
+class RagEntryIdsTest(unittest.TestCase):
+    """Per-turn Chroma parent ids must round-trip and skip gold."""
+
+    def test_parse_skips_gold(self):
+        self.assertEqual(
+            parse_rag_entry_ref('story_user_documents:abc'),
+            ('story_user_documents', 'abc'),
+        )
+        self.assertIsNone(parse_rag_entry_ref('gold_documents:abc'))
+        self.assertIsNone(parse_rag_entry_ref('assistant_gold_documents:abc'))
+        self.assertIsNone(parse_rag_entry_ref('not-a-ref'))
+
+    def test_collect_from_user_and_assistant(self):
+        msgs = [
+            {
+                'role': 'user',
+                'content': 'q',
+                'ragEntryIds': ['story_user_documents:u1'],
+            },
+            {
+                'role': 'assistant',
+                'content': 'a',
+                'ragEntryIds': [
+                    'story_ai_documents:a1',
+                    'gold_documents:g1',
+                    'story_ai_documents:a1',
+                ],
+            },
+        ]
+        self.assertEqual(
+            collect_rag_entry_refs(msgs),
+            [
+                ('story_user_documents', 'u1'),
+                ('story_ai_documents', 'a1'),
+            ],
+        )
+
+    def test_purge_calls_delete_grouped(self):
+        seen = []
+
+        class FakeRag:
+            def purge_entry_refs(self, refs):
+                seen.append(list(refs))
+                return len(refs)
+
+        msgs = [
+            {'role': 'assistant', 'ragEntryIds': ['story_ai_documents:a1']},
+            {'role': 'user', 'ragEntryIds': ['story_user_documents:u1']},
+        ]
+        self.assertEqual(purge_rag_entries(FakeRag(), msgs), 2)
+        self.assertEqual(
+            seen,
+            [[
+                ('story_ai_documents', 'a1'),
+                ('story_user_documents', 'u1'),
+            ]],
+        )
+        self.assertEqual(purge_rag_entries(None, msgs), 0)
+
+    def test_stamp_user_and_reserve_ai(self):
+        docs = {}
+        refs = reserve_ai_rag_entry(docs, 'story_ai_documents')
+        self.assertEqual(len(refs), 1)
+        self.assertTrue(refs[0].startswith('story_ai_documents:'))
+        self.assertEqual(docs['ai_rag_collection'], 'story_ai_documents')
+        self.assertEqual(len(docs['ai_rag_parent_ids']), 1)
+        msgs = [
+            {'role': 'user', 'content': 'q'},
+            {'role': 'assistant', 'content': 'a'},
+        ]
+        remember_rag_entry_ids(docs, 'story_user_documents', ['u1'],
+                               slot='user_rag_entry_ids')
+        stamp_user_rag_entry_ids(msgs, docs['user_rag_entry_ids'])
+        self.assertEqual(
+            msgs[0]['ragEntryIds'],
+            ['story_user_documents:u1'],
+        )
+
+    def test_edit_user_turn_keeps_old_ids_until_caller_clears(self):
+        msgs = [
+            {
+                'role': 'user',
+                'content': 'q1',
+                'ragEntryIds': ['story_user_documents:u1'],
+            },
+            {
+                'role': 'assistant',
+                'content': 'a1',
+                'ragEntryIds': ['story_ai_documents:a1'],
+            },
+        ]
+        out = edit_user_turn(msgs, 1, 'q1-edit')
+        self.assertEqual(out[0]['ragEntryIds'], ['story_user_documents:u1'])
+        dropped = msgs[len(out):]
+        self.assertEqual(
+            collect_rag_entry_refs([out[0]] + dropped),
+            [
+                ('story_user_documents', 'u1'),
+                ('story_ai_documents', 'a1'),
+            ],
+        )
 
 
 if __name__ == '__main__':
