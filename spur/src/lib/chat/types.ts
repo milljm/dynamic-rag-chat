@@ -47,6 +47,10 @@ export type Message = {
   streamingContext?: number;
   /** Basenames fetched via NEED_GOLD this turn. */
   recalled?: string[];
+  /** Gold/cabinet filenames used as RAG this turn (deletable from Documents). */
+  ragIds?: string[];
+  /** Turn-collection parent ids (`collection:id`) so rewind can purge them. */
+  ragEntryIds?: string[];
   createdAt: number;
 };
 

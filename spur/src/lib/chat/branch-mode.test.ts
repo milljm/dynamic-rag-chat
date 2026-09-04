@@ -18,6 +18,8 @@ import {
   modeOf,
   parseBranchInput,
   takeTurns,
+  applyEditUserTurn,
+  userTurnNumber,
 } from "./branch-mode.ts";
 import type { ChatSnapshot, Message } from "./types.ts";
 
@@ -265,6 +267,26 @@ test("lastUserMessage keeps attachments for regenerate", () => {
   ]);
   assert.equal(last?.content, "look at this");
   assert.equal(last?.attachments?.[0]?.name, "notes.txt");
+});
+
+test("edit user turn keeps that user and drops later turns", () => {
+  let s = userBranch(emptySnapshot(), "scratch", "story");
+  s = applySwitch(s, "scratch");
+  s = withTurns(s, "scratch", 2);
+  const edited = applyEditUserTurn(s, "u1", "q1-edit");
+  assert.equal(edited.ok, true);
+  if (edited.ok) {
+    const msgs = edited.state.branches.scratch!.messages;
+    assert.equal(msgs.length, 1);
+    assert.equal(msgs[0]!.role, "user");
+    assert.equal(msgs[0]!.content, "q1-edit");
+  }
+});
+
+test("userTurnNumber is 1-based over user messages only", () => {
+  const msgs = withTurns(emptySnapshot(), "story", 2).branches.story!.messages;
+  assert.equal(userTurnNumber(msgs, "u2"), 2);
+  assert.equal(userTurnNumber(msgs, "a1"), 0);
 });
 
 test("migrate remaps default to story without dropping user branches", () => {

@@ -62,7 +62,10 @@ from src import ImportData
 from src import SceneManager
 from src import Orchestration
 from src.sd_session import clear_session
-from src.chat_utils import load_pdf, HISTORY_META_KEYS
+from src.chat_utils import (
+    load_pdf, HISTORY_META_KEYS, drop_last_assistant, last_user_text,
+    purge_rag_entries,
+)
 posthog.disabled = True
 dark_rich_142_styles = {
     'markdown.h1': 'bold #FFFFFF',
@@ -570,7 +573,12 @@ class Chat():
     def _cmd_delete_last(self, history: dict) -> None:
         """Drop the last assistant/user turn from the current branch."""
         try:
-            history[self.chat_branch] = delete_last_turn(history[self.chat_branch])
+            msgs = history[self.chat_branch]
+            snapshot = list(msgs)
+            history[self.chat_branch] = delete_last_turn(msgs)
+            kept = {id(item) for item in history[self.chat_branch]}
+            dropped = [item for item in snapshot if id(item) not in kept]
+            purge_rag_entries(self.session.rag, dropped)
             self.session.common.save_chat(history)
             self.session.renderer.clear_ooc()
             clear_session(str(self.opts.vector_dir))
@@ -587,7 +595,9 @@ class Chat():
             if not 1 <= n <= total:
                 console.print(f'[red]usage: \\rewind N  (1 ≤ N ≤ {total})[/red]')
                 return
-            history[self.chat_branch] = slice_to_turn(cur, n)
+            kept = slice_to_turn(cur, n)
+            purge_rag_entries(self.session.rag, cur[len(kept):])
+            history[self.chat_branch] = kept
             self.session.common.save_chat(history)
             console.print(
                 f'[green]Rewound to turn {n} of {total}.[/green]',
@@ -764,19 +774,23 @@ class Chat():
         console.print()
 
     def _cmd_regenerate(self, history: dict):
-        """Pop the last assistant message and re-parse the previous user text.
+        """Drop the last assistant reply and re-send the previous user text.
 
-        Returns a ParsedInput to send, or None if history is empty.
+        Returns a ParsedInput to send, or None if there is no user turn.
         """
-        try:
-            last = history[self.chat_branch].pop()
-            match = re.findall(r'USER:(.*\n\n)', last)
-            self.session.common.save_chat(history)
-            return parse_user_input(match[0])
-        except IndexError:
-            console.print('[yellow]History empty.[/yellow]')
+        msgs = history.get(self.chat_branch) or []
+        dropped = []
+        if msgs and isinstance(msgs[-1], dict) and msgs[-1].get('role') == 'assistant':
+            dropped.append(msgs[-1])
+        drop_last_assistant(msgs)
+        purge_rag_entries(self.session.rag, dropped)
+        history[self.chat_branch] = msgs
+        text = last_user_text(msgs)
+        if not text:
+            console.print('[yellow]Nothing to regenerate.[/yellow]')
             return None
-
+        self.session.common.save_chat(history)
+        return parse_user_input(text)
     def _dispatch_command(self, parsed, history: dict):
         """Handle slash commands.
 
@@ -809,9 +823,12 @@ class Chat():
         console.print(f'[red]Unknown command:[/red] \\{cmd}')
         return parsed, True
 
-    def _prepare_turn_documents(self, parsed, history: dict, raw: str):
+    def _prepare_turn_documents(self, parsed, history: dict, raw: str,
+                                regenerate: bool = False):
         """Build the documents dict for this user turn, or None on failure."""
         extras = {}
+        if regenerate:
+            extras['regenerate'] = True
         if parsed.includes:
             extras['has_files'] = True
             extras['attached_filenames'] = CommonUtils.collect_filenames(
@@ -892,15 +909,18 @@ class Chat():
                     continue
                 history = self.session.common.load_chat()
                 parsed = parse_user_input(raw)
+                regenerate = parsed.command == 'regenerate'
                 if parsed.command:
                     parsed, skip = self._dispatch_command(parsed, history)
                     if skip:
                         continue
                 documents, meta_data = self._prepare_turn_documents(
-                    parsed, history, raw,
+                    parsed, history, raw, regenerate=regenerate,
                 )
                 if not documents:
                     continue
+                if regenerate:
+                    documents['regenerate'] = True
                 self.session.renderer.live_stream(documents, meta_data)
         except (KeyboardInterrupt, EOFError):
             sys.exit()

@@ -3,18 +3,25 @@ import {
   ArrowDown,
   Bot,
   BookOpen,
+  Check,
   ChevronRight,
   GitBranch,
   Globe,
   Lock,
   Palette,
   PanelLeft,
+  Pencil,
+  Trash2,
+  X,
 } from "lucide-react";
+import { toast } from "sonner";
 import { isLockedBranch, modeOf, turnCount } from "@/lib/chat/branch-mode";
+import { deleteDocument, usesChatPy } from "@/lib/chat/remote";
 import { useChatStore } from "@/lib/chat/store";
 import type { Message } from "@/lib/chat/types";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Tooltip,
   TooltipContent,
@@ -30,9 +37,11 @@ const NEAR_BOTTOM = 96;
 export function Thread({
   streaming,
   onRevealSidebar,
+  onEditUser,
 }: {
   streaming: boolean;
   onRevealSidebar?: () => void;
+  onEditUser?: (messageId: string, text: string) => void;
 }) {
   const currentId = useChatStore((s) => s.currentId);
   const branch = useChatStore((s) => s.branches[s.currentId]);
@@ -160,6 +169,8 @@ export function Thread({
                     msg.role === "assistant" &&
                     i === branch.messages.length - 1
                   }
+                  streaming={streaming}
+                  onEditUser={onEditUser}
                   onInspect={releasePin}
                 />
               ))
@@ -223,17 +234,45 @@ function MessageBubble({
   message,
   pending,
   turn,
+  streaming,
+  onEditUser,
   onInspect,
 }: {
   message: Message;
   pending: boolean;
   turn?: number;
+  streaming: boolean;
+  onEditUser?: (messageId: string, text: string) => void;
   onInspect?: () => void;
 }) {
   const isUser = message.role === "user";
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(message.content);
+  const ragNames = message.ragIds?.length ? message.ragIds : message.recalled;
+
+  function startEdit() {
+    setDraft(message.content);
+    setEditing(true);
+  }
+
+  function cancelEdit() {
+    setEditing(false);
+    setDraft(message.content);
+  }
+
+  function saveEdit() {
+    const next = draft.trim();
+    if (!next && !message.attachments?.length) return;
+    setEditing(false);
+    onEditUser?.(message.id, next || message.content);
+  }
+
   return (
     <article
-      className={cn("flex w-full", isUser ? "justify-end" : "justify-start")}
+      className={cn(
+        "group flex w-full",
+        isUser ? "justify-end" : "justify-start",
+      )}
     >
       <div
         className={cn(
@@ -297,8 +336,62 @@ function MessageBubble({
           pending={pending}
           onInspect={onInspect}
         />
-        {message.content ? (
+        {editing ? (
+          <div className="space-y-2">
+            <Textarea
+              value={draft}
+              rows={Math.min(8, Math.max(2, draft.split("\n").length))}
+              aria-label="Edit message"
+              className="min-h-16 bg-background/60"
+              autoFocus
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") {
+                  e.preventDefault();
+                  cancelEdit();
+                }
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  saveEdit();
+                }
+              }}
+            />
+            <div className="flex justify-end gap-1">
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Cancel edit"
+                onClick={cancelEdit}
+              >
+                <X className="size-3.5" />
+              </Button>
+              <Button
+                type="button"
+                size="icon-sm"
+                aria-label="Save and re-run"
+                disabled={!draft.trim() && !message.attachments?.length}
+                onClick={saveEdit}
+              >
+                <Check className="size-3.5" />
+              </Button>
+            </div>
+          </div>
+        ) : message.content ? (
           <Markdown text={message.content} />
+        ) : null}
+        {isUser && onEditUser && !streaming && !editing ? (
+          <div className="mt-2 flex justify-end">
+            <button
+              type="button"
+              className="flex size-7 items-center justify-center rounded-sm text-muted-foreground/50 transition-colors hover:bg-accent hover:text-foreground"
+              aria-label="Edit message"
+              title="Edit and re-run from here"
+              onClick={startEdit}
+            >
+              <Pencil className="size-3.5" />
+            </button>
+          </div>
         ) : null}
         {pending ? (
           <StatusLine
@@ -345,8 +438,49 @@ function MessageBubble({
             ) : null}
           </p>
         )}
+        {!isUser && !pending && ragNames?.length ? (
+          <RagIdList names={ragNames} />
+        ) : null}
       </div>
     </article>
+  );
+}
+
+function RagIdList({ names }: { names: string[] }) {
+  const canDelete = usesChatPy();
+  return (
+    <ul className="mt-2 flex flex-wrap gap-1">
+      {names.map((name) => (
+        <li
+          key={name}
+          className="flex max-w-full items-center gap-1 rounded-sm bg-secondary px-1.5 py-0.5 text-[10px] text-muted-foreground"
+          title={`RAG: ${name}`}
+        >
+          <span className="min-w-0 truncate font-mono">{name}</span>
+          {canDelete ? (
+            <button
+              type="button"
+              className="text-muted-foreground hover:text-destructive"
+              aria-label={`Delete ${name} from documents`}
+              onClick={async () => {
+                if (!window.confirm(`Remove ${name} from gold? Chat history stays.`)) {
+                  return;
+                }
+                const result = await deleteDocument(name);
+                if (!result.ok) {
+                  toast.error(result.error || `Could not delete ${name}`);
+                  return;
+                }
+                toast.success(`Deleted ${name}`);
+                window.dispatchEvent(new Event("spur-documents"));
+              }}
+            >
+              <Trash2 className="size-3" />
+            </button>
+          ) : null}
+        </li>
+      ))}
+    </ul>
   );
 }
 

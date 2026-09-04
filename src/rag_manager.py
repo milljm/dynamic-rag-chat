@@ -522,12 +522,28 @@ class RAG():
     def store_data(self, data,
                          tags_metadata: list[RAGTag[str,str|list]] = None,
                          collection: str = '',
-                         quiet: bool = False)->None:
-        """ store data into the RAG with optional metadata tagged with it """
+                         quiet: bool = False,
+                         ids: list[str] | None = None)->list[str]:
+        """Store one parent document into ``collection``. Returns parent ids.
+
+        The pre-processor tags a user query or assistant reply, then this
+        writes the body plus those tags into Chroma (child chunks) and the
+        parent docstore. The returned id is what history stamps as
+        ``ragEntryIds`` (``collection:id``) so a later regenerate / rewind /
+        edit can call ``delete_entries`` and drop *this turn only*.
+
+        ``ids`` is optional. Pass a predetermined parent id when history must
+        know the key *before* this write finishes — the assistant reply is
+        stored on a daemon thread, and a quick regenerate would otherwise
+        miss the snippet. ``uuid4`` is used when ``ids`` is omitted.
+
+        Gold cabinet files are a different path (``store_full_file``); do not
+        feed those ids through here expecting rewind to delete them.
+        """
         if not collection:
             collection = self.common.attributes.collections['ai']
         if not self._embeddings_ready():
-            return
+            return []
         # Remove metadata tagging information from data
         data = self.common.sanitize_response(data, strip=True)
         if tags_metadata is None:
@@ -539,16 +555,90 @@ class RAG():
                                f'\nTO COLLECTION:{collection}',
                                style=f'color({self.opts.color})',
                                highlight=False)
+        supplied = [str(i) for i in (ids or []) if str(i).strip()]
+        parent_id = supplied[0] if supplied else str(uuid4())
+        meta_dict.setdefault('doc_id', parent_id)
         doc = Document(data, metadata=meta_dict)
         retriever = self._parent_retriever(collection)
         try:
-            retriever.add_documents([doc])
+            retriever.add_documents([doc], ids=[parent_id])
         # pylint: disable=bare-except  # Sometimes this can fail for a variety of reasons
         except:
             if not quiet:
                 print(f'\nERROR STORING DATA:\n{data}\n\nTAGS:\n{meta_dict}\n\n'
                     'Check for malformed TAGS (no list items is usually the culprit)')
+            return []
         # pylint: enable=bare-except
+        return [parent_id]
+
+    def delete_entries(self, collection: str, ids: list[str]) -> int:
+        """Remove parent docs and their child chunks from one collection.
+
+        ``ids`` are parent docstore ids returned by ``store_data``. Also
+        accepts raw Chroma child ids (matched against the collection's id
+        list). Children whose metadata ``doc_id`` points at a wanted parent
+        are deleted with the parent.
+
+        This is the primitive regenerate / rewind / edit-user call. Gold
+        cabinet files are *not* deleted here even if you pass a gold
+        collection — ``purge_entry_refs`` skips those names so Documents
+        stays shared across turns. The chip trash still removes a named
+        gold file through ``delete_named_file``.
+
+        Returns the number of child vectors removed. Docstore misses and
+        empty collections are silent (0).
+        """
+        if collection and str(collection).endswith('gold_documents'):
+            return 0
+        wanted = [str(i) for i in (ids or []) if str(i).strip()]
+        if not wanted or not collection:
+            return 0
+        wanted_set = set(wanted)
+        removed = 0
+        try:
+            vector = self._vector_store(collection)
+            # pylint: disable=protected-access
+            payload = vector._collection.get(include=['metadatas'])
+            # pylint: enable=protected-access
+            child_ids = []
+            for cid, meta in zip(payload.get('ids') or [], payload.get('metadatas') or []):
+                if cid in wanted_set:
+                    child_ids.append(cid)
+                    continue
+                if isinstance(meta, dict) and meta.get('doc_id') in wanted_set:
+                    child_ids.append(cid)
+            if child_ids:
+                # pylint: disable=protected-access
+                vector._collection.delete(ids=child_ids)
+                # pylint: enable=protected-access
+                removed += len(child_ids)
+        except Exception:  # pylint: disable=broad-exception-caught
+            pass
+        try:
+            self._docstore(collection).mdelete(wanted)
+        except Exception:  # pylint: disable=broad-exception-caught
+            pass
+        return removed
+
+    def purge_entry_refs(self, refs: list[tuple[str, str]]) -> int:
+        """Delete ``(collection, parent_id)`` pairs written onto history turns.
+
+        Groups by collection so one Chroma ``get``/``delete`` covers a turn
+        that stored both a user-query parent and an assistant parent. Gold
+        collections are skipped — attached Documents are shared, not
+        per-turn. Returns the total child chunks removed.
+        """
+        grouped: dict[str, list[str]] = {}
+        for collection, entry_id in refs or []:
+            if not collection or not entry_id:
+                continue
+            if str(collection).endswith('gold_documents'):
+                continue
+            grouped.setdefault(str(collection), []).append(str(entry_id))
+        removed = 0
+        for collection, entry_ids in grouped.items():
+            removed += self.delete_entries(collection, entry_ids)
+        return removed
 
     def delete_collection(self, source: str)->None:
         """

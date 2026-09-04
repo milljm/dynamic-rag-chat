@@ -10,8 +10,10 @@ import secrets
 import tempfile
 import shutil
 import fcntl
+from uuid import uuid4
 from contextlib import contextmanager
 from dataclasses import dataclass, field, asdict
+from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any, Mapping, Optional
 from typing import NamedTuple
@@ -45,6 +47,262 @@ HISTORY_VERSION = 1
 HISTORY_META_KEYS = frozenset({
     'current', 'assistant_mode', 'branch_modes', 'version',
 })
+
+_USER_TURN_RE = re.compile(r'USER:\s*(.*?)\s*(?:\n\nAI:|\Z)', re.S)
+
+
+def drop_last_assistant(messages: list) -> bool:
+    """Remove the last AI reply only. Keep the user text. True if changed."""
+    if not messages:
+        return False
+    last = messages[-1]
+    if isinstance(last, dict):
+        if last.get('role') == 'assistant':
+            messages.pop()
+            return True
+        return False
+    if isinstance(last, str):
+        match = _USER_TURN_RE.search(last)
+        if match and '\n\nAI:' in last:
+            messages[-1] = f"USER: {match.group(1).strip()}\n\n"
+            return True
+        if match:
+            return False
+        messages.pop()
+        return True
+    return False
+
+
+def last_user_text(messages: list) -> str:
+    """Content of the most recent user turn."""
+    if not messages:
+        return ''
+    for item in reversed(messages):
+        if isinstance(item, dict) and item.get('role') == 'user':
+            return str(item.get('content') or '')
+        if isinstance(item, str):
+            match = _USER_TURN_RE.search(item)
+            if match:
+                return match.group(1).strip()
+    return ''
+
+
+def edit_user_turn(messages: list, n: int, text: str) -> list | None:
+    """Keep through the nth user message (1-based), replace text, drop later turns."""
+    if not isinstance(messages, list) or n < 1:
+        return None
+    seen = 0
+    for i, item in enumerate(messages):
+        if isinstance(item, dict) and item.get('role') == 'user':
+            seen += 1
+            if seen == n:
+                item['content'] = text
+                return messages[: i + 1]
+    return None
+
+
+def append_turn(
+    messages: list,
+    user_content: str,
+    assistant_content: str,
+    extra: dict | None = None,
+    regenerate: bool = False,
+) -> None:
+    """Append a user/assistant pair, or only a new assistant when regenerating."""
+    assistant_msg: dict = {'role': 'assistant', 'content': assistant_content}
+    if extra:
+        assistant_msg.update({k: v for k, v in extra.items() if k not in ('role',)})
+    if regenerate:
+        drop_last_assistant(messages)
+        messages.append(assistant_msg)
+        return
+    messages.append({'role': 'user', 'content': user_content})
+    messages.append(assistant_msg)
+
+
+_GOLD_SUFFIX = 'gold_documents'
+
+
+def format_rag_entry_ref(collection: str, parent_id: str) -> str:
+    """Encode a stored parent as ``collection:id`` for history ``ragEntryIds``.
+
+    Spur and the TUI stamp these on each turn so rewind / regenerate / edit
+    can delete *this turn's* pre-processor snippets without touching the gold
+    cabinet (Documents). Collection names have no colon; parent ids are uuids.
+    """
+    return f'{str(collection).strip()}:{str(parent_id).strip()}'
+
+
+def parse_rag_entry_ref(ref: str) -> tuple[str, str] | None:
+    """Split ``collection:id``. Gold cabinet refs are ignored (never auto-deleted)."""
+    text = str(ref or '').strip()
+    if ':' not in text:
+        return None
+    collection, parent_id = text.split(':', 1)
+    collection = collection.strip()
+    parent_id = parent_id.strip()
+    if not collection or not parent_id:
+        return None
+    if collection == _GOLD_SUFFIX or collection.endswith(f'_{_GOLD_SUFFIX}'):
+        return None
+    return collection, parent_id
+
+
+def collect_rag_entry_refs(messages: list) -> list[tuple[str, str]]:
+    """Pull ``(collection, parent_id)`` pairs off dropped history messages.
+
+    Each message may carry ``ragEntryIds`` written at store time: the user
+    query lives on the user bubble (``{branch}_user_documents:uuid``) and the
+    tagged assistant reply lives on the AI bubble. Call this *before* the
+    messages are discarded, then ``purge_rag_entries``. Duplicate refs across
+    a user/assistant pair are collapsed so ``delete_entries`` runs once.
+    """
+    refs: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for item in messages or []:
+        if not isinstance(item, dict):
+            continue
+        for raw in item.get('ragEntryIds') or []:
+            parsed = parse_rag_entry_ref(raw)
+            if parsed and parsed not in seen:
+                seen.add(parsed)
+                refs.append(parsed)
+    return refs
+
+
+def purge_rag_entries(rag, messages: list) -> int:
+    """Delete Chroma parents listed on ``messages``.
+
+    ``rag`` is duck-typed (needs ``purge_entry_refs``). Empty / None / missing
+    method is a no-op so tests and ``--no-rags`` sessions stay quiet. Returns
+    the number of child chunks ``delete_entries`` removed.
+
+    Gold cabinet files are never in the collected refs, so Documents stays
+    put even if a turn mentioned an attached file.
+    """
+    refs = collect_rag_entry_refs(messages)
+    if not refs or rag is None:
+        return 0
+    purge = getattr(rag, 'purge_entry_refs', None)
+    if not callable(purge):
+        return 0
+    return int(purge(refs) or 0)
+
+
+def remember_rag_entry_ids(
+    target: dict,
+    collection: str,
+    parent_ids: list[str] | None,
+    slot: str = 'ragEntryIds',
+) -> list[str]:
+    """Append ``collection:id`` refs onto ``target[slot]``. Returns the slot list.
+
+    Used both on history messages (``ragEntryIds``) and on the in-flight
+    ``documents`` dict (``user_rag_entry_ids``) so ``save_history`` can stamp
+    the user bubble after ``store_data`` returns.
+    """
+    current = [str(x) for x in (target.get(slot) or []) if str(x).strip()]
+    seen = set(current)
+    for parent_id in parent_ids or []:
+        parent_id = str(parent_id).strip()
+        if not collection or not parent_id:
+            continue
+        ref = format_rag_entry_ref(collection, parent_id)
+        if ref not in seen:
+            seen.add(ref)
+            current.append(ref)
+    if current:
+        target[slot] = current
+    return current
+
+
+def stamp_user_rag_entry_ids(messages: list, refs: list[str] | None) -> None:
+    """Write ``ragEntryIds`` onto the latest user message (this turn's query)."""
+    if not refs:
+        return
+    for item in reversed(messages or []):
+        if isinstance(item, dict) and item.get('role') == 'user':
+            item['ragEntryIds'] = list(refs)
+            return
+
+
+def reserve_ai_rag_entry(documents: dict, collection: str) -> list[str]:
+    """Mint the assistant parent id now; ``store_data`` consumes it later.
+
+    ``save_response`` tags the reply on a daemon thread so the prompt can
+    return. History has to know the parent id *before* that thread finishes,
+    otherwise a quick regenerate cannot call ``delete_entries`` and the old
+    snippet leaks into the next retrieve.
+
+    Stashes ``ai_rag_collection`` / ``ai_rag_parent_ids`` on ``documents``.
+    """
+    parent_id = str(uuid4())
+    documents['ai_rag_collection'] = collection
+    documents['ai_rag_parent_ids'] = [parent_id]
+    return [format_rag_entry_ref(collection, parent_id)]
+
+
+def item_text(item) -> str:
+    """Content of a history message or a RAG page. Empty for None."""
+    if isinstance(item, dict):
+        return str(item.get('content', '') or '')
+    return str(item) if item is not None else ''
+
+
+def overlap_ratio(needle: str, haystack: str) -> float:
+    """How much of ``needle`` appears as one contiguous run in ``haystack``.
+
+    1.0 means ``needle`` is already in the conversation. Asymmetric on
+    purpose: a short user turn that happens to appear inside a gold file
+    must not drop that file from DOCUMENTS. ``autojunk`` is off — spaces
+    and common letters would otherwise be treated as junk on anything
+    longer than ~200 characters, which is every real reply.
+    """
+    if not needle:
+        return 0.0
+    if needle in haystack:
+        return 1.0
+    matcher = SequenceMatcher(None, needle, haystack, autojunk=False)
+    match = matcher.find_longest_match(0, len(needle), 0, len(haystack))
+    return match.size / len(needle)
+
+
+def dedupe_rag_chunks(
+    chunks: list,
+    history_items: list,
+    sanitize,
+    threshold: float = 0.65,
+) -> list[str]:
+    """Drop RAG pages that chat history already covers.
+
+    ``store_data`` writes parents through ``sanitize_response(..., strip=True)``
+    (lowercase, collapsed whitespace, ``` fences stripped). History still
+    has the original markdown. Comparing those raw strings with
+    SequenceMatcher was case-sensitive and fence-sensitive, so the previous
+    turn's USER_RAG / AI_RAG were pasted next to CHAT_HISTORY almost
+    verbatim.
+
+    ``sanitize`` must be that same function. Gold files only drop when the
+    *file* is largely already in history — never because history is a
+    subset of the file.
+    """
+    hay = '\n'.join(
+        sanitize(item_text(item)) for item in (history_items or [])
+    )
+    cleaned: list[str] = []
+    seen_norm: list[str] = []
+    for chunk in chunks or []:
+        text = item_text(chunk)
+        needle = sanitize(text)
+        if not needle.strip():
+            continue
+        if hay and overlap_ratio(needle, hay) > threshold:
+            continue
+        if any(overlap_ratio(needle, prior) > threshold for prior in seen_norm):
+            continue
+        cleaned.append(text)
+        seen_norm.append(needle)
+    return cleaned
 
 
 def active_branch(assistant_mode: bool, history: dict | None) -> str:

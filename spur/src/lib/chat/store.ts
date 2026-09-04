@@ -7,6 +7,7 @@ import {
   applyDeleteBranch,
   applyDeleteLastTurn,
   applyPopLastAssistant,
+  applyEditUserTurn,
   applyReplaceMessage,
   applyResetBranch,
   applyRewind,
@@ -49,6 +50,10 @@ type ChatActions = {
   deleteLastTurn: () => { ok: true } | { ok: false; error: string };
   rewindTo: (n: number) => { ok: true } | { ok: false; error: string };
   popLastAssistant: () => boolean;
+  editUserTurn: (
+    messageId: string,
+    text: string,
+  ) => { ok: true } | { ok: false; error: string };
   setPendingOoc: (text: string) => void;
   addFiles: (files: File[]) => Promise<{
     added: number;
@@ -195,10 +200,16 @@ export const useChatStore = create<ChatStore>()(
         const before = get().branches[get().currentId]?.messages.length ?? 0;
         set((s) => applyPopLastAssistant(s));
         const after = get().branches[get().currentId]?.messages.length ?? 0;
-        if (usesChatPy() && after < before) {
-          void postOp("/api/history/pop-assistant");
-        }
+        // Server /api/chat?regenerate=true is the source of truth. A second
+        // fire-and-forget pop-assistant raced persist and ate turns.
         return after < before;
+      },
+
+      editUserTurn: (messageId, text) => {
+        const result = applyEditUserTurn(get(), messageId, text);
+        if (!result.ok) return result;
+        set(result.state);
+        return { ok: true };
       },
 
       setPendingOoc: (text) => set({ pendingOoc: text }),

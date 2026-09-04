@@ -26,7 +26,10 @@ from langchain_tavily import TavilySearch
 from langchain_openai import ChatOpenAI # For Type Hinting
 from .prompt_manager import PromptManager
 from .context_manager import ContextManager # For Type Hinting
-from .chat_utils import CommonUtils, ChatOptions, RAGTag # For Type Hinting
+from .chat_utils import (
+    CommonUtils, ChatOptions, RAGTag, append_turn,
+    purge_rag_entries, reserve_ai_rag_entry, stamp_user_rag_entry_ids,
+)
 from .model_orchestrator import Orchestration, MAX_AGENT_CALLS
 from .agent_tools import DuckDuckGoSearchTool, StockPriceTool
 from .sd_client import MAGICK_QUERY, has_generated_images, is_new_scene, ping_sd, vision_thumb_data_url
@@ -1283,20 +1286,28 @@ class RenderWindow(PromptManager):
 
         # ── Context handling (unchanged) ────────────────────────────────
         documents['llm_response'] = current_response
-        if not documents.get('sd_ran') and (current_response or '').strip():
-            self.state.context.handle_context(documents, direction='store')
+        assistant_extra: dict = {}
+        thought = (reasoning or getattr(self, 'thinking_chunk', '') or '').strip()
+        if thought:
+            assistant_extra['reasoning'] = thought
+        regenerate = bool(documents.get('regenerate'))
+        self._stash_turn_rag(documents, history[branch], branch, assistant_extra)
         current_response = self.common.sanitize_response(current_response)
 
         if self.state.disable_thinking:
             documents['user_query'] = documents['user_query'].replace('', '')
 
         # ── Append user/assistant pair to active branch ─────
-        assistant_msg: dict = {'role': 'assistant', 'content': current_response}
-        thought = (reasoning or getattr(self, 'thinking_chunk', '') or '').strip()
-        if thought:
-            assistant_msg['reasoning'] = thought
-        history[branch].append({'role': 'user', 'content': documents['user_query']})
-        history[branch].append(assistant_msg)
+        append_turn(
+            history[branch],
+            documents['user_query'],
+            current_response,
+            extra=assistant_extra or None,
+            regenerate=regenerate,
+        )
+        stamp_user_rag_entry_ids(
+            history[branch], documents.get('user_rag_entry_ids'),
+        )
 
         stream.meta_capture = ''
         if self.debug:
@@ -1306,3 +1317,23 @@ class RenderWindow(PromptManager):
 
         if self.debug:
             self.console.print('DEBUG: live finished', highlight=False)
+
+    def _stash_turn_rag(
+        self, documents: dict, msgs: list, branch: str, extra: dict,
+    ) -> None:
+        """Reserve AI parent ids and start the store thread.
+
+        Regenerating the last reply first purges that assistant's
+        ``ragEntryIds`` so ``delete_entries`` actually runs. The parent id is
+        minted *here* (and stamped on the new assistant message) because
+        ``save_response`` writes Chroma on a daemon thread.
+        """
+        if documents.get('regenerate') and msgs:
+            last = msgs[-1]
+            if isinstance(last, dict) and last.get('role') == 'assistant':
+                purge_rag_entries(self.state.context.rag, [last])
+        if documents.get('sd_ran') or not (documents.get('llm_response') or '').strip():
+            return
+        ai_collection = f'{branch}_{self.common.attributes.collections["ai"]}'
+        extra['ragEntryIds'] = reserve_ai_rag_entry(documents, ai_collection)
+        self.state.context.handle_context(documents, direction='store')
