@@ -34,7 +34,24 @@ logging.getLogger('chromadb').setLevel(logging.ERROR)
 
 
 class BM25Retriever(BaseRetriever):
-    """rank_bm25 wrapper. langchain-community's copy is sunsetting."""
+    """
+    ### BM25Retriever
+
+    ``rank_bm25`` wrapper. langchain-community's copy is sunsetting.
+    Scores already-fetched Chroma children before parent promotion.
+
+    *Class init args:*
+        .. code-block:: python
+            vectorizer: BM25Okapi | None  # built by from_documents
+            docs: list[Document]          # corpus in the same order as the index
+            k: int = 4                    # top-N to return
+
+    *Usage:*
+        - build over a similarity hit list:
+            .. code-block:: python
+                bm25 = BM25Retriever.from_documents(docs)
+                ranked = bm25.invoke(query)
+    """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
     vectorizer: Any = None
@@ -66,30 +83,47 @@ class RAG():
     """
     ### RAG
 
-    Responsible for RAG operations.
+    Chroma + ParentDocumentRetriever for this session. Child chunks are
+    embedded for search; parents live in a LocalFileStore under
+    ``vector_dir``. Gold cabinet files are a separate whole-file path
+    and are never wiped by rewind / regenerate.
 
     *Class init args:*
         .. code-block:: python
-            console: Rich.console  # Top level Rich console object
-            common: CommonUtils    # Needed for all the metadata tagging/regex involved
-            args: ChatOptions      # Arguments in the form of ChatOption dataclass
+            console: Console       # Rich console (debug prints)
+            common: CommonUtils    # sanitize, tags, collection names
+            args: ChatOptions      # vector_dir, embeddings, matches, mode
 
     *Usage:*
-        - instance RAG:
+        - construct:
             .. code-block:: python
                 rag = RAG(console, common, args)
 
-        - retrieve data from RAG:
+        - retrieve (similarity, tag filter, BM25, rerank, parents):
             .. code-block:: python
-                rag.retrieve(query, collection, metadatas={})
+                docs = rag.retrieve(query, collection, metadatas=None)
 
-        - store data to RAG:
+        - store a tagged turn (parent ids become ragEntryIds):
             .. code-block:: python
-                rag.store(query, collection, metadatas={})
+                ids = rag.store_data(text, tags_metadata, collection, ids=None)
 
-    - *query:* Required. string containing user's question.
-    - *collection:* Required. RAG collection to pull/write from/to.
-    - *metadatas:* Optional. Use field-filtering matching if set.
+        - drop one turn (rewind / regenerate / edit):
+            .. code-block:: python
+                n = rag.delete_entries(collection, ids)
+                n = rag.purge_entry_refs([(collection, id), ...])
+
+        - gold cabinet (whole file; not auto-deleted on rewind):
+            .. code-block:: python
+                rag.store_full_file(collection, filename, text)
+                doc = rag.get_full_file(collection, filename)
+                rag.delete_named_file(collection, filename)
+                docs = rag.retrieve_named_files(query, collection)
+
+        - branch clone / cut / wipe:
+            .. code-block:: python
+                rag.clone_collection(source, target, overwrite=False)
+                rag.build_collection_from_texts(target, texts, overwrite=True)
+                rag.delete_collection(branch)
     """
     def __init__(self, console, common: CommonUtils, args: ChatOptions):
         self.console = console
@@ -244,7 +278,22 @@ class RAG():
         return create_kv_docstore(fs)
 
     def store_full_file(self, collection: str, filename: str, text: str) -> None:
-        """Keep the unsplit file so a later filename mention can retrieve all of it."""
+        """
+        ### Store Full File
+
+        Keep the unsplit gold file so a later filename mention (or
+        ``<NEED_GOLD:name>``) can retrieve all of it. Also writes
+        ``vector_dir/attachments/<name>``. Rewind does not delete these.
+
+        *Key init args:*
+            .. code-block:: python
+                collection: str  # usually ``{branch}_gold_documents``
+                filename: str    # basename, matched case-insensitively
+                text: str        # whole file body
+        *Returns:*
+            .. code-block:: python
+                None
+        """
         if not filename or not (text or '').strip():
             return
         key = self._file_key(filename)
@@ -265,9 +314,19 @@ class RAG():
             pass
 
     def get_full_file(self, collection: str, filename: str) -> Document | None:
-        """Return the unsplit gold file, or None.
+        """
+        ### Get Full File
 
-        Directory first (vector_dir/attachments), then the docstore key.
+        Return the unsplit gold file, or None. Directory first
+        (``vector_dir/attachments``), then the parent docstore key.
+
+        *Key init args:*
+            .. code-block:: python
+                collection: str  # gold collection that owns the docstore
+                filename: str    # basename
+        *Returns:*
+            .. code-block:: python
+                Document | None  # page_content is the whole file
         """
         text = get_attachment(self.opts.vector_dir, filename)
         if text:
@@ -284,7 +343,21 @@ class RAG():
         return None
 
     def delete_named_file(self, collection: str, filename: str) -> bool:
-        """Remove a whole file from the cabinet and its gold chunks."""
+        """
+        ### Delete Named File
+
+        Remove a cabinet file: attachments dir, docstore whole-file key,
+        Chroma children tagged ``filename``, and their parent docs.
+        This is the Documents-chip trash path — not rewind.
+
+        *Key init args:*
+            .. code-block:: python
+                collection: str  # gold collection
+                filename: str    # basename to drop
+        *Returns:*
+            .. code-block:: python
+                bool  # True if anything was removed
+        """
         name = (filename or '').strip()
         if not name:
             return False
@@ -321,7 +394,21 @@ class RAG():
         return removed
 
     def retrieve_named_files(self, query: str, collection: str) -> list[Document]:
-        """If the query names a gold file, return that file in full."""
+        """
+        ### Retrieve Named Files
+
+        If the query names a gold file (up to two basenames), return
+        those files in full. Falls back to stitching parent chunks
+        tagged with that filename.
+
+        *Key init args:*
+            .. code-block:: python
+                query: str       # user text that may mention a basename
+                collection: str  # gold collection
+        *Returns:*
+            .. code-block:: python
+                list[Document]  # whole files, de-duplicated
+        """
         names = CommonUtils.extract_filenames(query)[:2]
         if not names:
             return []
@@ -490,13 +577,22 @@ class RAG():
         return out
 
     def retrieve(self, query: str, collection: str, metadatas: dict = None) -> list[Document]:
-        """Similarity, then Python-side field membership, then BM25.
+        """
+        ### Retrieve
 
-        List tags are stored as comma-joined strings, so Chroma `$in` never
-        matches a single name. Filter those in Python instead.
+        Similarity search, optional tag-field membership, BM25, optional
+        cross-encoder rerank, then promote child hits to their parent
+        docs. List tags are stored as comma-joined strings, so Chroma
+        ``$in`` never matches a single name — that filter runs in Python.
 
-        Cross-encoder rerank (optional) cuts to ``matches``, then each winner
-        is swapped for its parent document when one exists.
+        *Key init args:*
+            .. code-block:: python
+                query: str              # natural-language question
+                collection: str         # already-prefixed collection name
+                metadatas: dict | None  # FilterBuilder ``{field, values}``
+        *Returns:*
+            .. code-block:: python
+                list[Document]  # parents, cut to opts.matches after rerank
         """
         if not self._embeddings_ready() or self.opts.matches == 0:
             return []
@@ -524,21 +620,30 @@ class RAG():
                          collection: str = '',
                          quiet: bool = False,
                          ids: list[str] | None = None)->list[str]:
-        """Store one parent document into ``collection``. Returns parent ids.
+        """
+        ### Store Data
 
-        The pre-processor tags a user query or assistant reply, then this
-        writes the body plus those tags into Chroma (child chunks) and the
-        parent docstore. The returned id is what history stamps as
-        ``ragEntryIds`` (``collection:id``) so a later regenerate / rewind /
-        edit can call ``delete_entries`` and drop *this turn only*.
+        Write one parent into ``collection``. The pre-processor tags a
+        user query or assistant reply; this embeds child chunks in Chroma
+        and the parent in the docstore. Returned ids are stamped on
+        history as ``ragEntryIds`` (``collection:id``) so regenerate /
+        rewind / edit can ``delete_entries`` *this turn only*.
 
-        ``ids`` is optional. Pass a predetermined parent id when history must
-        know the key *before* this write finishes — the assistant reply is
-        stored on a daemon thread, and a quick regenerate would otherwise
-        miss the snippet. ``uuid4`` is used when ``ids`` is omitted.
+        Pass ``ids`` when history must know the key before the write
+        finishes (assistant reply is stored on a daemon thread). Gold
+        cabinet files use ``store_full_file`` — do not feed those ids
+        here expecting rewind to delete them.
 
-        Gold cabinet files are a different path (``store_full_file``); do not
-        feed those ids through here expecting rewind to delete them.
+        *Key init args:*
+            .. code-block:: python
+                data: str                         # parent body (sanitized)
+                tags_metadata: list[RAGTag] | None
+                collection: str = ''              # defaults to AI collection
+                quiet: bool = False               # swallow store errors
+                ids: list[str] | None             # predetermined parent id
+        *Returns:*
+            .. code-block:: python
+                list[str]  # parent ids written, or [] on failure
         """
         if not collection:
             collection = self.common.attributes.collections['ai']
@@ -572,21 +677,24 @@ class RAG():
         return [parent_id]
 
     def delete_entries(self, collection: str, ids: list[str]) -> int:
-        """Remove parent docs and their child chunks from one collection.
+        """
+        ### Delete Entries
 
-        ``ids`` are parent docstore ids returned by ``store_data``. Also
-        accepts raw Chroma child ids (matched against the collection's id
-        list). Children whose metadata ``doc_id`` points at a wanted parent
-        are deleted with the parent.
+        Remove parent docs and their child chunks from one collection.
+        ``ids`` are parent docstore ids from ``store_data``, or raw Chroma
+        child ids. Children whose metadata ``doc_id`` points at a wanted
+        parent go with it.
 
-        This is the primitive regenerate / rewind / edit-user call. Gold
-        cabinet files are *not* deleted here even if you pass a gold
-        collection — ``purge_entry_refs`` skips those names so Documents
-        stays shared across turns. The chip trash still removes a named
-        gold file through ``delete_named_file``.
+        Gold collections return 0 even if you pass their name — Documents
+        stay shared across turns. The chip trash uses ``delete_named_file``.
 
-        Returns the number of child vectors removed. Docstore misses and
-        empty collections are silent (0).
+        *Key init args:*
+            .. code-block:: python
+                collection: str  # user/ai collection (gold is skipped)
+                ids: list[str]   # parent (or child) ids to drop
+        *Returns:*
+            .. code-block:: python
+                int  # child vectors removed; misses are silent 0
         """
         if collection and str(collection).endswith('gold_documents'):
             return 0
@@ -621,12 +729,20 @@ class RAG():
         return removed
 
     def purge_entry_refs(self, refs: list[tuple[str, str]]) -> int:
-        """Delete ``(collection, parent_id)`` pairs written onto history turns.
+        """
+        ### Purge Entry Refs
 
-        Groups by collection so one Chroma ``get``/``delete`` covers a turn
-        that stored both a user-query parent and an assistant parent. Gold
-        collections are skipped — attached Documents are shared, not
-        per-turn. Returns the total child chunks removed.
+        Delete ``(collection, parent_id)`` pairs written onto history
+        turns. Groups by collection so one Chroma get/delete covers a
+        turn that stored both a user-query parent and an assistant
+        parent. Gold collections are skipped.
+
+        *Key init args:*
+            .. code-block:: python
+                refs: list[tuple[str, str]]  # (collection, parent_id)
+        *Returns:*
+            .. code-block:: python
+                int  # total child chunks removed
         """
         grouped: dict[str, list[str]] = {}
         for collection, entry_id in refs or []:
@@ -642,11 +758,18 @@ class RAG():
 
     def delete_collection(self, source: str)->None:
         """
-        Docstring for delete_collection
+        ### Delete Collection
 
-        :param self: Description
-        :param collection: Description
-        :type collection: str
+        Drop the user and AI Chroma collections for one branch
+        (``{source}_user_documents``, ``{source}_ai_documents``). Gold
+        is left alone so Documents survive ``\\reset`` of a branch.
+
+        *Key init args:*
+            .. code-block:: python
+                source: str  # branch name (story, assistant, fork id)
+        *Returns:*
+            .. code-block:: python
+                None
         """
         collection_list = [self.common.attributes.collections[x]
                            for x in self.common.attributes.collections]
@@ -724,7 +847,22 @@ class RAG():
             ) from exc
 
     def clone_collection(self, source: str, target: str, *, overwrite: bool = False) -> None:
-        """Clone Chroma + parent-docstore from source branch to target."""
+        """
+        ### Clone Collection
+
+        Copy Chroma documents plus the parent-docstore directory from
+        ``source`` branch to ``target``. Gold is not cloned (the cabinet
+        is shared). Used by ``\\branch NAME``.
+
+        *Key init args:*
+            .. code-block:: python
+                source: str             # existing branch name
+                target: str             # new branch name (must differ)
+                overwrite: bool = False # wipe target first if it exists
+        *Returns:*
+            .. code-block:: python
+                None  # raises ValueError / RuntimeError on bad names or IO
+        """
         if not source or not target or source == target:
             raise ValueError(
                 'clone_collection: source/target must be different, non-empty names.',
@@ -760,7 +898,20 @@ class RAG():
                                     texts: List[str],
                                     overwrite: bool = True) -> None:
         """
-        Rebuild `target` collection from raw turn texts; also reset the docstore folder.
+        ### Build Collection From Texts
+
+        Rebuild ``target``'s user/AI collections from raw turn texts
+        (branch cut at turn N). Resets the docstore folder. Gold is
+        skipped.
+
+        *Key init args:*
+            .. code-block:: python
+                target: str            # branch name to (re)build
+                texts: list[str]       # turn bodies, in order
+                overwrite: bool = True # delete existing ids first
+        *Returns:*
+            .. code-block:: python
+                None
         """
         if not target:
             raise ValueError('build_collection_from_texts: target name cannot be empty.')

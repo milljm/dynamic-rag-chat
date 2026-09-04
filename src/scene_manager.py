@@ -20,7 +20,31 @@ _MOVE_THRESHOLD = 0.7
 
 
 class SceneManager:
-    """Ground entity/audience/location so RAG and the story prompt agree."""
+    """
+    ### SceneManager
+
+    Story-mode scene state: who is here, where, across turns and
+    restarts. Grounds ``entity`` / ``audience`` / location tags so RAG
+    filters and the plot prompt agree. Assistant mode does not use this.
+
+    *Class init args:*
+        .. code-block:: python
+            console: Console
+            common: CommonUtils
+            args: ChatOptions  # user_name, vector_dir, debug
+
+    *Usage:*
+        - per branch:
+            .. code-block:: python
+                scene.set_branch('story')
+                scene.ground_scene(tags)
+                scene.save_scene()
+
+        - NPC sheets:
+            .. code-block:: python
+                if scene.is_new_character(name):
+                    ...
+    """
 
     def __init__(self, console, common: CommonUtils, args: ChatOptions):
         self.console = console

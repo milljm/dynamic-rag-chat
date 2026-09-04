@@ -79,7 +79,22 @@ def _abort_llm_stream(stream) -> None:
 # pylint: disable=too-many-instance-attributes  # this is what a dataclass is for
 @dataclass
 class StreamState:
-    """ RenderWindow animation (thinking) dataclass attributes """
+    """
+    ### StreamState
+
+    Per-token animation / think-tag capture while Rich Live is open.
+
+    *Class init args:*
+        .. code-block:: python
+            partial_chunk: str = ''
+            thinking: bool = False
+            think_ns: str = ''         # '' or 'mm:' (MiniMax)
+            never_think: bool = False
+            pulse_index: int = 0
+
+    *Usage:*
+        - owned by RenderWindowState.stream; do not construct by hand.
+    """
     partial_chunk: str = ''
     meta_capture: str = ''
     meta_brace_count: int = 0
@@ -94,7 +109,29 @@ class StreamState:
 
 @dataclass
 class RenderWindowState:
-    """ RenderWindow dataclass attributes """
+    """
+    ### RenderWindowState
+
+    Immutable-ish snapshot of flags the TUI needs each frame (debug,
+    theme, ContextManager, seed). ``color`` is derived in ``__post_init__``.
+
+    *Class init args:*
+        .. code-block:: python
+            debug: bool
+            verbose: bool
+            assistant_mode: bool
+            disable_thinking: bool
+            no_rags: bool
+            light_mode: bool
+            completion_tokens: int
+            syntax_theme: str
+            context: ContextManager
+            current_dir: str
+            seed: int | None = None
+
+    *Usage:*
+        - built by RenderWindow._load_states; read as ``window.state``.
+    """
     debug: bool
     verbose: bool
     assistant_mode: bool
@@ -118,7 +155,26 @@ class RenderWindowState:
 
 @dataclass
 class Renderables:
-    """ Rich Live renderables dataclass object """
+    """
+    ### Renderables
+
+    The six Rich pieces that make one Live frame (header, query,
+    separator, assistant name, response, footer).
+
+    *Class init args:*
+        .. code-block:: python
+            header: Text
+            query: Markdown
+            separator: Markdown
+            assistant: Text
+            response: Text | Markdown
+            footer: Text
+
+    *Usage:*
+        - pack for Live:
+            .. code-block:: python
+                live.update(renderables.full_window)
+    """
     header: Text
     query: Markdown
     separator: Markdown
@@ -139,7 +195,19 @@ class Renderables:
 # pylint: enable=too-many-instance-attributes
 
 class ThinkingThread(Thread):
-    """ Allow pulsing animation to run as a thread """
+    """
+    ### ThinkingThread
+
+    Pulse the thinking spinner on a daemon thread so the TUI animates
+    while tokens stall.
+
+    *Class init args:*
+        .. code-block:: python
+            owner: RenderWindow  # reads thinking_active, calls animate_thinking
+
+    *Usage:*
+        - started/stopped by RenderWindow around llm.stream().
+    """
     def __init__(self, owner):
         super().__init__()
         self.owner = owner
@@ -150,7 +218,18 @@ class ThinkingThread(Thread):
             time.sleep(0.5)
 
 class NamepulseThread(Thread):
-    """ Allow pulsing animation to run as a thread """
+    """
+    ### NamepulseThread
+
+    Pulse the assistant-name color while a reply is streaming.
+
+    *Class init args:*
+        .. code-block:: python
+            owner: RenderWindow  # reads namepulse_active, calls animate_namepulse
+
+    *Usage:*
+        - started/stopped by RenderWindow around llm.stream().
+    """
     def __init__(self, owner):
         super().__init__()
         self.owner = owner
@@ -161,7 +240,32 @@ class NamepulseThread(Thread):
             time.sleep(0.5)
 
 class RenderWindow(PromptManager):
-    """ Responsible for printing Rich Text/Markdown Live to the screen """
+    """
+    ### RenderWindow
+
+    TUI stream: pack the prompt, run the LLM (or agent / SD), Live-update
+    Markdown, then ``save_history``. Spur uses the same object without
+    the Rich Live (status_hook / image_hook / get_messages).
+
+    *Class init args:*
+        .. code-block:: python
+            console: Console
+            common: CommonUtils
+            context: ContextManager
+            current_dir: str
+            orchestration: Orchestration
+            args: ChatOptions
+
+    *Usage:*
+        - TUI:
+            .. code-block:: python
+                window.stream_response(documents, meta)
+
+        - Spur adapter:
+            .. code-block:: python
+                window.set_llm(meta, documents)
+                packed = window.get_messages(meta, documents)
+    """
     def __init__(self, console,
                  common: CommonUtils,
                  context: ContextManager,

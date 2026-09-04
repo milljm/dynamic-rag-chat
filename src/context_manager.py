@@ -23,7 +23,37 @@ from .gold_fetch import MAX_GOLD_FETCHES
 from .attachment_store import list_attachments
 
 class ContextManager(PromptManager):
-    """ A collection of methods aimed at producing/reducing the context """
+    """
+    ### ContextManager
+
+    Assemble the turn: pre-processor tags, RAG retrieve + dedupe against
+    staggered history, store the user query, stringify chat history.
+    Post-process stores the assistant reply on a daemon thread.
+
+    *Class init args:*
+        .. code-block:: python
+            console: Console
+            common: CommonUtils
+            rag: RAG
+            scene: SceneManager
+            current_dir: str
+            args: ChatOptions
+
+    *Usage:*
+        - query path (Spur / TUI before the LLM):
+            .. code-block:: python
+                documents, pre, post, tags = ctx.handle_context(documents)
+
+        - after the stream:
+            .. code-block:: python
+                ctx.handle_context(documents, direction='response')
+
+        - gold cabinet:
+            .. code-block:: python
+                ctx.ingest_user_attachments(documents, tags)
+                ctx.fetch_gold_file(documents, filename)
+                ctx.delete_gold_file(filename)
+    """
     # pylint: disable=too-many-positional-arguments, too-many-arguments
     def __init__(self,
                  console,

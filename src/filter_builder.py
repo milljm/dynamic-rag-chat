@@ -43,7 +43,27 @@ def metadata_matches(metadata: dict, field: str, values: list[str]) -> bool:
 
 
 class FilterBuilder:
-    """Construct a field + values spec the retriever can actually honor."""
+    """
+    ### FilterBuilder
+
+    Turn pre-processor ``RAGTag`` values into ``{field, values}`` for
+    Python-side membership. Chroma stores lists as comma-joined strings,
+    so ``$in`` never matches a single name.
+
+    *Class init args:*
+        .. code-block:: python
+            (none)
+
+    *Usage:*
+        - build a spec the retriever can honor:
+            .. code-block:: python
+                spec = FilterBuilder().build(tags, field='entity')
+                # spec is {'field': 'entity', 'values': [...]} or None
+
+        - test one document:
+            .. code-block:: python
+                ok = metadata_matches(doc.metadata, spec['field'], spec['values'])
+    """
 
     def values_for(self, tags: List[RAGTag], field: str) -> list[str]:
         """Return normalized values for the must-field only."""

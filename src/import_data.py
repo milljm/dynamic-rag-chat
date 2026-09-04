@@ -18,7 +18,26 @@ except ImportError:
     from chat_utils import RAGTag, load_pdf
 
 class ImportData:
-    """ handle incoming data and store it accordingly into the RAG """
+    """
+    ### ImportData
+
+    Bulk-load files, PDFs, directories, or a URL into the gold RAG
+    collection (the Documents cabinet). Shows a Rich live status of
+    parent/child splits while ``store_data`` embeds.
+
+    *Class init args:*
+        .. code-block:: python
+            session: SessionContext  # needs .rag, .common, .opts
+
+    *Usage:*
+        - from CLI flags on Chat:
+            .. code-block:: python
+                importer = ImportData(session)
+                importer.extract_text_from_dir(args)
+                importer.extract_text_from_pdf(args)
+                importer.store_text(args)
+                importer.extract_text_from_web(args)
+    """
     def __init__(self, session):
         self.d_session = session
         self.state = {}    # rich live panel stateful properties

@@ -10,10 +10,34 @@ except ImportError:
 # pylint: disable=no-member  # (build_prompts construct members on class init)
 class PromptManager():
     """
-    Handle all the possible prompt files we may introduce with RAG/Tagging
+    ### PromptManager
 
-    Most can be handled by a default. But This class is here so we can support possibly\n
-    more nuanced LLMs.
+    Load, overlay, and compose the ``prompts/*.md`` templates. Story
+    picks a model-matched file (gemma/llama/qwen/…); assistant always
+    uses the nostory pair. Spur edits write overlays under
+    ``vector_dir/prompt_overrides`` so repo templates stay intact.
+
+    *Class init args:*
+        .. code-block:: python
+            console: Console
+            current_dir: str           # repo root (prompts/ lives here)
+            args: ChatOptions
+            prompt_model: str = 'default'  # --model / --pre-llm name
+
+    *Usage:*
+        - construct (also called by ContextManager / RenderWindow):
+            .. code-block:: python
+                pm = PromptManager(console, current_dir, args, prompt_model)
+
+        - plot prompt for the live LLM:
+            .. code-block:: python
+                system, human = pm.compose_nostory_plot(documents)
+
+        - Spur editor:
+            .. code-block:: python
+                slot = pm.read_plot('assistant', 'system')
+                pm.write_plot('assistant', 'system', text)
+                pm.restore_plot('assistant', 'system')
     """
     def __init__(self, console, current_dir, args, prompt_model: str = 'default'):
         self.console = console
