@@ -10,7 +10,7 @@ From the repo root, with the project env active:
 python test_harness.py
 ```
 
-That discovers every `src/*_test.py` and runs them as unittest. A green run ends with `OK`.
+That discovers every `src/*_test.py` and runs them as unittest. A green run ends with `OK`. PRs run the same command on GitHub Actions (`.github/workflows/python-tests.yml`).
 
 The harness loads each file as a **top-level** module (`think_tags_test`, not `src.think_tags_test`). That is on purpose: `src/__init__.py` imports langchain and the rest of the app. `python -m src.think_tags_test` will fight you.
 

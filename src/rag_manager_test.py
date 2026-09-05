@@ -166,21 +166,25 @@ class RagManagerTest(unittest.TestCase):
             dropped = []
             rag._drop_chroma_collection = dropped.append
             for name in (
-                'scratch_user_documents',
-                'scratch_ai_documents',
+                'branch_x_user_documents',
+                'branch_x_ai_documents',
+                'branch_y_user_documents',
+                'branch_y_ai_documents',
                 'assistant_gold_documents',
-                'scratch_gold_documents',
+                'branch_x_gold_documents',
             ):
                 os.makedirs(os.path.join(tmp, name))
-            rag.wipe_branch_stores('scratch')
+            rag.wipe_branch_stores('branch_x')
             self.assertEqual(
                 set(dropped),
-                {'scratch_user_documents', 'scratch_ai_documents'},
+                {'branch_x_user_documents', 'branch_x_ai_documents'},
             )
-            self.assertFalse(os.path.isdir(os.path.join(tmp, 'scratch_user_documents')))
-            self.assertFalse(os.path.isdir(os.path.join(tmp, 'scratch_ai_documents')))
+            self.assertFalse(os.path.isdir(os.path.join(tmp, 'branch_x_user_documents')))
+            self.assertFalse(os.path.isdir(os.path.join(tmp, 'branch_x_ai_documents')))
+            self.assertTrue(os.path.isdir(os.path.join(tmp, 'branch_y_user_documents')))
+            self.assertTrue(os.path.isdir(os.path.join(tmp, 'branch_y_ai_documents')))
             self.assertTrue(os.path.isdir(os.path.join(tmp, 'assistant_gold_documents')))
-            self.assertTrue(os.path.isdir(os.path.join(tmp, 'scratch_gold_documents')))
+            self.assertTrue(os.path.isdir(os.path.join(tmp, 'branch_x_gold_documents')))
 
     def test_vector_store_reuses_chroma_client(self):
         with tempfile.TemporaryDirectory() as tmp:
