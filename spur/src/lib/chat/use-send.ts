@@ -381,7 +381,6 @@ export function useSend() {
 
   const editUser = useCallback(
     async (messageId: string, text: string) => {
-      if (inflight.current) return;
       const store = useChatStore.getState();
       const branch = store.branches[store.currentId];
       if (!branch) return;
@@ -404,30 +403,49 @@ export function useSend() {
       ) {
         return;
       }
+      // Edit always re-runs. Abort a stuck/in-flight stream so generate()
+      // cannot no-op on inflight.current after the bubble already closed.
+      if (inflight.current) {
+        abortRef.current?.abort();
+        if (usesChatPy()) void postOp("/api/stop");
+        inflight.current = false;
+      }
       const n = userTurnNumber(branch.messages, messageId);
+      if (n < 1) {
+        toast.error("Could not find that turn.");
+        return;
+      }
       const flags = msg.flags;
       const result = store.editUserTurn(messageId, nextText);
       if (!result.ok) {
         toast.error(result.error);
         return;
       }
-      if (usesChatPy()) {
-        const op = await postOp("/api/history/edit-user", { n, text: nextText });
-        if (!op.ok) {
-          toast.error(op.error || "Could not edit that turn.");
-          await store.hydrateFromServer();
-          return;
+      try {
+        if (usesChatPy()) {
+          const op = await postOp("/api/history/edit-user", { n, text: nextText });
+          if (!op.ok) {
+            toast.error(op.error || "Could not edit that turn.");
+            await store.hydrateFromServer();
+            return;
+          }
         }
+        await generate({
+          text: nextText,
+          regenerate: true,
+          agent: Boolean(flags?.agent || store.forceAgent),
+          image: Boolean(flags?.image || store.forceSd),
+          noContext: Boolean(flags?.noContext),
+          includeBranch: flags?.includeBranch,
+          ooc: Boolean(flags?.ooc),
+        });
+      } catch (err) {
+        inflight.current = false;
+        setStreaming(false);
+        toast.error(
+          err instanceof Error ? err.message : "Could not re-run that turn.",
+        );
       }
-      await generate({
-        text: nextText,
-        regenerate: true,
-        agent: Boolean(flags?.agent || store.forceAgent),
-        image: Boolean(flags?.image || store.forceSd),
-        noContext: Boolean(flags?.noContext),
-        includeBranch: flags?.includeBranch,
-        ooc: Boolean(flags?.ooc),
-      });
     },
     [generate],
   );
