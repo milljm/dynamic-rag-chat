@@ -21,7 +21,9 @@ Assistant (`nostory`) plot prompts are composed per turn:
 
 - `plot_prompt_nostory_system.md` — always (identity, buckets, output)
 - `plot_prompt_nostory_need_gold.md` — only when DOCUMENTS_INDEX is non-empty and this is *not* a GOLD_RESUME relaunch
+- `plot_prompt_nostory_need_search.md` — assistant answering model may emit `<NEED_SEARCH:query>` when the pre-processor missed a live fact; omitted on SEARCH_RESUME or after two lookups
 - `plot_prompt_nostory_resume.md` — prepended on a NEED_GOLD relaunch (cookbook is omitted so the model does not copy the example tag)
+- `plot_prompt_nostory_search_resume.md` — prepended on a NEED_SEARCH relaunch
 - `plot_prompt_nostory_search.md` — only when this turn already ran a live lookup; tells the answerer the WEB_SEARCH block is *its* knowledge, not an agent handoff
 - `plot_prompt_nostory_sd_last.md` — a generated picture is already on screen; don't pretend to see it
 - `plot_prompt_nostory_human.md` — Jinja drops empty THIS_TURN / INDEX / GOLD_RESUME / RAG blocks

@@ -20,6 +20,7 @@ Light mode (washed dust / sand). Code fences have a **theme dropdown** — pick 
 - **Story and Assistant** — switch in the UI. Story is role-play with scene grounding. Assistant is tools, documents, and optional web search.
 - **Memory that is not a window** — tagged RAG (user / AI / gold), deduped against history, older turns staggered so the important bits stay.
 - **Documents** — paperclip a file; later mention the name, or the model can recall it with `<NEED_GOLD:file>` even while thinking.
+- **Missed search** — the answering model can emit `<NEED_SEARCH:query>` mid-reply (same resume as NEED_GOLD) when the pre-processor did not start the web agent.
 - **URL scrape** — wrap a link in double braces and the page text joins the turn:
   `{{https://example.com/article}}`
 - **Web agent** — `\agent` or the Agent toggle. Live search, then the answering model.
@@ -204,6 +205,7 @@ Each **branch** owns `{branch}_user_documents` and `{branch}_ai_documents`. Stor
 | Spur **Documents** widget | — | list + delete |
 | Filename in the query | — | inject the whole file |
 | `<NEED_GOLD:filename>` mid-reply | — | fetch, resume same turn (cap 2) |
+| `<NEED_SEARCH:query>` mid-reply | live web lookup, resume same turn (cap 2) | — |
 
 Chunking is parent/child:
 

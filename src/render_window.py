@@ -43,6 +43,7 @@ from .sd_session import (
 from .think_tags import ThinkFeed, chunk_text, split_think
 from .sd_tools import make_sd_tools, seed_last_generated
 from .gold_fetch import MAX_GOLD_FETCHES, take_need_gold, recall_status
+from .search_fetch import MAX_SEARCH_FETCHES, take_need_search, search_status
 from .prompt_progress import PromptProgress, format_prompt_status, stream_chat
 
 # Regex to detect stock-related queries for status display
@@ -691,6 +692,58 @@ class RenderWindow(PromptManager):
                 )
         return self.get_messages(meta_data, documents, polish=polish)
 
+    def _live_lookup(self, query: str) -> str:
+        """Run the configured search tool (Tavily or DuckDuckGo) once."""
+        tools = list(self.agent_tools or [])
+        search = next(
+            (t for t in tools if getattr(t, 'name', '') != 'stock_price'),
+            None,
+        )
+        if search is None:
+            search = DuckDuckGoSearchTool()
+        # pylint: disable=protected-access  # BaseTool entry point
+        if hasattr(search, '_run'):
+            return search._run(query)
+        # pylint: enable=protected-access
+        out = search.invoke({'query': query})
+        return out if isinstance(out, str) else str(out)
+
+    def run_need_search(self, documents: dict, query: str) -> bool:
+        """Live lookup for a NEED_SEARCH tag. Assistant mode only.
+
+        Injects a WEB_SEARCH block into FILES and marks the agent as already
+        run so get_messages will not launch AgentExecutor on resume.
+        """
+        if not self.opts.assistant_mode:
+            return False
+        q = (query or '').strip()
+        if not q:
+            return False
+        used = int(documents.get('search_fetches') or 0)
+        if used >= MAX_SEARCH_FETCHES:
+            return False
+        documents['search_fetches'] = used + 1
+        documents['agent_ran'] = True
+        documents.setdefault('dynamic_files', '')
+        label = f'({documents["search_fetches"]}/{MAX_SEARCH_FETCHES})'
+        tool_name = self._search_tool_name()
+        self._status(f'Searching [{tool_name}]…')
+        try:
+            result = self._live_lookup(q)
+            documents['dynamic_files'] += (
+                f'\n=== WEB_SEARCH {label}: {q} ===\n{result}\n\n'
+            )
+        except Exception:  # pylint: disable=broad-exception-caught
+            documents['dynamic_files'] += (
+                '\n=== WEB_SEARCH ===\n'
+                'ERROR: Lookup failed.\n'
+                'INSTRUCTION: Tell the user you could not fetch current information '
+                'and cannot answer reliably without it. Do NOT fabricate or guess. '
+                'Do not mention tools, agents, or pipelines.\n\n'
+            )
+            documents['agent_error'] = '<AGENT_ERROR: TRUE>'
+        return True
+
     def _story_illustration_pack(self, documents: dict) -> str:
         """Canon + last beat for a story-mode scene still."""
         history = self.common.load_chat()
@@ -962,6 +1015,7 @@ class RenderWindow(PromptManager):
         documents.setdefault('documents_index', '')
         documents.setdefault('has_documents_index', False)
         documents.setdefault('gold_resume', '')
+        documents.setdefault('search_resume', '')
         documents.setdefault('attached_files_note', '')
         documents.setdefault('dynamic_files', '')
         documents.setdefault('include_branch', '')
@@ -1194,34 +1248,58 @@ class RenderWindow(PromptManager):
         self, assembled: str, documents: dict, meta_data, messages,
         footer_meta, color, live, inference_start, first_token_at,
     ) -> str:
-        """Fetch gold files the model asked for and continue this turn."""
+        """Fetch gold files / web searches the model asked for and continue."""
         del messages
         if not self.opts.assistant_mode:
             visible, _ = take_need_gold(assembled)
+            visible, _ = take_need_search(visible)
             return visible
-        fetches = 0
+        gold_n = 0
+        search_n = 0
         recalled: list[str] = []
-        while fetches < MAX_GOLD_FETCHES:
+        searched: list[str] = []
+        while True:
             visible, fname = take_need_gold(assembled)
+            if fname and gold_n < MAX_GOLD_FETCHES:
+                assembled = visible
+                if not self.state.context.fetch_gold_file(documents, fname):
+                    break
+                gold_n += 1
+                recalled.append(fname)
+                documents['gold_resume'] = visible
+                self.renderable.response = Text(
+                    recall_status(recalled), style=f'color({color}',
+                )
+                self.render_chat(live)
+                packed = self.get_messages(meta_data, documents)
+                more, later = self._consume_model_stream(
+                    packed, documents, footer_meta, color, live, inference_start,
+                )
+                if later and not first_token_at:
+                    first_token_at = later
+                assembled = (visible.rstrip() + '\n' + more).strip()
+                continue
+            visible, query = take_need_search(assembled)
             assembled = visible
-            if not fname:
-                break
-            if not self.state.context.fetch_gold_file(documents, fname):
-                break
-            fetches += 1
-            recalled.append(fname)
-            documents['gold_resume'] = visible
-            self.renderable.response = Text(
-                recall_status(recalled), style=f'color({color}',
-            )
-            self.render_chat(live)
-            packed = self.get_messages(meta_data, documents)
-            more, later = self._consume_model_stream(
-                packed, documents, footer_meta, color, live, inference_start,
-            )
-            if later and not first_token_at:
-                first_token_at = later
-            assembled = (visible.rstrip() + '\n' + more).strip()
+            if query and search_n < MAX_SEARCH_FETCHES:
+                if not self.run_need_search(documents, query):
+                    break
+                search_n += 1
+                searched.append(query)
+                documents['search_resume'] = visible
+                self.renderable.response = Text(
+                    search_status(searched), style=f'color({color}',
+                )
+                self.render_chat(live)
+                packed = self.get_messages(meta_data, documents)
+                more, later = self._consume_model_stream(
+                    packed, documents, footer_meta, color, live, inference_start,
+                )
+                if later and not first_token_at:
+                    first_token_at = later
+                assembled = (visible.rstrip() + '\n' + more).strip()
+                continue
+            break
         return assembled
 
     def _run_polisher(self, documents, meta_data, footer_meta, color, live,
