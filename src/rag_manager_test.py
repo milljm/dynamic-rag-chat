@@ -60,6 +60,76 @@ class RagManagerTest(unittest.TestCase):
         self.assertNotIn('hello', rag._chroma)
         self.assertNotIn('hello', rag._pdr)
 
+    def test_is_hnsw_error(self):
+        self.assertTrue(RAG._is_hnsw_error(
+            RuntimeError(
+                'Error executing plan: Internal error: '
+                'Error creating hnsw segment reader: Nothing found on disk',
+            ),
+        ))
+        self.assertFalse(RAG._is_hnsw_error(ValueError('bad k')))
+
+    def test_retrieve_skips_empty_collection(self):
+        rag = RAG(None, None, _opts(emb_host='http://x', embeddings='m', matches=4))
+        rag.embeddings = object()
+
+        class _Col:
+            def count(self):
+                return 0
+
+        class _Vec:
+            _collection = _Col()
+
+            def as_retriever(self, **kwargs):
+                raise AssertionError('must not query an empty HNSW index')
+
+        rag._vector_store = lambda collection: _Vec()
+        self.assertEqual(rag.retrieve('hello!', 'scratch_user_documents'), [])
+
+    def test_retrieve_heals_hnsw_gap(self):
+        rag = RAG(None, None, _opts(emb_host='http://x', embeddings='m', matches=4))
+        rag.embeddings = object()
+        healed = []
+
+        class _Col:
+            def count(self):
+                return 3
+
+        class _Ret:
+            def invoke(self, query):
+                del query
+                raise RuntimeError(
+                    'Error creating hnsw segment reader: Nothing found on disk',
+                )
+
+        class _Vec:
+            _collection = _Col()
+            _client = object()
+
+            def as_retriever(self, **kwargs):
+                return _Ret()
+
+        rag._vector_store = lambda collection: _Vec()
+        rag._heal_hnsw = healed.append
+        self.assertEqual(rag.retrieve('hello!', 'scratch_ai_documents'), [])
+        self.assertEqual(healed, ['scratch_ai_documents'])
+
+    def test_drop_chroma_uses_cached_client(self):
+        rag = RAG(None, None, _opts())
+        deleted = []
+
+        class _Client:
+            def delete_collection(self, name):
+                deleted.append(name)
+
+        class _Vec:
+            _client = _Client()
+
+        rag._chroma['scratch_user_documents'] = _Vec()
+        rag._drop_chroma_collection('scratch_user_documents')
+        self.assertEqual(deleted, ['scratch_user_documents'])
+        self.assertNotIn('scratch_user_documents', rag._chroma)
+
     def test_vector_store_reuses_chroma_client(self):
         with tempfile.TemporaryDirectory() as tmp:
             rag = RAG(None, None, _opts(vector_dir=tmp))
