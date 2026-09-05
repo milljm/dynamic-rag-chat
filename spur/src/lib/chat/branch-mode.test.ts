@@ -283,6 +283,19 @@ test("edit user turn keeps that user and drops later turns", () => {
   }
 });
 
+test("regenerate after edit is a no-op pop — last message is the edited user", () => {
+  let s = userBranch(emptySnapshot(), "scratch", "story");
+  s = applySwitch(s, "scratch");
+  s = withTurns(s, "scratch", 2);
+  const edited = applyEditUserTurn(s, "u2", "q2-edit");
+  assert.equal(edited.ok, true);
+  if (!edited.ok) return;
+  const popped = applyPopLastAssistant(edited.state);
+  const msgs = popped.branches.scratch!.messages;
+  assert.equal(msgs.at(-1)?.role, "user");
+  assert.equal(msgs.at(-1)?.content, "q2-edit");
+});
+
 test("userTurnNumber is 1-based over user messages only", () => {
   const msgs = withTurns(emptySnapshot(), "story", 2).branches.story!.messages;
   assert.equal(userTurnNumber(msgs, "u2"), 2);

@@ -267,6 +267,14 @@ function MessageBubble({
     onEditUser?.(message.id, next || message.content);
   }
 
+  const editLineCount = Math.max(
+    4,
+    draft.split("\n").reduce(
+      (n, line) => n + Math.max(1, Math.ceil(line.length / 52)),
+      0,
+    ),
+  );
+
   return (
     <article
       className={cn(
@@ -280,6 +288,8 @@ function MessageBubble({
           isUser
             ? "ml-auto rounded-lg rounded-br-xs bg-user-bubble"
             : "rounded-lg rounded-bl-xs bg-assistant-bubble",
+          // Shrink-to-fit + textarea width:100% collapses to ~20ch.
+          editing && "w-full min-w-[min(100%,20rem)]",
         )}
       >
         {isUser && turn != null && turn > 0 ? (
@@ -337,21 +347,27 @@ function MessageBubble({
           onInspect={onInspect}
         />
         {editing ? (
-          <div className="space-y-2">
+          <div className="w-full space-y-2">
             <Textarea
               value={draft}
-              rows={Math.min(8, Math.max(2, draft.split("\n").length))}
+              rows={Math.min(16, editLineCount)}
               aria-label="Edit message"
-              className="min-h-16 bg-background/60"
+              className="min-h-24 w-full min-w-0 resize-y bg-background/60"
               autoFocus
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Escape") {
                   e.preventDefault();
+                  e.stopPropagation();
                   cancelEdit();
                 }
-                if (e.key === "Enter" && !e.shiftKey) {
+                if (
+                  e.key === "Enter" &&
+                  !e.shiftKey &&
+                  !e.nativeEvent.isComposing
+                ) {
                   e.preventDefault();
+                  e.stopPropagation();
                   saveEdit();
                 }
               }}
@@ -360,20 +376,22 @@ function MessageBubble({
               <Button
                 type="button"
                 variant="ghost"
-                size="icon-sm"
+                size="sm"
                 aria-label="Cancel edit"
                 onClick={cancelEdit}
               >
                 <X className="size-3.5" />
+                Cancel
               </Button>
               <Button
                 type="button"
-                size="icon-sm"
+                size="sm"
                 aria-label="Save and re-run"
                 disabled={!draft.trim() && !message.attachments?.length}
                 onClick={saveEdit}
               >
                 <Check className="size-3.5" />
+                Re-run
               </Button>
             </div>
           </div>
