@@ -4,8 +4,10 @@ import sys
 # ChatOptions is a type hint only — avoid importing chat_utils at module load.
 try:
     from .sd_client import has_generated_images
+    from .search_fetch import MAX_SEARCH_FETCHES
 except ImportError:
     from sd_client import has_generated_images
+    from search_fetch import MAX_SEARCH_FETCHES
 
 # pylint: disable=no-member  # (build_prompts construct members on class init)
 class PromptManager():
@@ -191,26 +193,39 @@ class PromptManager():
         sys.exit(1)
 
     def compose_nostory_plot(self, documents: dict) -> tuple[str, str]:
-        """Spine + event fragments. Resume turns do not see the NEED_GOLD cookbook."""
+        """Spine + event fragments. Resume turns omit the matching cookbook."""
         spine = self.get_prompt(f'{self.plot_prompt_file}_system.md')
         human = self.get_prompt(f'{self.plot_prompt_file}_human.md')
-        resume = bool(str(documents.get('gold_resume') or '').strip())
+        gold_resume = bool(str(documents.get('gold_resume') or '').strip())
+        search_resume = bool(str(documents.get('search_resume') or '').strip())
         has_index = bool(documents.get('has_documents_index'))
         has_images = bool(
             documents.get('has_images') or documents.get('dynamic_images')
         )
+        search_used = (
+            int(documents.get('search_fetches') or 0)
+            + int(documents.get('agent_calls') or 0)
+        )
         parts: list[str] = []
-        if resume:
+        if gold_resume:
             parts.append(self.get_prompt(f'{self.plot_prompt_file}_resume.md'))
+        if search_resume:
+            extra = f'{self.plot_prompt_file}_search_resume.md'
+            if os.path.exists(extra):
+                parts.append(self.get_prompt(extra))
         parts.append(spine)
         if has_images:
             extra = f'{self.plot_prompt_file}_images.md'
             if os.path.exists(extra):
                 parts.append(self.get_prompt(extra))
-        if has_index and not resume:
+        if has_index and not gold_resume:
             parts.append(self.get_prompt(f'{self.plot_prompt_file}_need_gold.md'))
+        if not search_resume and search_used < MAX_SEARCH_FETCHES:
+            extra = f'{self.plot_prompt_file}_need_search.md'
+            if os.path.exists(extra):
+                parts.append(self.get_prompt(extra))
         searched = (
-            int(documents.get('agent_calls') or 0) > 0
+            search_used > 0
             or 'WEB_SEARCH' in str(documents.get('dynamic_files') or '')
             or 'AGENT_TOOL_RESULT' in str(documents.get('dynamic_files') or '')
         )

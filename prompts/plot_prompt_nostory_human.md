@@ -45,6 +45,11 @@ A live lookup failed. Tell the user you could not fetch current information. Do 
 {{gold_resume}}
 </GOLD_RESUME>
 {% endif %}
+{% if search_resume %}
+<SEARCH_RESUME - THE USER ALREADY SAW THIS. DO NOT REPEAT IT. RESULTS ARE IN FILES (WEB_SEARCH). ANSWER NOW.>
+{{search_resume}}
+</SEARCH_RESUME>
+{% endif %}
 <CHAT_HISTORY - FLOW AND TONE. SUPERSEDES AI_RAG FOR FACTS>
 {{chat_history}}
 </CHAT_HISTORY>

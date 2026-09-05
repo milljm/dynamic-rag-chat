@@ -53,7 +53,8 @@ from chat import (
     seed_from_string,
 )
 from src.think_tags import ThinkFeed
-from src.gold_fetch import GoldNeedFeed, MAX_GOLD_FETCHES, recall_status
+from src.gold_fetch import MAX_GOLD_FETCHES, recall_status
+from src.search_fetch import MidTurnFeed, MAX_SEARCH_FETCHES, search_status
 from src.attachment_store import list_attachments
 from src.chat_utils import (
     HISTORY_META_KEYS,
@@ -1271,8 +1272,9 @@ def _iter_sse_chunks(
 ) -> Iterator[bytes]:
     """Yield token/reasoning/status/usage SSE frames for one LLM stream.
 
-    If the model emits <NEED_GOLD:file>, fetch that gold file and resume
-    in this same turn (assistant mode, capped).
+    If the model emits <NEED_GOLD:file> or <NEED_SEARCH:query>, fetch
+    that gold file / run a live lookup and resume in this same turn
+    (assistant mode, capped).
     """
     _reset_renderer_think(renderer)
     started = time.time()
@@ -1283,7 +1285,9 @@ def _iter_sse_chunks(
     reasoning = ''
     model = getattr(renderer.llm, 'model_name', '')
     fetches = 0
+    searches = 0
     recalled: list[str] = []
+    searched: list[str] = []
     assistant = bool(getattr(renderer.opts, 'assistant_mode', False))
 
     def bump(count: int = 1) -> None:
@@ -1294,8 +1298,8 @@ def _iter_sse_chunks(
         if generation_stopped():
             break
         parser = ThinkFeed()
-        gold_feed = GoldNeedFeed()
-        last_gold_channel = 'visible'
+        mid_feed = MidTurnFeed()
+        last_tag_channel = 'visible'
         _reset_renderer_think(renderer)
         chunks = renderer.stream_response(packed)
         announced_reason = False
@@ -1334,13 +1338,13 @@ def _iter_sse_chunks(
                             'Reasoning…', model or '', route or '',
                             context or 0, recalled,
                         )
-                    emit_t, hit_t = gold_feed.feed(thought)
+                    emit_t, hit_t = mid_feed.feed(thought)
                     if emit_t:
                         bump(len(emit_t.split()))
                         reasoning += emit_t
                         yield sse({'type': 'reasoning', 'content': emit_t}).encode()
                     if hit_t:
-                        last_gold_channel = 'thought'
+                        last_tag_channel = 'thought'
                         break
                 if visible:
                     if not announced_stream:
@@ -1349,13 +1353,13 @@ def _iter_sse_chunks(
                             'Streaming…', model or '', route or '',
                             context or 0, recalled,
                         )
-                    emit_v, hit_v = gold_feed.feed(visible)
+                    emit_v, hit_v = mid_feed.feed(visible)
                     if emit_v:
                         bump(renderer.response_count(emit_v))
                         answer += emit_v
                         yield sse({'type': 'token', 'content': emit_v}).encode()
                     if hit_v:
-                        last_gold_channel = 'visible'
+                        last_tag_channel = 'visible'
                         break
         finally:
             closer = getattr(chunks, 'close', None)
@@ -1364,9 +1368,9 @@ def _iter_sse_chunks(
                     closer()
                 except Exception:  # pylint: disable=broad-exception-caught
                     pass
-        leftover = gold_feed.flush()
-        if leftover and not gold_feed.filename:
-            if last_gold_channel == 'thought':
+        leftover = mid_feed.flush()
+        if leftover and not mid_feed.kind:
+            if last_tag_channel == 'thought':
                 bump(len(leftover.split()))
                 reasoning += leftover
                 yield sse({'type': 'reasoning', 'content': leftover}).encode()
@@ -1374,16 +1378,30 @@ def _iter_sse_chunks(
                 bump(renderer.response_count(leftover))
                 answer += leftover
                 yield sse({'type': 'token', 'content': leftover}).encode()
-        fname = gold_feed.filename
-        if (generation_stopped() or not fname or not assistant
-                or fetches >= MAX_GOLD_FETCHES or meta is None):
+        kind = mid_feed.kind
+        value = mid_feed.value
+        if generation_stopped() or not kind or not assistant or meta is None:
             break
-        if not renderer.state.context.fetch_gold_file(documents, fname):
+        if kind == 'gold':
+            if fetches >= MAX_GOLD_FETCHES:
+                break
+            if not renderer.state.context.fetch_gold_file(documents, value):
+                break
+            fetches += 1
+            recalled.append(value)
+            documents['gold_resume'] = answer
+            yield _status_sse(recall_status(recalled), recalled=recalled)
+        elif kind == 'search':
+            if searches >= MAX_SEARCH_FETCHES:
+                break
+            if not renderer.run_need_search(documents, value):
+                break
+            searches += 1
+            searched.append(value)
+            documents['search_resume'] = answer
+            yield _status_sse(search_status(searched), recalled=recalled)
+        else:
             break
-        fetches += 1
-        recalled.append(fname)
-        documents['gold_resume'] = answer
-        yield _status_sse(recall_status(recalled), recalled=recalled)
         yield b':\n\n'
         packed = renderer.get_messages(meta, documents)
         model = getattr(renderer.llm, 'model_name', '') or model

@@ -80,6 +80,45 @@ class PlotFileTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 pm.write_plot('story', 'human', 'nope')
 
+    def test_compose_includes_need_search_cookbook(self):
+        pm = PromptManager(_Console(), ROOT, _args(True), prompt_model='qwen')
+        system, _ = pm.compose_nostory_plot({
+            'gold_resume': '',
+            'search_resume': '',
+            'has_documents_index': False,
+            'dynamic_files': '',
+            'agent_calls': 0,
+            'search_fetches': 0,
+        })
+        self.assertIn('<NEED_SEARCH>', system)
+        self.assertIn('<NEED_SEARCH:NVDA share price>', system)
+
+    def test_compose_omits_need_search_cookbook_on_resume(self):
+        pm = PromptManager(_Console(), ROOT, _args(True), prompt_model='qwen')
+        system, human = pm.compose_nostory_plot({
+            'gold_resume': '',
+            'search_resume': 'Lead in.',
+            'has_documents_index': False,
+            'dynamic_files': '=== WEB_SEARCH ===\nhits',
+            'agent_calls': 0,
+            'search_fetches': 1,
+        })
+        self.assertNotIn('You may emit one live-lookup tag', system)
+        self.assertIn('<SEARCH_RESUME_EVENT>', system)
+        self.assertIn('LIVE_LOOKUP', system)
+
+    def test_compose_omits_need_search_when_agent_already_capped(self):
+        pm = PromptManager(_Console(), ROOT, _args(True), prompt_model='qwen')
+        system, _ = pm.compose_nostory_plot({
+            'gold_resume': '',
+            'search_resume': '',
+            'has_documents_index': False,
+            'dynamic_files': '',
+            'agent_calls': 2,
+            'search_fetches': 0,
+        })
+        self.assertNotIn('You may emit one live-lookup tag', system)
+
 
 if __name__ == '__main__':
     unittest.main()
