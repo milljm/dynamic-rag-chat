@@ -124,6 +124,7 @@ class RAG():
                 rag.clone_collection(source, target, overwrite=False)
                 rag.build_collection_from_texts(target, texts, overwrite=True)
                 rag.delete_collection(branch)
+                rag.wipe_branch_stores(branch)
     """
     def __init__(self, console, common: CommonUtils, args: ChatOptions):
         self.console = console
@@ -240,6 +241,17 @@ class RAG():
         elif len(name) > max_length:
             name = name[:max_length]
         return name
+
+    @staticmethod
+    def collection_prefix(branch: str, collection: str, assistant_mode: bool) -> str:
+        """Chroma name prefix for a branch.
+
+        User/AI are always ``{branch}_``. Gold is shared in assistant
+        mode (``assistant_gold_documents``); story gold is unprefixed.
+        """
+        if collection == 'gold_documents':
+            return 'assistant_' if assistant_mode else ''
+        return f'{branch}_'
 
     def _forget_collection(self, collection: str) -> None:
         """Drop cached Chroma / ParentDocumentRetriever for a collection name."""
@@ -854,6 +866,34 @@ class RAG():
                                     style=f'color({self.opts.color})',
                                     highlight=False)
             self._drop_chroma_collection(f_source)
+
+    def wipe_branch_stores(self, source: str) -> None:
+        """
+        ### Wipe Branch Stores
+
+        ``\\reset`` / delete-branch: destroy this branch's user and AI
+        Chroma collections *and* their parent docstore folders. Gold is
+        never touched (``assistant_gold_documents`` / ``gold_documents``
+        and ``vector_dir/attachments`` stay).
+
+        Do not glob ``{source}*`` — resetting ``assistant`` would delete
+        the gold parent store.
+
+        *Key init args:*
+            .. code-block:: python
+                source: str  # branch name
+        *Returns:*
+            .. code-block:: python
+                None
+        """
+        self.delete_collection(source)
+        root = str(getattr(self.opts, 'vector_dir', '') or '')
+        if not root:
+            return
+        for suffix in ('user_documents', 'ai_documents'):
+            path = os.path.join(root, f'{source}_{suffix}')
+            if os.path.isdir(path):
+                shutil.rmtree(path, ignore_errors=True)
 
     def _clone_chroma_payload(self, f_source: str, f_target: str, overwrite: bool) -> None:
         """Copy one Chroma collection's documents/metadatas/embeddings."""

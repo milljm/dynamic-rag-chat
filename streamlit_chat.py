@@ -11,7 +11,6 @@ import re
 import sys
 import tempfile
 import time
-import glob
 import shutil
 from copy import deepcopy
 from dataclasses import dataclass
@@ -770,13 +769,10 @@ def delete_branch(chat: Chat, name: str) -> tuple[bool, str]:
         hist.pop(name, None)
         hist.get('branch_modes', {}).pop(name, None)
         chat.session.common.save_chat(hist)
-        if hasattr(chat.session.rag, 'delete_collection'):
+        if hasattr(chat.session.rag, 'wipe_branch_stores'):
+            chat.session.rag.wipe_branch_stores(name)
+        elif hasattr(chat.session.rag, 'delete_collection'):
             chat.session.rag.delete_collection(name)
-        vector_dir = getattr(chat.opts, 'vector_dir', '')
-        if vector_dir:
-            for path in glob.glob(f'{vector_dir}{os.path.sep}{name}*'):
-                if os.path.isdir(path):
-                    shutil.rmtree(path, ignore_errors=True)
         return True, f"Deleted '{name}'."
     except Exception as exc:  # pylint: disable=broad-exception-caught
         return False, f'Delete failed: {exc}'
@@ -787,15 +783,12 @@ def reset_branch(chat: Chat) -> tuple[bool, str]:
     hist = _history(chat)
     branch = hist.get('current', 'story')
     try:
-        if hasattr(chat.session.rag, 'delete_collection'):
+        if hasattr(chat.session.rag, 'wipe_branch_stores'):
+            chat.session.rag.wipe_branch_stores(branch)
+        elif hasattr(chat.session.rag, 'delete_collection'):
             chat.session.rag.delete_collection(branch)
         hist[branch] = []
         chat.session.common.save_chat(hist)
-        vector_dir = getattr(chat.opts, 'vector_dir', '')
-        if vector_dir:
-            for path in glob.glob(f'{vector_dir}{os.path.sep}{branch}*'):
-                if os.path.isdir(path):
-                    shutil.rmtree(path, ignore_errors=True)
         if hasattr(chat.session.renderer, 'clear_ooc'):
             try:
                 chat.session.renderer.clear_ooc()

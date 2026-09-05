@@ -60,6 +60,30 @@ class RagManagerTest(unittest.TestCase):
         self.assertNotIn('hello', rag._chroma)
         self.assertNotIn('hello', rag._pdr)
 
+    def test_collection_prefix_fork_is_not_shared_assistant(self):
+        self.assertEqual(
+            RAG.collection_prefix('scratch', 'user_documents', True),
+            'scratch_',
+        )
+        self.assertEqual(
+            RAG.collection_prefix('scratch', 'ai_documents', True),
+            'scratch_',
+        )
+        self.assertEqual(
+            RAG.collection_prefix('assistant', 'user_documents', True),
+            'assistant_',
+        )
+
+    def test_collection_prefix_gold_stays_shared(self):
+        self.assertEqual(
+            RAG.collection_prefix('scratch', 'gold_documents', True),
+            'assistant_',
+        )
+        self.assertEqual(
+            RAG.collection_prefix('story', 'gold_documents', False),
+            '',
+        )
+
     def test_is_hnsw_error(self):
         self.assertTrue(RAG._is_hnsw_error(
             RuntimeError(
@@ -129,6 +153,34 @@ class RagManagerTest(unittest.TestCase):
         rag._drop_chroma_collection('scratch_user_documents')
         self.assertEqual(deleted, ['scratch_user_documents'])
         self.assertNotIn('scratch_user_documents', rag._chroma)
+
+    def test_wipe_branch_stores_spares_gold(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            rag = RAG(None, SimpleNamespace(
+                attributes=SimpleNamespace(collections={
+                    'user': 'user_documents',
+                    'ai': 'ai_documents',
+                    'gold': 'gold_documents',
+                }),
+            ), _opts(vector_dir=tmp))
+            dropped = []
+            rag._drop_chroma_collection = dropped.append
+            for name in (
+                'scratch_user_documents',
+                'scratch_ai_documents',
+                'assistant_gold_documents',
+                'scratch_gold_documents',
+            ):
+                os.makedirs(os.path.join(tmp, name))
+            rag.wipe_branch_stores('scratch')
+            self.assertEqual(
+                set(dropped),
+                {'scratch_user_documents', 'scratch_ai_documents'},
+            )
+            self.assertFalse(os.path.isdir(os.path.join(tmp, 'scratch_user_documents')))
+            self.assertFalse(os.path.isdir(os.path.join(tmp, 'scratch_ai_documents')))
+            self.assertTrue(os.path.isdir(os.path.join(tmp, 'assistant_gold_documents')))
+            self.assertTrue(os.path.isdir(os.path.join(tmp, 'scratch_gold_documents')))
 
     def test_vector_store_reuses_chroma_client(self):
         with tempfile.TemporaryDirectory() as tmp:
