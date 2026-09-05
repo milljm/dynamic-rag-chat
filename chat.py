@@ -41,7 +41,6 @@ import base64
 import argparse
 import mimetypes
 import shutil
-import glob
 import hashlib
 from dataclasses import dataclass, asdict
 from copy import deepcopy
@@ -631,25 +630,15 @@ class Chat():
                 return
             if arg == branch and arg != 'current':
                 history.pop(arg)
-                pattern = f'{self.opts.vector_dir}{os.path.sep}{arg}*'
-                for path in glob.glob(pattern):
-                    if os.path.isdir(path):
-                        console.print(f'[green]Deleting:[/green] {path}')
-                        shutil.rmtree(path)
-                self.session.rag.delete_collection(arg)
+                self.session.rag.wipe_branch_stores(arg)
                 self.session.common.save_chat(history)
                 console.print(f'[green]Deleted: [/green]{arg}', highlight=False)
                 return
 
     def _cmd_reset(self, history: dict) -> None:
         """Clear history and RAG for the current branch."""
-        self.session.rag.delete_collection(self.chat_branch)
+        self.session.rag.wipe_branch_stores(self.chat_branch)
         history[self.chat_branch] = []
-        pattern = f'{self.opts.vector_dir}{os.path.sep}{self.chat_branch}*'
-        for path in glob.glob(pattern):
-            if os.path.isdir(path):
-                console.print(f'[green]Deleting:[/green] {path}')
-                shutil.rmtree(path)
         console.print(f'[green]Reset: [/green]{self.chat_branch}', highlight=False)
         self.session.common.save_chat(history)
         clear_session(str(self.opts.vector_dir))

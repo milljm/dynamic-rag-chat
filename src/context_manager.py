@@ -679,12 +679,16 @@ class ContextManager(PromptManager):
         return True
 
     def _collection_prefix(self, branch: str, collection: str) -> str:
-        """Chroma collection name prefix for this branch."""
-        if self.opts.assistant_mode:
-            return 'assistant_'
-        if collection == 'gold_documents':
-            return ''
-        return f'{branch}_'
+        """Chroma collection name prefix for this branch.
+
+        User/AI collections are always ``{branch}_`` so ``\\branch`` clone
+        and ``\\reset`` operate on the live store. Gold is shared across
+        assistant forks (``assistant_gold_documents``); story gold is
+        unprefixed.
+        """
+        return RAG.collection_prefix(
+            branch, collection, bool(self.opts.assistant_mode),
+        )
 
     def list_gold_files(self) -> list[dict]:
         """Whole files in vector_dir/attachments (Documents widget)."""

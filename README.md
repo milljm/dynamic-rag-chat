@@ -234,7 +234,7 @@ Stable Diffusion: Settings → A1111 URL (`--sd-server`). Image must be on. Imag
 python test_harness.py
 ```
 
-Runs every `src/*_test.py`. See [CONTRIBUTING.md](CONTRIBUTING.md).
+Runs every `src/*_test.py`. PRs run this on GitHub Actions. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 This tree tracks **LangChain 1.x** ([issue #23](https://github.com/milljm/dynamic-rag-chat/issues/23)). Chroma is 1.x; old `vector_data/` from 0.6 may need `\reset` or a gold re-import.
 

@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import glob
 import json
 import mimetypes
 import os
@@ -566,13 +565,10 @@ def delete_branch(chat: Chat, name: str) -> tuple[bool, str]:
     hist.pop(name, None)
     hist.get('branch_modes', {}).pop(name, None)
     chat.session.common.save_chat(hist)
-    if hasattr(chat.session.rag, 'delete_collection'):
+    if hasattr(chat.session.rag, 'wipe_branch_stores'):
+        chat.session.rag.wipe_branch_stores(name)
+    elif hasattr(chat.session.rag, 'delete_collection'):
         chat.session.rag.delete_collection(name)
-    vector_dir = getattr(chat.opts, 'vector_dir', '')
-    if vector_dir:
-        for path in glob.glob(f'{vector_dir}{os.path.sep}{name}*'):
-            if os.path.isdir(path):
-                shutil.rmtree(path, ignore_errors=True)
     return True, f"Deleted '{name}'."
 
 
@@ -584,15 +580,12 @@ def _clear_sd(chat: Chat) -> None:
 def reset_branch(chat: Chat) -> tuple[bool, str]:
     hist = _history(chat)
     branch = hist.get('current', 'story')
-    if hasattr(chat.session.rag, 'delete_collection'):
+    if hasattr(chat.session.rag, 'wipe_branch_stores'):
+        chat.session.rag.wipe_branch_stores(branch)
+    elif hasattr(chat.session.rag, 'delete_collection'):
         chat.session.rag.delete_collection(branch)
     hist[branch] = []
     chat.session.common.save_chat(hist)
-    vector_dir = getattr(chat.opts, 'vector_dir', '')
-    if vector_dir:
-        for path in glob.glob(f'{vector_dir}{os.path.sep}{branch}*'):
-            if os.path.isdir(path):
-                shutil.rmtree(path, ignore_errors=True)
     if hasattr(chat.session.renderer, 'clear_ooc'):
         chat.session.renderer.clear_ooc()
     _clear_sd(chat)

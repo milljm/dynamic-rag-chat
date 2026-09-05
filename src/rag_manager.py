@@ -124,6 +124,7 @@ class RAG():
                 rag.clone_collection(source, target, overwrite=False)
                 rag.build_collection_from_texts(target, texts, overwrite=True)
                 rag.delete_collection(branch)
+                rag.wipe_branch_stores(branch)
     """
     def __init__(self, console, common: CommonUtils, args: ChatOptions):
         self.console = console
@@ -241,11 +242,74 @@ class RAG():
             name = name[:max_length]
         return name
 
+    @staticmethod
+    def collection_prefix(branch: str, collection: str, assistant_mode: bool) -> str:
+        """Chroma name prefix for a branch.
+
+        User/AI are always ``{branch}_``. Gold is shared in assistant
+        mode (``assistant_gold_documents``); story gold is unprefixed.
+        """
+        if collection == 'gold_documents':
+            return 'assistant_' if assistant_mode else ''
+        return f'{branch}_'
+
     def _forget_collection(self, collection: str) -> None:
         """Drop cached Chroma / ParentDocumentRetriever for a collection name."""
         key = self._normalize_collection_name(collection)
         self._chroma.pop(key, None)
         self._pdr.pop(key, None)
+
+    @staticmethod
+    def _is_hnsw_error(exc: BaseException) -> bool:
+        """True for Chroma's empty/corrupt HNSW segment reader crash."""
+        msg = str(exc).lower()
+        return (
+            'hnsw' in msg
+            or 'nothing found on disk' in msg
+            or 'segment reader' in msg
+        )
+
+    def _chroma_client(self):
+        """Reuse an open PersistentClient so we do not spawn a second sqlite lock."""
+        for vs in self._chroma.values():
+            client = getattr(vs, '_client', None)
+            if client is not None:
+                return client
+        return None
+
+    def _drop_chroma_collection(self, name: str) -> None:
+        """Delete a Chroma collection if it exists. Do not query it."""
+        name = self._normalize_collection_name(name)
+        cached = self._chroma.get(name)
+        client = getattr(cached, '_client', None) if cached is not None else None
+        if client is None:
+            client = self._chroma_client()
+        try:
+            if client is None:
+                # Last resort: get_or_create then delete. Avoids a second
+                # PersistentClient on the same sqlite file.
+                vs = self._vector_store(name)
+                client = vs._client  # pylint: disable=protected-access
+            client.delete_collection(name)
+        except Exception:  # pylint: disable=broad-exception-caught
+            pass
+        self._forget_collection(name)
+
+    def _heal_hnsw(self, collection: str) -> None:
+        """Drop a corrupt/empty HNSW segment so the next store recreates it."""
+        self._drop_chroma_collection(collection)
+
+    def _chroma_count(self, collection: str) -> int:
+        """How many child chunks are in this collection. 0 if missing/corrupt."""
+        chroma = self._vector_store(collection)
+        try:
+            # pylint: disable=protected-access
+            return int(chroma._collection.count())
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            if self._is_hnsw_error(exc):
+                self._heal_hnsw(collection)
+                return 0
+            raise
 
     def _parent_retriever(self, collection: str)->ParentDocumentRetriever:
         """ Return ParentDocumentRetriever for provided collection """
@@ -524,9 +588,24 @@ class RAG():
         return None, []
 
     def _similar_docs(self, query: str, collection: str, k: int) -> list[Document]:
-        """Similarity search with a specific k."""
-        retriever = self._chroma_retriever(collection, {'k': k})
-        return retriever.invoke(query)
+        """Similarity search with a specific k.
+
+        Querying a brand-new or just-reset collection (count 0) makes
+        Chroma's HNSW reader throw ``Nothing found on disk``. Skip the
+        search; store_data will populate the index on this same turn.
+        """
+        if k <= 0:
+            return []
+        try:
+            if self._chroma_count(collection) <= 0:
+                return []
+            retriever = self._chroma_retriever(collection, {'k': k})
+            return retriever.invoke(query)
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            if self._is_hnsw_error(exc):
+                self._heal_hnsw(collection)
+                return []
+            raise
 
     @staticmethod
     def _parent_ids(documents: list[Document]) -> list[str]:
@@ -612,6 +691,11 @@ class RAG():
             if metadatas:
                 return self.retrieve(query, collection, metadatas=None)
             return []
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            if self._is_hnsw_error(exc):
+                self._heal_hnsw(collection)
+                return []
+            raise
         documents = self._apply_rerank(query, documents)
         return self._promote_parents(documents, collection)
 
@@ -781,13 +865,35 @@ class RAG():
                 self.console.print(f'\nSOURCE COLLECTION >>>{f_source}<<<\n',
                                     style=f'color({self.opts.color})',
                                     highlight=False)
+            self._drop_chroma_collection(f_source)
 
-            src_vs = self._vector_store(f_source)
-            # pylint: disable=protected-access
-            client = src_vs._client
-            # pylint: enable=protected-access
-            client.delete_collection(f_source)
-            self._forget_collection(f_source)
+    def wipe_branch_stores(self, source: str) -> None:
+        """
+        ### Wipe Branch Stores
+
+        ``\\reset`` / delete-branch: destroy this branch's user and AI
+        Chroma collections *and* their parent docstore folders. Gold is
+        never touched (``assistant_gold_documents`` / ``gold_documents``
+        and ``vector_dir/attachments`` stay).
+
+        Do not glob ``{source}*`` — resetting ``assistant`` would delete
+        the gold parent store.
+
+        *Key init args:*
+            .. code-block:: python
+                source: str  # branch name
+        *Returns:*
+            .. code-block:: python
+                None
+        """
+        self.delete_collection(source)
+        root = str(getattr(self.opts, 'vector_dir', '') or '')
+        if not root:
+            return
+        for suffix in ('user_documents', 'ai_documents'):
+            path = os.path.join(root, f'{source}_{suffix}')
+            if os.path.isdir(path):
+                shutil.rmtree(path, ignore_errors=True)
 
     def _clone_chroma_payload(self, f_source: str, f_target: str, overwrite: bool) -> None:
         """Copy one Chroma collection's documents/metadatas/embeddings."""
