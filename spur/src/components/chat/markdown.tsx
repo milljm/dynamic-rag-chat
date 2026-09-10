@@ -1,4 +1,11 @@
-import { Fragment, useRef, useState, type MouseEvent, type ReactNode } from "react";
+import {
+  Fragment,
+  memo,
+  useRef,
+  useState,
+  type MouseEvent,
+  type ReactNode,
+} from "react";
 import { Check, Copy, Download } from "lucide-react";
 import { downloadTextFile, parseFenceInfo } from "@/lib/chat/artifacts";
 import { highlightCode, normalizeLang } from "@/lib/chat/highlight";
@@ -779,7 +786,9 @@ function MarkdownTable({ table, ctx }: { table: MdTable; ctx: MdCtx }) {
   );
 }
 
-function CodeBlock({
+// Memoized: re-running highlightCode on every parent render is expensive,
+// and only lang/body/file change the highlighted output.
+const CodeBlock = memo(function CodeBlock({
   lang,
   body,
   file,
@@ -861,7 +870,7 @@ function CodeBlock({
       </pre>
     </div>
   );
-}
+});
 
 function escapeRe(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -869,7 +878,9 @@ function escapeRe(s: string): string {
 
 const OPEN_FENCE = /^( {0,3})(`{3,}|~{3,})([^\n]*)$/;
 
-export function Markdown({
+// Memoized so status-only streaming patches (same content string) skip the
+// full markdown re-parse.
+export const Markdown = memo(function Markdown({
   text,
   className,
 }: {
@@ -982,4 +993,4 @@ export function Markdown({
       {nodes.length ? nodes : <Fragment>{inline(source, ctx)}</Fragment>}
     </div>
   );
-}
+});

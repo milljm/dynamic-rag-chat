@@ -40,7 +40,6 @@ import time
 import base64
 import argparse
 import mimetypes
-import shutil
 import hashlib
 from dataclasses import dataclass, asdict
 from copy import deepcopy

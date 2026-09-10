@@ -1,4 +1,13 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+import { Virtuoso, type VirtuosoHandle, type Components } from "react-virtuoso";
+import { useShallow } from "zustand/react/shallow";
 import {
   ArrowDown,
   Bot,
@@ -15,7 +24,7 @@ import {
   X,
 } from "lucide-react";
 import { toast } from "sonner";
-import { isLockedBranch, modeOf, turnCount } from "@/lib/chat/branch-mode";
+import { isLockedBranch, modeOf } from "@/lib/chat/branch-mode";
 import { deleteDocument, usesChatPy } from "@/lib/chat/remote";
 import { useChatStore } from "@/lib/chat/store";
 import type { Message } from "@/lib/chat/types";
@@ -34,6 +43,18 @@ import { ChatImage } from "./chat-image";
 
 const NEAR_BOTTOM = 96;
 
+// Item wrapper restores the old thread container's centering and its
+// gap-5/py-6 rhythm inside the virtualized list.
+const VIRTUOSO_COMPONENTS: Components<string> = {
+  Header: () => <div className="h-6" aria-hidden="true" />,
+  Footer: () => <div className="h-1" aria-hidden="true" />,
+  Item: ({ children, ...props }) => (
+    <div {...props} className="mx-auto w-full max-w-3xl px-4 pb-5 md:px-8">
+      {children}
+    </div>
+  ),
+};
+
 export function Thread({
   streaming,
   onRevealSidebar,
@@ -44,48 +65,88 @@ export function Thread({
   onEditUser?: (messageId: string, text: string) => void;
 }) {
   const currentId = useChatStore((s) => s.currentId);
-  const branch = useChatStore((s) => s.branches[s.currentId]);
-  const scrollerRef = useRef<HTMLDivElement>(null);
-  const innerRef = useRef<HTMLDivElement>(null);
+  // Primitive / shallow-compared subscriptions only: per-token content
+  // patches must not re-render the thread shell. Only the streaming
+  // bubble (via its own message subscription below) updates per frame.
+  const hasBranch = useChatStore((s) => Boolean(s.branches[s.currentId]));
+  const ids = useChatStore(
+    useShallow((s) => s.branches[s.currentId]?.messages.map((m) => m.id) ?? []),
+  );
+  const turns = useChatStore(
+    useShallow((s) => {
+      const messages = s.branches[s.currentId]?.messages;
+      if (!messages) return [];
+      const out: number[] = [];
+      let n = 0;
+      for (const m of messages) {
+        if (m.role === "user") n += 1;
+        out.push(m.role === "user" ? n : 0);
+      }
+      return out;
+    }),
+  );
+  const name = useChatStore((s) => s.branches[s.currentId]?.name ?? "");
+  const mode = useChatStore((s) => {
+    const branch = s.branches[s.currentId];
+    return branch ? modeOf(branch) : "assistant";
+  });
+  const locked = useChatStore((s) => {
+    const branch = s.branches[s.currentId];
+    return branch ? isLockedBranch(branch.id) : false;
+  });
+
+  const virtuosoRef = useRef<VirtuosoHandle>(null);
   const pinnedRef = useRef(true);
   const [pinned, setPinned] = useState(true);
 
-  function pinToBottom() {
-    pinnedRef.current = true;
-    setPinned(true);
-    const el = scrollerRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }
-
-  function releasePin() {
+  // Opening a reasoning frame must not fight the live follow scroll.
+  const releasePin = useCallback(() => {
     pinnedRef.current = false;
     setPinned(false);
+  }, []);
+
+  const handleAtBottom = useCallback((atBottom: boolean) => {
+    pinnedRef.current = atBottom;
+    setPinned(atBottom);
+  }, []);
+
+  // A branch switch swaps the whole list; the Virtuoso remount below
+  // (key={currentId}) lands on the newest item by itself.
+  useEffect(() => {
+    pinnedRef.current = true;
+    setPinned(true);
+  }, [currentId]);
+
+  function jumpToLatest() {
+    pinnedRef.current = true;
+    setPinned(true);
+    const last = ids.length - 1;
+    if (last >= 0) {
+      virtuosoRef.current?.scrollToIndex({
+        index: last,
+        align: "end",
+        behavior: "smooth",
+      });
+    }
   }
 
-  useEffect(() => {
-    pinToBottom();
-  }, [currentId]);
+  const turnTotal = turns.reduce((n, t) => n + (t > 0 ? 1 : 0), 0);
 
-  useEffect(() => {
-    if (!pinnedRef.current) return;
-    const el = scrollerRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [branch?.messages, streaming]);
+  const renderItem = useCallback(
+    (index: number, id: string) => (
+      <MessageBubble
+        messageId={id}
+        turn={turns[index] || undefined}
+        isLast={index === ids.length - 1}
+        streaming={streaming}
+        onEditUser={onEditUser}
+        onInspect={releasePin}
+      />
+    ),
+    [ids, turns, streaming, onEditUser, releasePin],
+  );
 
-  useEffect(() => {
-    const el = scrollerRef.current;
-    const inner = innerRef.current;
-    if (!el || !inner) return;
-    const ro = new ResizeObserver(() => {
-      if (pinnedRef.current) el.scrollTop = el.scrollHeight;
-    });
-    ro.observe(inner);
-    return () => ro.disconnect();
-  }, [currentId]);
-
-  if (!branch) return null;
-
-  const mode = modeOf(branch);
+  if (!hasBranch) return null;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -105,10 +166,8 @@ export function Thread({
         <GitBranch className="size-4 text-muted-foreground" />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <h1 className="truncate text-sm font-medium">{branch.name}</h1>
-            {isLockedBranch(branch.id) && (
-              <Lock className="size-3 text-muted-foreground" />
-            )}
+            <h1 className="truncate text-sm font-medium">{name}</h1>
+            {locked && <Lock className="size-3 text-muted-foreground" />}
           </div>
           <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
             {mode === "assistant" ? (
@@ -117,9 +176,7 @@ export function Thread({
               <BookOpen className="size-3" />
             )}
             <span className="capitalize">{mode}</span>
-            <span className="font-mono tabular-nums">
-              · {turnCount(branch.messages)} turns
-            </span>
+            <span className="font-mono tabular-nums">· {turnTotal} turns</span>
           </p>
         </div>
         <SettingsButton streaming={streaming} />
@@ -127,61 +184,33 @@ export function Thread({
       </header>
 
       <div className="relative min-h-0 flex-1">
-        <div
-          ref={scrollerRef}
-          className="h-full overflow-y-auto [overflow-anchor:none]"
-          onWheel={(e) => {
-            if (e.deltaY < 0) releasePin();
-          }}
-          onScroll={(e) => {
-            const el = e.currentTarget;
-            const near =
-              el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM;
-            if (near === pinnedRef.current) return;
-            pinnedRef.current = near;
-            setPinned(near);
-          }}
-        >
-          <div
-            ref={innerRef}
-            className="mx-auto flex max-w-3xl flex-col gap-5 px-4 py-6 md:px-8"
-          >
-            {branch.messages.length === 0 ? (
-              <EmptyState
-                name={branch.name}
-                mode={mode}
-                locked={isLockedBranch(branch.id)}
-              />
-            ) : (
-              branch.messages.map((msg, i) => (
-                <MessageBubble
-                  key={msg.id}
-                  message={msg}
-                  turn={
-                    msg.role === "user"
-                      ? branch.messages
-                          .slice(0, i + 1)
-                          .filter((m) => m.role === "user").length
-                      : undefined
-                  }
-                  pending={
-                    streaming &&
-                    msg.role === "assistant" &&
-                    i === branch.messages.length - 1
-                  }
-                  streaming={streaming}
-                  onEditUser={onEditUser}
-                  onInspect={releasePin}
-                />
-              ))
-            )}
+        {ids.length === 0 ? (
+          <div className="h-full overflow-y-auto">
+            <div className="mx-auto max-w-3xl px-4 py-6 md:px-8">
+              <EmptyState name={name} mode={mode} locked={locked} />
+            </div>
           </div>
-        </div>
+        ) : (
+          <Virtuoso
+            key={currentId}
+            ref={virtuosoRef}
+            className="h-full"
+            data={ids}
+            computeItemKey={(_, id) => id}
+            initialTopMostItemIndex={ids.length - 1}
+            followOutput={pinned ? "smooth" : false}
+            atBottomStateChange={handleAtBottom}
+            atBottomThreshold={NEAR_BOTTOM}
+            increaseViewportBy={{ top: 640, bottom: 640 }}
+            itemContent={renderItem}
+            components={VIRTUOSO_COMPONENTS}
+          />
+        )}
         {!pinned && (
           <button
             type="button"
             className="absolute bottom-4 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1.5 rounded-full bg-popover px-3 py-1.5 text-xs text-popover-foreground shadow-[var(--shadow-border)]"
-            onClick={pinToBottom}
+            onClick={jumpToLatest}
           >
             <ArrowDown className="size-3" />
             {streaming ? "Resume live" : "Jump to latest"}
@@ -230,24 +259,36 @@ function EmptyState({
   );
 }
 
-function MessageBubble({
-  message,
-  pending,
+const MessageBubble = memo(function MessageBubble({
+  messageId,
   turn,
+  isLast,
   streaming,
   onEditUser,
   onInspect,
 }: {
-  message: Message;
-  pending: boolean;
+  messageId: string;
   turn?: number;
+  isLast: boolean;
   streaming: boolean;
   onEditUser?: (messageId: string, text: string) => void;
   onInspect?: () => void;
 }) {
-  const isUser = message.role === "user";
+  // Subscribe to this message only. applyReplaceMessage keeps untouched
+  // message objects referentially stable, so a streamed token re-renders
+  // exactly one bubble instead of the whole thread.
+  const bubbleMessage = useChatStore((s) => {
+    const branch = s.branches[s.currentId];
+    return branch?.messages.find((m) => m.id === messageId);
+  });
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(message.content);
+  const [draft, setDraft] = useState("");
+  if (!bubbleMessage) return null;
+  // Definite type for the hoisted edit helpers below.
+  const message = bubbleMessage;
+
+  const isUser = message.role === "user";
+  const pending = streaming && isLast && message.role === "assistant";
   const ragNames = message.ragIds?.length ? message.ragIds : message.recalled;
 
   function startEdit() {
@@ -462,7 +503,7 @@ function MessageBubble({
       </div>
     </article>
   );
-}
+});
 
 function RagIdList({ names }: { names: string[] }) {
   const canDelete = usesChatPy();

@@ -12,6 +12,7 @@ import { parseComposerInput, parseIncludes, SLASH_HELP } from "./commands";
 import { retrieve } from "./rag";
 import { chatPyOrigin, postOp, usesChatPy } from "./remote";
 import { ragFromPending, useChatStore } from "./store";
+import { createPatchQueue } from "./patch-queue";
 import { streamChat, streamSse } from "./stream";
 import { feedThink } from "./think";
 import type { Attachment, Message, RagChunk, StreamMetrics, TurnFlags } from "./types";
@@ -174,9 +175,11 @@ export function useSend() {
       abortRef.current = ac;
       setStreaming(true);
 
-      const patch = (partial: Partial<Message>) => {
-        useChatStore.getState().replaceMessage(assistantId, partial, originId);
-      };
+      // Coalesce per-token patches into one store write per frame.
+      const queue = createPatchQueue((partial) =>
+        useChatStore.getState().replaceMessage(assistantId, partial, originId),
+      );
+      const patch = queue.push;
 
       try {
         await streamChat(
@@ -250,14 +253,18 @@ export function useSend() {
           ac.signal,
         );
       } catch (err) {
+        // The authoritative write happens in finally — sync the locals
+        // instead of patching so a queued frame can't clobber them.
         if ((err as Error).name === "AbortError") {
-          if (!content) patch({ content: "Generation stopped." });
+          if (!content) content = "Generation stopped.";
         } else {
           const message =
             err instanceof Error ? err.message : "Something went wrong.";
-          patch({ content: content || message, status: undefined });
+          content = content || message;
         }
       } finally {
+        // Land any pending frame, then write the authoritative final state.
+        queue.flush();
         const generationTime = (performance.now() - started) / 1000;
         const tokenCount = completionTokens || estimateTokens(content);
         const metrics: StreamMetrics = {
@@ -670,9 +677,11 @@ async function generateViaChatPy(
   const ac = new AbortController();
   abortRef.current = ac;
   setStreaming(true);
-  const patch = (partial: Partial<Message>) => {
-    useChatStore.getState().replaceMessage(assistantId, partial, originId);
-  };
+  // Coalesce per-token patches into one store write per frame.
+  const queue = createPatchQueue((partial) =>
+    useChatStore.getState().replaceMessage(assistantId, partial, originId),
+  );
+  const patch = queue.push;
 
   try {
     await streamSse(
@@ -791,13 +800,17 @@ async function generateViaChatPy(
       ac.signal,
     );
   } catch (err) {
+    // The authoritative write happens in finally — sync the locals
+    // instead of patching so a queued frame can't clobber them.
     if ((err as Error).name === "AbortError") {
-      if (!content) patch({ content: "Generation stopped." });
+      if (!content) content = "Generation stopped.";
     } else {
       const message = err instanceof Error ? err.message : "Something went wrong.";
-      patch({ content: content || message, status: undefined });
+      content = content || message;
     }
   } finally {
+    // Land any pending frame, then write the authoritative final state.
+    queue.flush();
     const generationTime = (performance.now() - started) / 1000;
     const tokenCount = completionTokens || estimateTokens(content);
     const ids = [...new Set([...ragIds, ...recalled])];
