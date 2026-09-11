@@ -32,6 +32,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
+import { MetricsWidget } from "./metrics-widget";
 import { ModeToggle } from "./mode-toggle";
 
 const SECTION_KEY = "spur-sec-";
@@ -238,6 +239,10 @@ export function Sidebar({
               }}
             />
           </div>
+        </SidebarSection>
+
+        <SidebarSection id="performance" title="Performance" defaultOpen={false}>
+          <MetricsWidget />
         </SidebarSection>
 
         <HistoryTools />

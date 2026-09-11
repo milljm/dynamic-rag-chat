@@ -40,6 +40,11 @@
   --spur-shimmer-a: #7ee08a;
   --spur-shimmer-b: #c8d85a;
   --spur-shimmer-c: #f0a040;
+  /* Performance sidebar chart: near-black well, green line (shimmer hue). */
+  --spur-chart-bg: #080908;
+  --spur-chart-line: #7ee08a;
+  /* Non-reasoning (answer) overlay line — orange, matches the shimmer ramp. */
+  --spur-chart-alt: #f0a040;
   --spur-paper: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");
 }
 
@@ -82,6 +87,9 @@ html[data-theme="light"] {
   --spur-shimmer-a: #1a5c32;
   --spur-shimmer-b: #5a4a0c;
   --spur-shimmer-c: #8a3d00;
+  --spur-chart-bg: #fbfaf6;
+  --spur-chart-line: #22c55e;
+  --spur-chart-alt: #b45309;
   --spur-paper: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.055'/%3E%3C/svg%3E");
 }
 
@@ -114,6 +122,9 @@ html[data-theme="light"] {
   --color-route: var(--spur-route);
   --color-ttl-warn: var(--spur-ttl-warn);
   --color-ttl-warn-bg: var(--spur-ttl-warn-bg);
+  --color-chart-bg: var(--spur-chart-bg);
+  --color-chart-line: var(--spur-chart-line);
+  --color-chart-alt: var(--spur-chart-alt);
 
   --font-sans: "Figtree", ui-sans-serif, system-ui, sans-serif;
   --font-display: "Fraunces", ui-serif, Georgia, "Times New Roman", serif;
