@@ -12,9 +12,9 @@ import { PromptEditor } from "./prompt-editor";
 import { Sidebar } from "./sidebar";
 import { Thread } from "./thread";
 
-const SIDEBAR_MIN = 350;
+const SIDEBAR_MIN = 370;
 const SIDEBAR_MAX = 560;
-const SIDEBAR_DEFAULT = 350;
+const SIDEBAR_DEFAULT = 370;
 
 export function AppShell() {
   const ready = useHydrateChat();

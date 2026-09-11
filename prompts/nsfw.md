@@ -1,2 +1,2 @@
-<ADDITIONAL_RULES - ADD *NSFW* RULES HERE (note: this file is read as-is, do not use template variables)>
-</ADDITIONAL_RULES>
+NOTE TO USER: NSFW rules belong in this file. Know that template operations do not work in this file. Everything is read literally as-is. Delete this section when finished to prevent the model from tripping over it
+NOTE TO AI: If you are reading this, then there are no NSFW rules set
