@@ -11,7 +11,7 @@ import os
 import threading
 from langchain_core.documents import Document
 from langchain_core.prompts import ChatPromptTemplate, PromptTemplate
-from langchain_core.prompts import HumanMessagePromptTemplate, SystemMessagePromptTemplate
+from langchain_core.prompts import HumanMessagePromptTemplate
 from langchain_openai import ChatOpenAI
 from openai import APITimeoutError
 from .rag_manager import RAG, RAGTag
@@ -68,11 +68,13 @@ class ContextManager(PromptManager):
         self.rag = rag
         self.scene = scene
         self.opts = args
+        # RAG field filter. Story scopes retrieval by person (`entity`),
+        # assistant by `document_topics`; `handle_topics()` and
+        # `gather_context()` only ever filter on this field. Scene `creature`
+        # tags are colour and continuity — deliberately never a filter field,
+        # which is why a named thinking being belongs in `entity` instead.
         self.mode = 'document_topics' if args.assistant_mode else 'entity'
-        self.prompts = PromptManager(self.console,
-                                     current_dir,
-                                     args,
-                                     prompt_model=args.preconditioner)
+        self.prompts = PromptManager(self.console, current_dir, args)
 
         # output_version=v0 keeps chunk.content as a string so ThinkFeed
         # still sees MiniMax / gpt-oss reasoning tokens. use_responses_api=False
@@ -164,12 +166,18 @@ class ContextManager(PromptManager):
     def pre_processor(self,
                       query: str,
                       documents: dict,
-                      do_scene: bool=True)->tuple[str,list[RAGTag]]:
+                      do_scene: bool=True,
+                      direction: str='query')->tuple[str,list[RAGTag]]:
         """
         lightweight LLM as a tagging pre-processor
+
+        ``direction`` names the caller so each run gets its own debug log:
+        ``query`` for the user's input, ``response`` for the AI reply being
+        tagged for RAG, ``import`` for gold-document ingestion. Without it
+        the last caller wins and the query's prompt_stack is lost.
+
         Returns LLM's response, meta_tags, bool (general failure or not)
         """
-        prompts = self.prompts
         query = self.common.normalize_for_dedup(query)
         documents = dict(documents)
         if not self.opts.assistant_mode:
@@ -182,23 +190,10 @@ class ContextManager(PromptManager):
                                                         documents['chat_history'], 1)
         # Tagging LLM: filenames only — never paperclip / gold bodies.
         documents = CommonUtils.preprocessor_payload(documents)
-        if self.opts.assistant_mode:
-            human_prompt = prompts.compose_nostory_tag(documents)
-        else:
-            # pylint: disable-next=no-member # dynamic prompts (see self.__build_prompts)
-            human_prompt = prompts.get_prompt(f'{prompts.tag_prompt_file}_human.md')
-        human_tmpl = PromptTemplate(template=human_prompt,
-                                    template_format='jinja2')
-        human_msg = HumanMessagePromptTemplate(prompt=human_tmpl)
-        messages = [human_msg]
-        if not self.opts.assistant_mode:
-            # pylint: disable-next=no-member
-            system_prompt = prompts.get_prompt(f'{prompts.tag_prompt_file}_system.md')
-            if system_prompt and system_prompt.strip():
-                sys_tmpl = PromptTemplate(
-                    template=system_prompt, template_format='jinja2',
-                )
-                messages.insert(0, SystemMessagePromptTemplate(prompt=sys_tmpl))
+        menu = ([] if self.opts.assistant_mode
+                else self._tagging_menu(documents, direction))
+        messages = self.prompts.compose_tagging_messages(
+            documents, direction, menu)
         prompt_template = ChatPromptTemplate.from_messages(messages)
 
         prompt = prompt_template.format_messages(**documents)
@@ -207,7 +202,7 @@ class ContextManager(PromptManager):
                                 style=f'color({self.opts.color})', highlight=False)
         try:
             content = self.pre_llm.invoke(prompt).content
-            self.common.write_debug('pre_processor', content)
+            self.common.write_debug(f'pre_processor_{direction}', content)
         except APITimeoutError:
             return ('APITimeoutError', [], False)
         # pylint: disable-next=bare-except  # can't handle everything
@@ -227,6 +222,65 @@ class ContextManager(PromptManager):
                 self.console.print(f'SCENE MANAGER OVERRIDE:\n{tags}\n\n',
                                 style=f'color({self.opts.color})', highlight=False)
         return (content, tags, True)
+
+    def _route_mood_families(self, documents: dict) -> list[str]:
+        """Narrow the mood menu with one small pre-LLM call.
+
+        A ~2B tagger choosing among six families is far more reliable than
+        the same model choosing from the whole mood list, and the metadata
+        call that follows then sees a short menu. Returns ``[]`` on any
+        failure, which the caller treats as "offer everything" — routing
+        must never break a turn. Failures are reported out loud, because a
+        silently dead router costs the whole two-stage step.
+        """
+        prompts = self.prompts
+        menu = prompts.mood_family_menu()
+        if not menu:
+            return []
+        payload = {**documents, 'family_menu': menu}
+        try:
+            prompt = prompts.compose_mood_router(payload)
+            if not prompt:
+                return []
+            content = self.pre_llm.invoke(prompt).content
+        except APITimeoutError:
+            self._router_failed('timed out')
+            return []
+        except Exception as exc:  # pylint: disable=broad-except
+            self._router_failed(repr(exc))
+            return []
+        self.common.write_debug('mood_router', content)
+        known = {name for name, _ in menu}
+        families = [f for f in self.common.get_families(content) if f in known]
+        if self.debug:
+            self.console.print(
+                f'MOOD ROUTER: {families}\n\n',
+                style=f'color({self.opts.color})',
+                highlight=False,
+            )
+        return families
+
+    def _router_failed(self, reason: str) -> None:
+        """Say so out loud when the mood router cannot do its job."""
+        self.console.print(
+            f'MOOD ROUTER unavailable ({reason}); offering every mood.',
+            style=f'color({self.opts.color})',
+            highlight=False,
+        )
+
+    def _tagging_menu(self, documents: dict, direction: str) -> list[tuple[str, str]]:
+        """Moods offered to the metadata tagger for this direction.
+
+        Story query turns are a two-stage pick: a tiny router chooses
+        families, then the tagger chooses moods from that short list. An
+        empty or bogus route falls back to the full menu so the mood layer
+        is never silently lost. Reply and import tag metadata only.
+        """
+        if direction != 'query':
+            return []
+        prompts = self.prompts
+        families = self._route_mood_families(documents)
+        return prompts.mood_menu(families=families) or prompts.mood_menu()
 
     def post_process(self, documents: dict)->None:
         """ Start a thread to process LLMs response """
@@ -268,7 +322,8 @@ class ContextManager(PromptManager):
         if self.debug:
             self.console.print(f'ROLL REVERSAL PRE-PROCESSOR:\n{roll_reversal}\n\n',
                 style=f'color({self.opts.color})', highlight=False)
-        (_, list_rag_tags, error) = self.pre_processor(response, roll_reversal)
+        (_, list_rag_tags, error) = self.pre_processor(
+            response, roll_reversal, direction='response')
         if not error:
             self.console.print('ERROR running pre-processor. Generated output not saved.'
                                r' Advised to run `\regenerate` to try again.',
@@ -297,16 +352,22 @@ class ContextManager(PromptManager):
         )
 
     def _mint_new_characters(self, documents: dict) -> None:
-        """Write NPC sheets for anyone new in the current scene entity list."""
-        present = self.scene.get_scene().get('entity') or []
-        if isinstance(present, str):
-            present = [present]
-        for char in present:
+        """Write sheets for anyone new in the scene: people, then creatures."""
+        for char in self.scene.scene_names('entity'):
             if self.scene.is_new_character(char):
                 self.create_character(char, documents)
+        # Creatures never join the known-character roster and get their own
+        # sheet shape. create_character() skips them once the file exists.
+        for beast in self.scene.scene_names('creature'):
+            self.create_character(beast, documents, slot='creature_human')
 
-    def create_character(self, char: str, documents: dict)->None:
-        """ Query the Entity LLM to generate a character file based on chat_history """
+    def create_character(self, char: str, documents: dict,
+                         slot: str='entity_human')->None:
+        """ Query the Entity LLM to generate a sheet for one name.
+
+        ``slot`` picks the sheet shape: ``entity_human`` for people,
+        ``creature_human`` for animals and monsters.
+        """
         if self.opts.assistant_mode or self.entity_llm.model_name == 'None':
             return
         if not os.path.exists(os.path.join(self.opts.vector_dir, 'entities')):
@@ -325,8 +386,7 @@ class ContextManager(PromptManager):
         prompts = self.prompts
         populated = {'character_name' : char} | documents
 
-        # pylint: disable-next=no-member # dynamic prompts (see self.__build_prompts)
-        human_prompt = prompts.get_prompt(f'{prompts.entity_prompt_file}_human.md')
+        human_prompt = prompts.slot('pre_processor', slot)
         human_tmpl = PromptTemplate(template=human_prompt,
                                     template_format='jinja2')
         human_msg = HumanMessagePromptTemplate(prompt=human_tmpl)
@@ -448,8 +508,10 @@ class ContextManager(PromptManager):
         Return list of strings with grounding info for each entity detected in meta_tags.
         Handles entity content as list or delimiter-separated string.
         """
-        # Collect raw values of all entity tags
-        raw_entities = [x.content for x in meta_tags if x.tag == self.mode]
+        # Collect raw values of all entity tags. Creatures come along: both
+        # have sheets on disk that ground the scene.
+        wanted = {self.mode, 'creature'}
+        raw_entities = [x.content for x in meta_tags if x.tag in wanted]
         if not raw_entities:
             return ['']
 
@@ -503,21 +565,13 @@ class ContextManager(PromptManager):
         return documents
 
     def get_explicit(self)->str:
-        """ read and return nsfw.md file """
-        nsfw_file = os.path.join(self.current_dir, 'prompts', 'nsfw.md')
-        if os.path.exists(nsfw_file):
-            with open(nsfw_file, 'r', encoding='utf-8') as f:
-                return f.read()
-        return ''
+        """ read and return the story NSFW addendum (literal, no Jinja) """
+        return self.optional_slot('heavy', 'nsfw')
 
     def get_ooc(self)->str:
-        """ read and return ooc_default_system.md """
+        """ read and return the OOC system fragment """
         # this is temporary until I develop a separate OOC LLM calling method
-        ooc_file = os.path.join(self.current_dir, 'prompts', 'ooc_default_system.md')
-        if os.path.exists(ooc_file):
-            with open(ooc_file, 'r', encoding='utf-8') as f:
-                return f.read()
-        return ''
+        return self.optional_slot('heavy', 'ooc_system')
 
     def stagger_history(self, documents) -> list:
         """
@@ -588,14 +642,21 @@ class ContextManager(PromptManager):
             style=f'color({self.opts.color})',
             highlight=False,
         )
-        (_, meta_tags, error) = self.pre_processor(query, documents)
+        (content, meta_tags, error) = self.pre_processor(query, documents)
+        # Story-only: the tagger also names the prompt controls this turn
+        # needs. Assistant mode keeps its event-driven fragment flags.
+        documents['prompt_stack'] = (
+            [] if self.opts.assistant_mode
+            else self.common.get_prompt_stack(content)
+        )
         self.common.write_debug(
             f'handle_context_preprocess-{self.pre_llm.model_name}',
             meta_tags,
         )
         if self.debug:
             self.console.print(
-                f'TAG RETRIEVAL:\n{meta_tags}\n\n',
+                f'TAG RETRIEVAL:\n{meta_tags}\n\n'
+                f'PROMPT STACK: {documents["prompt_stack"]}\n\n',
                 style=f'color({self.opts.color})',
                 highlight=False,
             )

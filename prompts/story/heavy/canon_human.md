@@ -7,6 +7,7 @@
 <SCENE_STATE - AUTHORITATIVE FOR WHO IS HERE AND WHERE. DO NOT CONTRADICT THIS>
 player_location: {{ player_location | default('') }}
 present (in this room): {{ entity | default('') }}
+creatures (non-people present): {{ creature | default('') }}
 speaking: {{ audience | default('') }}
 npc_locations: {{ npc_locations | default('') }}
 known_characters (roster, NOT automatically in the room): {{ known_characters | default('') }}

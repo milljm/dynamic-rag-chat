@@ -21,7 +21,10 @@ except ImportError:
 
 
 class _Console:
-    def print(self, *args, **kwargs):
+    """Discard console output so tests stay quiet."""
+
+    def print(self, *args, **kwargs):  # pylint: disable=unused-argument
+        """Swallow any Rich console call."""
         del args, kwargs
 
 
@@ -137,6 +140,85 @@ class SceneManagerTest(unittest.TestCase):
                 moving_confidence=0.9,
             ))
             self.assertEqual(mgr.get_scene()['player_location'], 'dock')
+
+    def test_low_confidence_location_change_is_ignored(self):
+        """Staying means staying: >0.7 is required to relocate.
+
+        The reply tagger misreads a room merely mentioned in the prose
+        ("the cabin door thumped open behind me") and reports it with low
+        confidence. SCENE_STATE is authoritative for the next turn's
+        prompt, so that must not move the PC.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            mgr = _mgr(tmp)
+            mgr.ground_scene(_tags(
+                entity=['jason'], player_location='garden', moving_confidence=0.0,
+            ))
+            self.assertEqual(mgr.scene['player_location'], 'garden')
+            mgr.ground_scene(_tags(
+                entity=['jason', 'elara'], player_location='cabin',
+                moving_confidence=0.1,
+            ))
+            self.assertEqual(mgr.scene['player_location'], 'garden')
+            # The arrival still lands; only the room holds.
+            self.assertIn('elara', mgr.scene['entity'])
+
+    def test_high_confidence_location_change_still_applies(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            mgr = _mgr(tmp)
+            mgr.ground_scene(_tags(
+                entity=['jason'], player_location='tavern', moving_confidence=0.0,
+            ))
+            mgr.ground_scene(_tags(
+                entity=['jason'], player_location='stables', moving_confidence=0.9,
+            ))
+            self.assertEqual(mgr.scene['player_location'], 'stables')
+
+    def test_first_location_fills_when_none_known(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            mgr = _mgr(tmp)
+            mgr.ground_scene(_tags(
+                entity=['jason'], player_location='garden', moving_confidence=0.0,
+            ))
+            self.assertEqual(mgr.scene['player_location'], 'garden')
+
+    def test_creature_persists_while_the_room_holds(self):
+        """Ambient wildlife carries forward, like the cast does."""
+        with tempfile.TemporaryDirectory() as tmp:
+            mgr = _mgr(tmp)
+            mgr.ground_scene(_tags(
+                entity=['jason'], creature=['rat snake'],
+                player_location='garden', moving_confidence=0.0,
+            ))
+            self.assertEqual(mgr.scene['creature'], ['rat snake'])
+            # A later turn that omits the creature keeps it in the scene.
+            mgr.ground_scene(_tags(
+                entity=['jason'], player_location='garden', moving_confidence=0.0,
+            ))
+            self.assertEqual(mgr.scene['creature'], ['rat snake'])
+
+    def test_creature_never_joins_the_character_roster(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            mgr = _mgr(tmp)
+            mgr.ground_scene(_tags(
+                entity=['jason'], creature=['rat snake', 'red fox'],
+                player_location='garden', moving_confidence=0.0,
+            ))
+            self.assertEqual(mgr.scene['known_characters'], ['jason'])
+            self.assertEqual(mgr.scene_names('creature'),
+                             ['rat snake', 'red fox'])
+
+    def test_creature_is_left_behind_on_a_move(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            mgr = _mgr(tmp)
+            mgr.ground_scene(_tags(
+                entity=['jason'], creature=['rat snake'],
+                player_location='garden', moving_confidence=0.0,
+            ))
+            mgr.ground_scene(_tags(
+                entity=['jason'], player_location='cabin', moving_confidence=0.9,
+            ))
+            self.assertEqual(mgr.scene['creature'], [])
 
     def test_branch_files_are_separate(self):
         with tempfile.TemporaryDirectory() as tmp:

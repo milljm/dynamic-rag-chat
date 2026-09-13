@@ -64,6 +64,7 @@ class SceneManager:
         return {
             'entity': [player],
             'audience': [],
+            'creature': [],
             'known_characters': [player],
             'player_location': '',
             'npc_locations': [],
@@ -91,6 +92,10 @@ class SceneManager:
     def _names(self, value) -> list[str]:
         """Like _as_list but drop pronoun-only tokens (people, not locations)."""
         return [n for n in self._as_list(value) if n not in _PRONOUNS]
+
+    def scene_names(self, key: str) -> list[str]:
+        """Cleaned name list for one scene key (entity, creature, …)."""
+        return self._as_list(self.scene.get(key))
 
     def _union(self, *parts) -> list[str]:
         """Stable unique concat of name lists."""
@@ -251,11 +256,19 @@ class SceneManager:
     def _merge_stay(self, prev: dict, incoming: dict) -> dict:
         """Same room: people persist even if the tagger omitted them."""
         scene = {
+            # Staying means staying: player_location may be filled in when
+            # unknown, but never changed. A real move requires
+            # moving_confidence > 0.7 and routes through _merge_move.
+            # Without this, a tagger that misreads a room merely mentioned
+            # in the prose (a cabin door opening, an NPC's house) silently
+            # relocates the PC in SCENE_STATE, which the prompt calls
+            # authoritative for the next turn.
             'player_location': (
-                self._location(incoming.get('player_location'))
-                or self._location(prev.get('player_location'))
+                self._location(prev.get('player_location'))
+                or self._location(incoming.get('player_location'))
             ),
             'entity': self._with_player(self._union(prev.get('entity'), incoming.get('entity'))),
+            'creature': self._union(prev.get('creature'), incoming.get('creature')),
             'audience': (
                 self._names(incoming['audience'])
                 if 'audience' in incoming
@@ -279,6 +292,7 @@ class SceneManager:
         )
         scene['player_location'] = self._location(incoming.get('player_location'))
         scene['entity'] = self._with_player(self._names(incoming.get('entity')))
+        scene['creature'] = self._names(incoming.get('creature'))
         scene['audience'] = self._names(incoming.get('audience'))
         scene['npc_locations'] = self._npc_list(self._npc_map(incoming.get('npc_locations')))
         return scene
