@@ -11,7 +11,6 @@ import re
 import sys
 import tempfile
 import time
-import shutil
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Generator
@@ -595,11 +594,11 @@ def _sync_chat_object(chat: Chat, hist: dict | None = None) -> tuple[str, bool]:
 
 def _refresh_mode_runtime(chat: Chat) -> None:
     """
-    PromptManager / ContextManager bake assistant_mode in at construct time.
+    PromptManager resolves prompts from prompts/<flavor>/... at call time.
 
-    _match_model() returns 'nostory' whenever args.assistant_mode is True,
-    and build_prompts() caches plot_prompt_system / plot_prompt_human.
-    Flipping chat.opts.assistant_mode alone does nothing — rebuild files.
+    The flavor follows args.assistant_mode, but the slot manifest is
+    indexed at construction. Flipping chat.opts.assistant_mode re-points
+    the flavor, so re-scan the tree to keep the manifest in step.
     """
     mode = bool(chat.opts.assistant_mode)
     renderer = chat.session.renderer
@@ -624,15 +623,10 @@ def _refresh_mode_runtime(chat: Chat) -> None:
     context.mode = 'document_topics' if mode else 'entity'
 
     if hasattr(renderer, 'prompts') and hasattr(renderer.prompts, 'build_prompts'):
-        renderer.prompts.prompt_model = chat.opts.model
         renderer.prompts.build_prompts()
     if hasattr(renderer, 'build_prompts'):
-        renderer.prompt_model = chat.opts.model
         renderer.build_prompts()
     if hasattr(context, 'prompts') and hasattr(context.prompts, 'build_prompts'):
-        context.prompts.prompt_model = getattr(
-            chat.opts, 'preconditioner', chat.opts.model
-        )
         context.prompts.build_prompts()
 
 

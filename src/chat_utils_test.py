@@ -11,6 +11,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from chat_utils import (  # noqa: C0413
     ChatOptions,
     CommonUtils,
+    RAGTag,
     RegExp,
     active_branch,
     dedupe_rag_chunks,
@@ -53,6 +54,82 @@ class ActiveBranchTest(unittest.TestCase):
             'branch_modes': {'testing': True},
         }
         self.assertEqual(active_branch(True, hist), 'testing')
+
+
+class PromptStackParserTest(unittest.TestCase):
+    """The tagger's prompt_stack rides *beside* metadata, never inside it."""
+
+    def test_reads_the_sibling_key(self):
+        raw = ('{"metadata": {"entity": ["aeloria"]}, '
+               '"prompt_stack": ["mood_combat", "mood_tense"]}')
+        self.assertEqual(
+            CommonUtils.get_prompt_stack(raw), ['mood_combat', 'mood_tense'])
+
+    def test_metadata_only_yields_empty(self):
+        raw = '{"metadata": {"entity": ["aeloria"]}}'
+        self.assertEqual(CommonUtils.get_prompt_stack(raw), [])
+
+    def test_nested_in_metadata_is_not_read(self):
+        """Nested, it would become a RAGTag: written to Chroma + the scene."""
+        raw = '{"metadata": {"prompt_stack": ["mood_combat"]}}'
+        self.assertEqual(CommonUtils.get_prompt_stack(raw), [])
+
+    def test_malformed_and_empty_are_safe(self):
+        for raw in ('', 'not json', '[]', '{"metadata": {}}', None):
+            self.assertEqual(CommonUtils.get_prompt_stack(raw), [])
+
+    def test_strips_think_frame_and_normalises(self):
+        raw = ('<think>choosing a mood</think>{"metadata": {}, '
+               '"prompt_stack": ["mood_combat", "MOOD_COMBAT", " mood_anger "]}')
+        self.assertEqual(
+            CommonUtils.get_prompt_stack(raw), ['mood_combat', 'mood_anger'])
+
+    def test_single_string_is_wrapped(self):
+        raw = '{"metadata": {}, "prompt_stack": "mood_combat"}'
+        self.assertEqual(CommonUtils.get_prompt_stack(raw), ['mood_combat'])
+
+    def test_get_families_reads_its_own_key_only(self):
+        self.assertEqual(
+            CommonUtils.get_families('{"families": ["danger", "QUIET"]}'),
+            ['danger', 'quiet'])
+        # Sibling keys must not bleed into one another.
+        self.assertEqual(
+            CommonUtils.get_prompt_stack('{"families": ["danger"]}'), [])
+        self.assertEqual(
+            CommonUtils.get_families('{"prompt_stack": ["mood_x"]}'), [])
+
+class TagSanitisingTest(unittest.TestCase):
+    """A ~2B tagger sends [[]] and ["none"]; neither may reach the pipeline."""
+
+    def test_nested_empty_list_is_flattened_away(self):
+        tags = CommonUtils.parse_tags({'audience': [[]], 'npc_locations': [[]]})
+        self.assertEqual(tags, [RAGTag('audience', []),
+                                RAGTag('npc_locations', [])])
+
+    def test_placeholder_values_are_dropped(self):
+        tags = CommonUtils.parse_tags({
+            'audience': ['none'], 'npc_locations': ['unknown', 'n/a'],
+        })
+        self.assertEqual(tags, [RAGTag('audience', []),
+                                RAGTag('npc_locations', [])])
+
+    def test_nested_real_values_survive(self):
+        tags = CommonUtils.parse_tags({
+            'entity': [['aeloria'], [], 'elara', 'aeloria'],
+        })
+        self.assertEqual(tags, [RAGTag('entity', ['aeloria', 'elara'])])
+
+    def test_dedupe_survives_a_nested_list(self):
+        """This exact key raised 'unhashable type: list' in production."""
+        tags = [RAGTag('audience', [[]]), RAGTag('audience', [[]]),
+                RAGTag('entity', ['aeloria'])]
+        deduped = CommonUtils.dedupe_tags(tags)
+        self.assertEqual(len(deduped), 2)
+
+    def test_dedupe_keeps_first_occurrence_order(self):
+        tags = [RAGTag('a', ['1']), RAGTag('b', 'x'), RAGTag('a', ['1'])]
+        self.assertEqual(CommonUtils.dedupe_tags(tags),
+                         [RAGTag('a', ['1']), RAGTag('b', 'x')])
 
 
 class ChatOptionsYamlTest(unittest.TestCase):

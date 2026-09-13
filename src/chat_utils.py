@@ -64,6 +64,14 @@ HISTORY_META_KEYS = frozenset({
 
 _USER_TURN_RE = re.compile(r'USER:\s*(.*?)\s*(?:\n\nAI:|\Z)', re.S)
 
+# A pre-processor list field meaning "nothing here". Small taggers write
+# these where an empty array was asked for — including a nested ``[]``,
+# which used to reach the tag dedupe key and raise "unhashable type: 'list'".
+TAG_LIST_JUNK = frozenset({
+    '', 'none', 'null', 'nil', 'n/a', 'na', 'unknown', 'unspecified',
+    '[]', '[ ]', '{}', 'no one', 'nobody', 'nothing',
+})
+
 
 def drop_last_assistant(messages: list) -> bool:
     """Remove the last AI reply only. Keep the user text. True if changed."""
@@ -427,7 +435,7 @@ def load_history_from_dir(vector_dir: str) -> dict | None:
     json_path = os.path.join(vector_dir, HISTORY_JSON)
     loaded = _read_json_dict(json_path)
     if loaded is not None:
-        return _ensure_version(loaded, json_path)
+        return _ensure_version(loaded)
 
     # Try backup
     loaded = _read_json_dict(json_path + '.bak')
@@ -437,13 +445,13 @@ def load_history_from_dir(vector_dir: str) -> dict | None:
             _atomic_write_json(json_path, loaded)
         except OSError:
             pass
-        return _ensure_version(loaded, json_path)
+        return _ensure_version(loaded)
 
     return None
 
 
-def _ensure_version(data: dict, path: str) -> dict:
-    """Set default version and save if missing."""
+def _ensure_version(data: dict) -> dict:
+    """Set the default history version in-place. The caller persists."""
     data.setdefault('version', HISTORY_VERSION)
     return data
 
@@ -995,6 +1003,27 @@ class CommonUtils():
         return _response
 
     @staticmethod
+    def _clean_list_values(values) -> list[str]:
+        """Flatten nested sequences from a tagger and drop placeholder junk.
+
+        ``"audience": [[]]`` is what a ~2B model produces when told that an
+        empty array is ``[]``. Left alone, that nested list reaches the tag
+        dedupe key and raises ``unhashable type: 'list'``.
+        """
+        out: list[str] = []
+        queue = list(values)
+        while queue:
+            item = queue.pop(0)
+            if isinstance(item, (list, tuple, set, frozenset)):
+                queue[0:0] = list(item)
+                continue
+            text = str(item).strip()
+            if text.lower() in TAG_LIST_JUNK or text in out:
+                continue
+            out.append(text)
+        return out
+
+    @staticmethod
     def parse_tags(meta_tags: dict|list[list[str,str]])->list[RAGTag]:
         """ Parse supplied dictionary or list of lists into RAGTags """
         _rag_tags = []
@@ -1008,8 +1037,27 @@ class CommonUtils():
                 split_values = re.split(r'[;,|]\s*', value.strip())
                 # Use list if it split into multiple values, else keep as string
                 value = split_values if len(split_values) > 1 else split_values[0]
+            elif isinstance(value, (list, tuple, set, frozenset)):
+                value = CommonUtils._clean_list_values(value)
             _rag_tags.append(RAGTag(key, value))
         return _rag_tags
+
+    @staticmethod
+    def dedupe_tags(tags: list[RAGTag]) -> list[RAGTag]:
+        """Stable-dedupe tags.
+
+        Keyed on ``repr()`` of the content, so no tag shape can produce an
+        unhashable key. The previous ``tuple(content)`` key raised
+        ``unhashable type: 'list'`` when a tagger returned a nested list.
+        """
+        seen = set()
+        out = []
+        for tag in tags:
+            key = (tag.tag, repr(tag.content))
+            if key not in seen:
+                seen.add(key)
+                out.append(tag)
+        return out
 
     @staticmethod
     def extract_first_json(text: str) -> dict | str:
@@ -1090,7 +1138,7 @@ class CommonUtils():
         matches = self.extract_first_json(response)
         if isinstance(matches, str):
             self.console.print('\nPardon the intrusion, but pre-processor returned non-valid JSON '
-                               'results. Please see:\n\n\tvector_data/pre_processor_debug.log\n\t'
+                               'results. Please see:\n\n\tvector_data/pre_processor_*_debug.log\n\t'
                                'vector_data/json_load_debug.log\n\nfor more information (This turn '
                                'was not saved to the RAG).',
                                 style=f'color({self.opts.color})', highlight=False)
@@ -1098,16 +1146,51 @@ class CommonUtils():
             return []
         if matches:
             _tags.extend(self.parse_tags(matches.get('metadata', {})))
-        seen = set()
-        deduped = []
-        for tag in _tags:
-            key = (tag.tag,
-                    tuple(tag.content)
-                    if isinstance(tag.content, (list, set)) else tag.content)
-            if key not in seen:
-                seen.add(key)
-                deduped.append(tag)
-        return deduped
+        return CommonUtils.dedupe_tags(_tags)
+
+    @staticmethod
+    def _string_list(response: str, key: str) -> list[str]:
+        """Top-level ``key`` string array from a pre-processor response.
+
+        Returns ``[]`` for anything malformed — a bad list must never break
+        a turn, it just means nothing was selected.
+        """
+        if not response:
+            return []
+        response = response.replace('\\_', '_')
+        think_frame = RegExp.think_re.findall(response)
+        if think_frame:
+            response = think_frame[0]
+        matches = CommonUtils.extract_first_json(response)
+        if not isinstance(matches, dict):
+            return []
+        raw = matches.get(key)
+        if isinstance(raw, str):
+            raw = [raw]
+        if not isinstance(raw, list):
+            return []
+        out = []
+        for item in raw:
+            name = str(item).strip().lower()
+            if name and name not in out:
+                out.append(name)
+        return out
+
+    @staticmethod
+    def get_prompt_stack(response: str) -> list[str]:
+        """Extract the tagger's top-level ``prompt_stack`` array.
+
+        Deliberately NOT part of ``metadata``: metadata fields become
+        ``RAGTag``s, so they are written to Chroma and merged into the
+        scene file. A prompt stack is presentation, not retrieval, so it
+        travels as a sibling key and never touches either.
+        """
+        return CommonUtils._string_list(response, 'prompt_stack')
+
+    @staticmethod
+    def get_families(response: str) -> list[str]:
+        """Extract the mood router's top-level ``families`` array."""
+        return CommonUtils._string_list(response, 'families')
 
     @staticmethod
     def normalize_for_dedup(text: str)->str:

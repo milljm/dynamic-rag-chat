@@ -302,12 +302,7 @@ class RenderWindow(PromptManager):
             MessagesPlaceholder(variable_name='agent_scratchpad'),
             ])
         # Prompts
-        self.prompts = PromptManager(
-            console,
-            current_dir,
-            args,
-            prompt_model=self.opts.model
-        )
+        self.prompts = PromptManager(console, current_dir, args)
         self.prompts.build_prompts()
 
         self.thinking_active: bool = False
@@ -995,8 +990,10 @@ class RenderWindow(PromptManager):
         else:
             documents['ooc_diagnostics'] = ''
         documents['ooc_diagnostics_bool'] = 'TRUE' if diag else 'FALSE'
-        documents['ooc_mode_bool'] = (
-            'TRUE' if documents['user_query'].strip().lower().startswith('ooc:') else 'FALSE')
+        # Same prefix save_response() uses to keep OOC turns out of history
+        # and RAG, so a SYSTEM:/OOC> aside is routed as OOC too.
+        is_ooc = bool(self.common.regex.ooc_prefix.search(documents['user_query']))
+        documents['ooc_mode_bool'] = 'TRUE' if is_ooc else 'FALSE'
         self.ooc_response = ''
 
         # One shot VISION population
@@ -1026,16 +1023,13 @@ class RenderWindow(PromptManager):
         documents.setdefault('agent_error', '<AGENT_ERROR: FALSE>')
         documents['has_agent_error'] = 'TRUE' in str(documents.get('agent_error') or '')
 
-        # pylint: disable=no-member # dynamic prompts (see self.__build_prompts)
         if polish:
-            system_prompt = prompts.get_prompt(f'{prompts.polish_prompt_file}_system.md')
-            human_prompt = prompts.get_prompt(f'{prompts.polish_prompt_file}_human.md')
+            system_prompt = prompts.slot('heavy', 'polish_system')
+            human_prompt = prompts.slot('heavy', 'polish_human')
         elif self.opts.assistant_mode:
-            system_prompt, human_prompt = prompts.compose_nostory_plot(documents)
+            system_prompt, human_prompt = prompts.compose_assistant_plot(documents)
         else:
-            system_prompt = prompts.get_prompt(f'{prompts.plot_prompt_file}_system.md')
-            human_prompt = prompts.get_prompt(f'{prompts.plot_prompt_file}_human.md')
-        # pylint: enable=no-member
+            system_prompt, human_prompt = prompts.compose_story_plot(documents)
 
         # Prompt conversions/templates
         system_tmpl = PromptTemplate(template=system_prompt,
@@ -1187,7 +1181,7 @@ class RenderWindow(PromptManager):
         raw = (self.opts.polisher_llm or '').strip().lower()
         return (
             raw in {'', 'none', 'not_set'}
-            or documents['user_query'].find('OOC:') != -1
+            or bool(self.common.regex.ooc_prefix.search(documents['user_query']))
             or self.opts.assistant_mode
         )
 

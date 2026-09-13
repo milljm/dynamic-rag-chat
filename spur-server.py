@@ -26,7 +26,6 @@ import json
 import mimetypes
 import os
 import queue
-import shutil
 import sys
 import threading
 import time
@@ -341,15 +340,10 @@ def _refresh_mode_runtime(chat: Chat) -> None:
     context.assistant_prompt = mode
     context.mode = 'document_topics' if mode else 'entity'
     if hasattr(renderer, 'prompts') and hasattr(renderer.prompts, 'build_prompts'):
-        renderer.prompts.prompt_model = chat.opts.model
         renderer.prompts.build_prompts()
     if hasattr(renderer, 'build_prompts'):
-        renderer.prompt_model = chat.opts.model
         renderer.build_prompts()
     if hasattr(context, 'prompts') and hasattr(context.prompts, 'build_prompts'):
-        context.prompts.prompt_model = getattr(
-            chat.opts, 'preconditioner', chat.opts.model
-        )
         context.prompts.build_prompts()
 
 

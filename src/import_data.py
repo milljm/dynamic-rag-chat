@@ -253,12 +253,11 @@ class ImportData:
             # Some times the LLM/RAG Tagging does not gibe well. And a simple 'try again' works
             for attempt in range(2):
                 try:
-                    (_,
-                    meta_tags,
-                    status) = self.d_session.context.pre_processor(
+                    (_, meta_tags, status) = self.d_session.context.pre_processor(
                                 '',
                                 {'user_query' : split_doc},
-                                False)
+                                False,
+                                direction='import')
                     if not status:
                         pass
                     _normal = self.d_session.common.normalize_for_dedup(split_doc)
