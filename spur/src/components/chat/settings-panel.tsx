@@ -17,11 +17,13 @@ import {
   type SettingsKey,
   type SettingsValues,
 } from "@/lib/chat/settings";
+import { useBehaviors } from "@/lib/chat/behaviors";
 import { usesChatPy } from "@/lib/chat/remote";
 import { useChatStore } from "@/lib/chat/store";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 
 const fieldClass =
   "flex h-10 w-full rounded-sm bg-secondary px-3 text-sm text-foreground shadow-[var(--shadow-border)] transition-[box-shadow] duration-150 placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70 disabled:cursor-not-allowed disabled:opacity-50";
@@ -91,6 +93,32 @@ function Field({
         <span className="text-[11px] text-muted-foreground">{hint}</span>
       ) : null}
     </label>
+  );
+}
+
+function BehaviorRow({
+  id,
+  label,
+  hint,
+  checked,
+  onCheckedChange,
+}: {
+  id: string;
+  label: string;
+  hint: string;
+  checked: boolean;
+  onCheckedChange: (checked: boolean) => void;
+}) {
+  return (
+    <div className="flex items-start justify-between gap-4">
+      <label htmlFor={id} className="grid cursor-pointer gap-1">
+        <span className="text-xs font-medium text-foreground">{label}</span>
+        <span className="text-[11px] leading-snug text-muted-foreground">
+          {hint}
+        </span>
+      </label>
+      <Switch id={id} checked={checked} onCheckedChange={onCheckedChange} />
+    </div>
   );
 }
 
@@ -233,6 +261,8 @@ function SettingsPanel({
       setPingNote(catalog.note);
     }
   }
+
+  const [behaviors, setBehaviors] = useBehaviors();
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -420,14 +450,45 @@ function SettingsPanel({
         </header>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
-          {!values ? (
-            <p className="text-xs text-muted-foreground">Loading…</p>
-          ) : (
-            <div className="grid gap-5">
-              <section className="grid gap-3">
-                <h3 className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                  Server
-                </h3>
+          <div className="grid gap-5">
+            <details>
+              <summary className="cursor-pointer text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                Behaviors
+              </summary>
+              <div className="mt-3 grid gap-3">
+                <BehaviorRow
+                  id="spur-behavior-clear-screen"
+                  label="Clear Screen"
+                  hint="When I send, push my message to the top of the thread."
+                  checked={behaviors.clearScreen}
+                  onCheckedChange={(checked) =>
+                    setBehaviors({ clearScreen: checked })
+                  }
+                />
+                <BehaviorRow
+                  id="spur-behavior-auto-scroll"
+                  label="Auto Scroll"
+                  hint="Follow the assistant's reply while it generates."
+                  checked={behaviors.autoScroll}
+                  onCheckedChange={(checked) =>
+                    setBehaviors({ autoScroll: checked })
+                  }
+                />
+              </div>
+            </details>
+
+            {!values ? (
+              <p className="text-xs text-muted-foreground">Loading…</p>
+            ) : (
+              <>
+                <details className="border-t border-border pt-3">
+                  <summary className="cursor-pointer text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                    Required Models
+                  </summary>
+                  <div className="mt-3 grid gap-3">
+                    <h3 className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                      Server
+                    </h3>
                 <Field label="URL" hint="OpenAI-compatible (LM Studio / Ollama)">
                   <Input
                     value={values.llm_server}
@@ -462,12 +523,9 @@ function SettingsPanel({
                     {pingNote}
                   </span>
                 </div>
-              </section>
+              </div>
 
-              <section className="grid gap-3">
-                <h3 className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                  Required models
-                </h3>
+              <div className="grid gap-3">
                 <Field label="Generator" hint="Uses the server above">
                   <ModelSelect
                     required
@@ -529,11 +587,12 @@ function SettingsPanel({
                     </span>
                   )}
                 </div>
-              </section>
+              </div>
+              </details>
 
               <details className="border-t border-border pt-3">
                 <summary className="cursor-pointer text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                  Routes
+                  Route Models
                 </summary>
                 <p className="mt-2 text-[11px] text-muted-foreground">
                   Blank inherits the generator. Vision, agent, and polisher stay
@@ -661,8 +720,9 @@ function SettingsPanel({
                     </div>
                   </div>
                 </details>
-            </div>
-          )}
+              </>
+            )}
+          </div>
         </div>
 
         <footer className="border-t border-border px-4 py-3">
