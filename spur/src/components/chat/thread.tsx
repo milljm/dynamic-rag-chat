@@ -24,6 +24,7 @@ import {
   X,
 } from "lucide-react";
 import { toast } from "sonner";
+import { useBehaviors } from "@/lib/chat/behaviors";
 import { isLockedBranch, modeOf } from "@/lib/chat/branch-mode";
 import { deleteDocument, usesChatPy } from "@/lib/chat/remote";
 import { useChatStore } from "@/lib/chat/store";
@@ -43,11 +44,39 @@ import { ChatImage } from "./chat-image";
 
 const NEAR_BOTTOM = 96;
 
+// Programmatic scrolls (send repositioning, clear-screen park, jump to
+// latest) legitimately travel away from the bottom for a moment; the
+// debounced atBottomStateChange(false) arriving inside this window is
+// settle noise from our own scrolling, not the user scrolling away.
+const SCROLL_GRACE_MS = 400;
+
+// Clear-screen pad: a spacer in the Virtuoso footer that makes the fresh
+// query scrollable to the very top of the viewport. It is driven
+// imperatively (direct style writes from a ResizeObserver) because it
+// resizes once per animation frame while the reply streams — a React
+// re-render per frame here would violate the thread's render budget.
+let clearScreenPadEl: HTMLDivElement | null = null;
+
+function setClearScreenPad(height: number) {
+  const el = clearScreenPadEl;
+  if (!el) return;
+  if (height > 0) el.style.height = `${Math.round(height)}px`;
+  else el.style.removeProperty("height");
+}
+
 // Item wrapper restores the old thread container's centering and its
 // gap-5/py-6 rhythm inside the virtualized list.
 const VIRTUOSO_COMPONENTS: Components<string> = {
   Header: () => <div className="h-6" aria-hidden="true" />,
-  Footer: () => <div className="h-1" aria-hidden="true" />,
+  Footer: () => (
+    <div
+      ref={(el) => {
+        clearScreenPadEl = el;
+      }}
+      className="h-1"
+      aria-hidden="true"
+    />
+  ),
   Item: ({ children, ...props }) => (
     <div {...props} className="mx-auto w-full max-w-3xl px-4 pb-5 md:px-8">
       {children}
@@ -94,18 +123,43 @@ export function Thread({
     const branch = s.branches[s.currentId];
     return branch ? isLockedBranch(branch.id) : false;
   });
+  const [behaviors] = useBehaviors();
+  const { autoScroll, clearScreen } = behaviors;
 
   const virtuosoRef = useRef<VirtuosoHandle>(null);
+  // Wraps the Virtuoso scroller; the clear-screen pad measures items
+  // through it.
+  const scrollShellRef = useRef<HTMLDivElement>(null);
   const pinnedRef = useRef(true);
   const [pinned, setPinned] = useState(true);
+  // Until this timestamp, atBottomStateChange(false) is treated as settle
+  // noise from our own programmatic scrolls rather than user intent.
+  const programmaticUntilRef = useRef(0);
+  // Clear Screen: one pad session per send while the behavior is on. The
+  // pad parks the fresh query at the top of the viewport and yields to
+  // the reply as it grows (see the pad effect below).
+  const [padSession, setPadSession] = useState<{
+    key: number;
+    queryIndex: number;
+    replyIndex: number;
+  } | null>(null);
+  const padKeyRef = useRef(0);
+
+  // Resume-live intent: an explicit attach while streaming follows the
+  // stream even when the auto-scroll preference is off, until the user
+  // scrolls away again.
+  const manualFollowRef = useRef(false);
 
   // Opening a reasoning frame must not fight the live follow scroll.
   const releasePin = useCallback(() => {
+    manualFollowRef.current = false;
     pinnedRef.current = false;
     setPinned(false);
   }, []);
 
   const handleAtBottom = useCallback((atBottom: boolean) => {
+    if (!atBottom && performance.now() < programmaticUntilRef.current) return;
+    if (!atBottom) manualFollowRef.current = false;
     pinnedRef.current = atBottom;
     setPinned(atBottom);
   }, []);
@@ -113,12 +167,209 @@ export function Thread({
   // A branch switch swaps the whole list; the Virtuoso remount below
   // (key={currentId}) lands on the newest item by itself.
   useEffect(() => {
+    setPadSession(null);
+    setClearScreenPad(0);
     pinnedRef.current = true;
     setPinned(true);
   }, [currentId]);
 
-  function jumpToLatest() {
+  const turnTotal = turns.reduce((n, t) => n + (t > 0 ? 1 : 0), 0);
+  const messageCount = ids.length;
+  const lastIndexRef = useRef(0);
+  lastIndexRef.current = Math.max(0, messageCount - 1);
+
+  // A genuine send appends exactly [user, assistant] to the current branch
+  // and bumps the user-turn count by one. Rewind, edit, regenerate, and
+  // branch switches never match that shape, so only real sends trigger the
+  // scroll below.
+  const sendShapeRef = useRef<{ id: string; count: number; len: number } | null>(null);
+  useEffect(() => {
+    const prev = sendShapeRef.current;
+    sendShapeRef.current = { id: currentId, count: turnTotal, len: messageCount };
+    if (!prev || prev.id !== currentId) return;
+    if (prev.count + 1 !== turnTotal || prev.len + 2 !== messageCount) return;
+    // A genuine send always re-engages the live follow: whatever dropped
+    // the pin earlier (scrolled away, a previous stream's settle flap)
+    // must never leave this reply unattended.
+    programmaticUntilRef.current = performance.now() + SCROLL_GRACE_MS;
     pinnedRef.current = true;
+    setPinned(true);
+    if (clearScreen) {
+      // Park the fresh query at the top of the viewport. The pad effect
+      // below owns the scroll; the footer pad it plants makes the target
+      // position actually reachable instead of browser-clamped.
+      setPadSession({
+        key: ++padKeyRef.current,
+        queryIndex: messageCount - 2,
+        replyIndex: messageCount - 1,
+      });
+    } else {
+      setPadSession(null);
+      // Keep the new turn on screen even with auto-scroll disabled.
+      virtuosoRef.current?.scrollToIndex({
+        index: messageCount - 1,
+        align: "end",
+      });
+    }
+  }, [currentId, turnTotal, messageCount, clearScreen]);
+
+  // The pad is a per-turn device: release it as soon as the reply
+  // completes so no phantom space is left below the finished exchange.
+  // Also land the end-of-stream layout: the metrics footer grows the
+  // bubble in the same commit that stops streaming — one growth the
+  // chase below can no longer observe.
+  useEffect(() => {
+    if (streaming) return;
+    setPadSession(null);
+    if (!pinnedRef.current) return;
+    programmaticUntilRef.current = performance.now() + SCROLL_GRACE_MS;
+    virtuosoRef.current?.scrollToIndex({
+      index: lastIndexRef.current,
+      align: "end",
+    });
+  }, [streaming, currentId]);
+
+  // Stream chase: react-virtuoso's followOutput reacts to item-count
+  // changes only, while a streaming reply is one item growing in place
+  // (the reasoning frame mounting, tokens, the metrics footer). Virtuoso
+  // does not chase that: its internal size-increase recovery stays armed
+  // only ~100ms after a count change, and growth under the at-bottom
+  // threshold is not even reported. Observe the streaming bubble's own
+  // wrapper and re-assert the bottom position on every real growth while
+  // a follow is engaged, so the reply never slides below the fold.
+  useEffect(() => {
+    if (!streaming || padSession || !pinned) return;
+    let ro: ResizeObserver | null = null;
+    let cancelled = false;
+    let tries = 0;
+    let lastHeight = 0;
+    const attach = () => {
+      const el = scrollShellRef.current?.querySelector<HTMLElement>(
+        `[data-index="${lastIndexRef.current}"]`,
+      );
+      if (!el) {
+        // Virtuoso renders items after its own effect pass; retry a few
+        // frames before giving up.
+        if (!cancelled && tries++ < 30) requestAnimationFrame(attach);
+        return;
+      }
+      ro = new ResizeObserver((entries) => {
+        const height = entries[0]?.contentRect.height ?? 0;
+        const grew = height > lastHeight;
+        lastHeight = height;
+        if (!grew || !pinnedRef.current) return;
+        if (!autoScroll && !manualFollowRef.current) return;
+        if (performance.now() < programmaticUntilRef.current) return;
+        virtuosoRef.current?.scrollToIndex({
+          index: lastIndexRef.current,
+          align: "end",
+          behavior: "auto",
+        });
+      });
+      ro.observe(el);
+    };
+    attach();
+    return () => {
+      cancelled = true;
+      ro?.disconnect();
+    };
+  }, [streaming, padSession, pinned, autoScroll, currentId, ids.length]);
+
+  // Detach the follow the instant the view moves upward outside a
+  // programmatic scroll — wheel, touch drag, or keyboard. The debounced
+  // atBottomStateChange would otherwise let one chase frame yank the
+  // view back down mid-gesture. Downward movement never releases.
+  useEffect(() => {
+    const scroller = scrollShellRef.current?.querySelector<HTMLElement>(
+      '[data-testid="virtuoso-scroller"]',
+    );
+    if (!scroller) return;
+    let last = scroller.scrollTop;
+    const onScroll = () => {
+      const top = scroller.scrollTop;
+      const movedUp = top < last - 8;
+      last = top;
+      if (!movedUp) return;
+      if (performance.now() < programmaticUntilRef.current) return;
+      releasePin();
+    };
+    scroller.addEventListener("scroll", onScroll, { passive: true });
+    return () => scroller.removeEventListener("scroll", onScroll);
+  }, [releasePin, currentId]);
+
+  // Grow/shrink the clear-screen pad so the query parks at the very top
+  // of the viewport while the reply streams in below it. The pad starts
+  // at the scroll deficit (how far the browser clamped the align-start
+  // target) and yields exactly as much height as the reply gains, so the
+  // list's total height stays constant: zero scroll noise while the
+  // window fills, and a seamless handoff to the regular bottom follow
+  // once the reply alone outgrows the viewport.
+  useEffect(() => {
+    if (!padSession) return;
+    let cancelled = false;
+    let ro: ResizeObserver | null = null;
+    const raf = requestAnimationFrame(() => {
+      if (cancelled) return;
+      const shell = scrollShellRef.current;
+      const scroller = shell?.querySelector<HTMLElement>(
+        '[data-testid="virtuoso-scroller"]',
+      );
+      if (!shell || !scroller) return;
+      // Run after Virtuoso's own append-follow so the park wins, and
+      // shield the resulting away-from-bottom flap from dropping the pin.
+      programmaticUntilRef.current = performance.now() + SCROLL_GRACE_MS;
+      virtuosoRef.current?.scrollToIndex({
+        index: padSession.queryIndex,
+        align: "start",
+      });
+      // Offset of an item's top edge within the scroll content, valid
+      // regardless of which ancestor is the offsetParent.
+      const itemTop = (el: HTMLElement) =>
+        el.getBoundingClientRect().top -
+        scroller.getBoundingClientRect().top +
+        scroller.scrollTop;
+      const queryEl = shell.querySelector<HTMLElement>(
+        `[data-index="${padSession.queryIndex}"]`,
+      );
+      const replyEl = shell?.querySelector<HTMLElement>(
+        `[data-index="${padSession.replyIndex}"]`,
+      );
+      if (!queryEl || !replyEl) return;
+      // How far the browser clamped the align-start scroll away from the
+      // query's top — exactly the height the list is missing below.
+      const deficit = itemTop(queryEl) - scroller.scrollTop;
+      if (!(deficit > 0)) return;
+      const baseHeight = replyEl.getBoundingClientRect().height;
+      setClearScreenPad(deficit);
+      ro = new ResizeObserver(() => {
+        const grown = replyEl.getBoundingClientRect().height - baseHeight;
+        const pad = deficit - grown;
+        if (pad <= 0) {
+          setClearScreenPad(0);
+          ro?.disconnect();
+          ro = null;
+          // Pad spent: the reply fills the window — hand follow duty
+          // back to the stream chase.
+          setPadSession(null);
+        } else {
+          setClearScreenPad(pad);
+        }
+      });
+      ro.observe(replyEl);
+    });
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(raf);
+      ro?.disconnect();
+      setClearScreenPad(0);
+    };
+  }, [padSession]);
+
+  function jumpToLatest() {
+    programmaticUntilRef.current = performance.now() + SCROLL_GRACE_MS;
+    pinnedRef.current = true;
+    // An explicit resume follows the stream even with auto-scroll off.
+    manualFollowRef.current = true;
     setPinned(true);
     const last = ids.length - 1;
     if (last >= 0) {
@@ -129,8 +380,6 @@ export function Thread({
       });
     }
   }
-
-  const turnTotal = turns.reduce((n, t) => n + (t > 0 ? 1 : 0), 0);
 
   const renderItem = useCallback(
     (index: number, id: string) => (
@@ -183,7 +432,7 @@ export function Thread({
         <ThemeToggle />
       </header>
 
-      <div className="relative min-h-0 flex-1">
+      <div ref={scrollShellRef} className="relative min-h-0 flex-1">
         {ids.length === 0 ? (
           <div className="h-full overflow-y-auto">
             <div className="mx-auto max-w-3xl px-4 py-6 md:px-8">
@@ -191,6 +440,11 @@ export function Thread({
             </div>
           </div>
         ) : (
+          // Always "auto": the "smooth" variant let the debounced
+          // atBottomStateChange(false) fire mid-animation (e.g. the metrics
+          // footer growing the bubble as the stream ends) and permanently
+          // dropped the pin, killing every later stream. jumpToLatest owns
+          // smoothness via its own scrollToIndex call.
           <Virtuoso
             key={currentId}
             ref={virtuosoRef}
@@ -198,7 +452,7 @@ export function Thread({
             data={ids}
             computeItemKey={(_, id) => id}
             initialTopMostItemIndex={ids.length - 1}
-            followOutput={pinned ? "smooth" : false}
+            followOutput={pinned && autoScroll ? "auto" : false}
             atBottomStateChange={handleAtBottom}
             atBottomThreshold={NEAR_BOTTOM}
             increaseViewportBy={{ top: 640, bottom: 640 }}
