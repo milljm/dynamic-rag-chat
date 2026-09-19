@@ -274,8 +274,17 @@ class StoryStackTests(unittest.TestCase):
         self.assertNotIn('mood_downtime', narrowed)
         self.assertEqual(pm.mood_menu(families=['no_such_family']), [])
 
+    def test_mood_erotic_is_offered_in_the_interior_family(self):
+        pm = PromptManager(_Console(), ROOT, _args(False))
+        menu = dict(pm.mood_menu(families=['interior']))
+        self.assertIn('mood_erotic', menu)
+        self.assertIn('mood_intimacy', menu)
+        system, _ = pm.compose_story_plot(
+            _story_documents(prompt_stack=['mood_erotic']))
+        self.assertIn('<MOOD_EROTIC>', system)
+
     def test_router_prompt_offers_only_families(self):
-        """The router sees 6 families, not 47 moods."""
+        """The router sees 6 families, not 48 moods."""
         pm = PromptManager(_Console(), ROOT, _args(False))
         template = pm.slot('pre_processor', 'mood_router_human')
         docs = {'user_name': 'x', 'chat_history': '', 'user_query': 'hi',
