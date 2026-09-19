@@ -1,5 +1,5 @@
 <!-- control
-desc: Warmth, attraction, physical closeness (non-explicit) — use when romance or sensuality is the charge.
+desc: Tenderness and sensual closeness — hands, proximity, anticipation, no explicit detail. Use when warmth is the charge but nothing has turned erotic.
 family: interior
 -->
 <MOOD_INTIMACY>
