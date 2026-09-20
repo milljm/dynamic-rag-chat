@@ -281,5 +281,32 @@ class DedupeRagChunksTest(unittest.TestCase):
         )
 
 
+class ChatOptionsTuningTest(unittest.TestCase):
+    """Slider values persist as strings; _build coerces and whitelists."""
+
+    def test_string_floats_are_coerced(self):
+        opts = ChatOptions._build('.', {'model_temp': '1.0', 'pre_topp': '0.9'})
+        self.assertEqual(opts.model_temp, 1.0)
+        self.assertEqual(opts.pre_topp, 0.9)
+
+    def test_blank_numbers_keep_defaults(self):
+        opts = ChatOptions._build('.', {'model_temp': None, 'casual_temp': '  '})
+        self.assertEqual(opts.model_temp, 1.0)
+        self.assertEqual(opts.casual_temp, 0.9)
+
+    def test_effort_is_whitelisted(self):
+        opts = ChatOptions._build('.', {
+            'model_reasoning_effort': 'MAX',
+            'pre_reasoning_effort': 'bogus',
+        })
+        self.assertEqual(opts.model_reasoning_effort, 'max')
+        self.assertEqual(opts.pre_reasoning_effort, '')
+
+    def test_effort_defaults_to_blank(self):
+        opts = ChatOptions()
+        self.assertEqual(opts.model_reasoning_effort, '')
+        self.assertEqual(opts.structured_reasoning_effort, '')
+
+
 if __name__ == '__main__':
     unittest.main()

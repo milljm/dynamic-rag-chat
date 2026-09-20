@@ -14,11 +14,15 @@ export function ModeToggle({
   mode,
   onChange,
   onEditPrompt,
+  onEditCharacterSheet,
+  characterSheetEnabled,
 }: {
   branchId: string;
   mode: Mode;
   onChange: (mode: Mode) => void;
   onEditPrompt?: () => void;
+  onEditCharacterSheet?: () => void;
+  characterSheetEnabled?: boolean;
 }) {
   const locked = isLockedBranch(branchId);
   const effective = modeOf({ id: branchId, mode });
@@ -48,12 +52,19 @@ export function ModeToggle({
           label="Story"
         />
       </div>
-      {onEditPrompt && (
-        <PromptEditButton
-          label="Edit system prompt"
-          onClick={onEditPrompt}
-        />
-      )}
+      {onEditPrompt && effective === "story" && onEditCharacterSheet ? (
+        <div className="grid grid-cols-2 gap-1">
+          <PromptEditButton label="Edit system prompt" onClick={onEditPrompt} />
+          <PromptEditButton
+            label="Edit Character Sheet"
+            onClick={onEditCharacterSheet}
+            disabled={!characterSheetEnabled}
+            disabledReason="Needs a character sheet: --character-sheet or character_sheet in .chat.yaml"
+          />
+        </div>
+      ) : onEditPrompt ? (
+        <PromptEditButton label="Edit system prompt" onClick={onEditPrompt} />
+      ) : null}
       <p className="flex items-start gap-1.5 text-xs leading-snug text-muted-foreground">
         {locked ? (
           <>
@@ -71,18 +82,38 @@ export function ModeToggle({
 function PromptEditButton({
   label,
   onClick,
+  disabled = false,
+  disabledReason,
 }: {
   label: string;
   onClick: () => void;
+  disabled?: boolean;
+  disabledReason?: string;
 }) {
-  return (
+  const button = (
     <button
       type="button"
       onClick={onClick}
-      className="h-6 w-full rounded-sm bg-secondary/70 px-2 text-[10px] font-medium tracking-wide text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+      disabled={disabled}
+      className={cn(
+        "h-6 w-full rounded-sm bg-secondary/70 px-2 text-[10px] font-medium tracking-wide text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground",
+        disabled &&
+          "cursor-not-allowed opacity-40 hover:bg-secondary/70 hover:text-muted-foreground",
+      )}
     >
       {label}
     </button>
+  );
+
+  if (!disabledReason) return button;
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="grid">{button}</span>
+      </TooltipTrigger>
+      <TooltipContent>{disabledReason}</TooltipContent>
+    </Tooltip>
   );
 }
 

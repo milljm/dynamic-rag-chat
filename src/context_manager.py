@@ -1,3 +1,4 @@
+# pylint: disable=too-many-lines  # the turn pipeline lives here by design
 """
 ContextManager aims at handling everything relating to the context
 being supplied to the LLM. It utilizing several methods:
@@ -9,16 +10,24 @@ being supplied to the LLM. It utilizing several methods:
 """
 import os
 import threading
+from typing import Optional
 from langchain_core.documents import Document
 from langchain_core.prompts import ChatPromptTemplate, PromptTemplate
 from langchain_core.prompts import HumanMessagePromptTemplate
 from langchain_openai import ChatOpenAI
 from openai import APITimeoutError
 from .rag_manager import RAG, RAGTag
-from .chat_utils import CommonUtils, ChatOptions, remember_rag_entry_ids, dedupe_rag_chunks
+from .chat_utils import (
+    CommonUtils,
+    ChatOptions,
+    reasoning_effort,
+    remember_rag_entry_ids,
+    dedupe_rag_chunks,
+)
 from .prompt_manager import PromptManager
 from .filter_builder import FilterBuilder
 from .scene_manager import SceneManager
+from .plot_manager import PlotManager
 from .gold_fetch import MAX_GOLD_FETCHES
 from .attachment_store import list_attachments
 
@@ -79,30 +88,55 @@ class ContextManager(PromptManager):
         # output_version=v0 keeps chunk.content as a string so ThinkFeed
         # still sees MiniMax / gpt-oss reasoning tokens. use_responses_api=False
         # keeps LM Studio / Ollama on Chat Completions.
+        pre_effort = reasoning_effort(getattr(args, 'pre_reasoning_effort', ''))
         self.pre_llm = ChatOpenAI(base_url=args.pre_host,
                                   model=args.preconditioner or args.model,
                                   temperature=args.pre_temp,
+                                  top_p=args.pre_topp,
                                   streaming=False,
                                   max_tokens=8096,
                                   api_key=args.api_key,
                                   seed = args.seed,
                                   request_timeout=150,
+                                  extra_body=(
+                                      {'reasoning_effort': pre_effort}
+                                      if pre_effort else None
+                                  ),
                                   output_version='v0',
                                   use_responses_api=False)
 
+        entity_effort = reasoning_effort(getattr(args, 'entity_reasoning_effort', ''))
         self.entity_llm = ChatOpenAI(base_url=args.entity_host,
                                   model=args.entity_llm or 'None',
                                   temperature=args.entity_temp,
+                                  top_p=args.entity_topp,
                                   streaming=False,
                                   max_tokens=4096,
                                   api_key=args.api_key,
                                   seed = args.seed,
                                   request_timeout=150,
+                                  extra_body=(
+                                      {'reasoning_effort': entity_effort}
+                                      if entity_effort else None
+                                  ),
                                   output_version='v0',
                                   use_responses_api=False)
 
         self.filter_builder = FilterBuilder()
         self.prompts.build_prompts()
+
+        # Fable brain: hidden plot state, updated by light LLMs on the same
+        # daemon thread that tags the reply. Story mode only; never fatal.
+        self.plot: Optional[PlotManager] = None
+        if not args.assistant_mode and getattr(args, 'plot_manager', True):
+            try:
+                self.plot = PlotManager(self.console, self.common, args,
+                                        self.pre_llm, self.prompts, scene=self.scene)
+            except Exception:  # pylint: disable=broad-exception-caught
+                if self.debug:
+                    self.console.print('PLOT MANAGER INIT FAILED\n\n',
+                                       style=f'color({self.opts.color})',
+                                       highlight=False)
 
     # Helper methods for history schema migration
     @staticmethod
@@ -287,6 +321,7 @@ class ContextManager(PromptManager):
         threading.Thread(target=self.save_response, args=(documents,),
                          daemon=True).start()
 
+    # pylint: disable-next=too-many-branches  # one guard per post-store step
     def save_response(self, documents: dict, collection: str='')->None:
         """
         ### Save Response
@@ -313,6 +348,8 @@ class ContextManager(PromptManager):
             collection = self.common.attributes.collections['ai']
         if not self.opts.assistant_mode:
             self.scene.set_branch(self._active_branch(history))
+            if self.plot is not None:
+                self.plot.set_branch(self._active_branch(history))
 
         # Swap rolls, feeding the LLM's response back at the pre-processor for tagging
         response = documents['llm_response']
@@ -334,6 +371,14 @@ class ContextManager(PromptManager):
         if not self.opts.assistant_mode:
             list_rag_tags = self.scene.ground_scene(list_rag_tags)
 
+        # Fable the turn: hidden plot state, updated while the user types.
+        # Retired threads come back for cold storage in the AI collection.
+        # assistant_mode can be toggled at runtime (Spur settings), so the
+        # fable must follow the live flag, not the startup one.
+        archived = []
+        if self.plot is not None and not self.opts.assistant_mode:
+            archived = self.plot.record(documents)
+
         reserved_collection = documents.get('ai_rag_collection')
         reserved_ids = documents.get('ai_rag_parent_ids')
         if reserved_collection:
@@ -350,6 +395,18 @@ class ContextManager(PromptManager):
             collection=collection,
             ids=list(reserved_ids) if reserved_ids else None,
         )
+        if archived:
+            archive_tags = [RAGTag('source', 'fable_archive')]
+            names = sorted({
+                str(n) for item in archived for n in item.get('entity', [])
+            })
+            if names:
+                archive_tags.append(RAGTag('entity', names))
+            self.rag.store_data(
+                '\n\n'.join(item['summary'] for item in archived),
+                tags_metadata=archive_tags,
+                collection=collection,
+            )
 
     def _mint_new_characters(self, documents: dict) -> None:
         """Write sheets for anyone new in the scene: people, then creatures."""
@@ -675,6 +732,10 @@ class ContextManager(PromptManager):
         documents['known_characters'] = ','.join(
             self.scene.get_scene().get('known_characters', []),
         )
+        if self.plot is not None:
+            documents['fable_brief'] = self.plot.brief(
+                self.scene.scene_names('entity'),
+            )
         if self._turn_count(documents['chat_history']) > self.opts.unmolested_sessions:
             documents['chat_history'] = self.stagger_history(documents)
         gold = dict(documents)
@@ -971,6 +1032,8 @@ class ContextManager(PromptManager):
         branch = self._active_branch(history)
         if not self.opts.assistant_mode:
             self.scene.set_branch(branch)
+            if self.plot is not None:
+                self.plot.set_branch(branch)
         documents['terminal_width'] = int(os.get_terminal_size().columns) - 5
         documents['chat_history'] = history[branch]
         documents['additional_content'] = self.get_explicit()

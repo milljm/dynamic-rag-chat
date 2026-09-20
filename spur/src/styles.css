@@ -26,6 +26,8 @@
   --spur-turn-shadow: 0 1px 6px rgba(124, 232, 122, 0.32),
     0 0 0 1px rgba(217, 224, 142, 0.2);
   --spur-route: #ff9100;
+  /* Open settings separators (Behaviors, Route Models, …) tint with this. */
+  --spur-sep-open: #ff9100;
   --spur-ttl-warn: #f0a8a0;
   --spur-ttl-warn-bg: rgba(48, 18, 16, 0.82);
   --spur-ttl-warn-shadow: 0 1px 6px rgba(220, 90, 80, 0.35),
@@ -73,6 +75,8 @@ html[data-theme="light"] {
   --spur-turn-shadow: 0 1px 6px rgb(132, 66, 0),
     0 0 0 1px rgba(30, 110, 34, 0.28);
   --spur-route: #1e4d2b;
+  /* Bright green open separators (light mode). */
+  --spur-sep-open: #22c55e;
   --spur-ttl-warn: #280500;
   --spur-ttl-warn-bg: rgba(255, 118, 118, 0.666);
   --spur-ttl-warn-shadow: 0 1px 6px rgb(139, 63, 0),
@@ -120,6 +124,7 @@ html[data-theme="light"] {
   --color-turn: var(--spur-turn);
   --color-turn-bg: var(--spur-turn-bg);
   --color-route: var(--spur-route);
+  --color-sep-open: var(--spur-sep-open);
   --color-ttl-warn: var(--spur-ttl-warn);
   --color-ttl-warn-bg: var(--spur-ttl-warn-bg);
   --color-chart-bg: var(--spur-chart-bg);
@@ -188,6 +193,23 @@ html[data-theme="light"] {
   p {
     text-wrap: pretty;
   }
+}
+
+/* Settings section separators (the <summary> of each <details> pane) tint
+   with the accent color while their section is open. */
+details > summary.spur-sep {
+  color: var(--spur-muted-fg);
+  transition: color var(--motion-quick) ease;
+}
+details > summary.spur-sep::marker {
+  color: var(--spur-muted-fg);
+}
+details:not([open]) > summary.spur-sep:hover {
+  color: var(--spur-fg);
+}
+details[open] > summary.spur-sep,
+details[open] > summary.spur-sep::marker {
+  color: var(--spur-sep-open);
 }
 
 .hx-kw {

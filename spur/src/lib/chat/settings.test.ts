@@ -1,11 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  REASONING_LEVELS,
   canonicalModelId,
   dedupeModelRows,
   hostForRole,
+  isReasoningLevel,
   normalizeHost,
   preferModelId,
+  reasoningIndex,
   uniqueHosts,
 } from "./settings-hosts.ts";
 
@@ -74,4 +77,25 @@ test("canonicalModelId maps a lowercase saved id onto the catalog spelling", () 
     "MiniMax-M2.7-ConfigI-MLX",
   );
   assert.equal(canonicalModelId("other", ["MiniMax-M2.7-ConfigI-MLX"]), "other");
+});
+
+test("reasoningIndex maps unset/bogus onto the server-default stop", () => {
+  assert.equal(reasoningIndex(""), 2);
+  assert.equal(reasoningIndex(undefined), 2);
+  assert.equal(reasoningIndex("bogus"), 2);
+  assert.equal(reasoningIndex("max"), 2);
+  assert.equal(reasoningIndex("LOW"), 0);
+  assert.equal(reasoningIndex("high"), 1);
+});
+
+test("isReasoningLevel accepts only the three effort levels", () => {
+  assert.equal(isReasoningLevel("low"), true);
+  assert.equal(isReasoningLevel("High"), true);
+  assert.equal(isReasoningLevel("max"), true);
+  assert.equal(isReasoningLevel(""), false);
+  assert.equal(isReasoningLevel("medium"), false);
+});
+
+test("REASONING_LEVELS order matches the slider stops", () => {
+  assert.deepEqual([...REASONING_LEVELS], ["low", "high", "max"]);
 });

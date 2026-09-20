@@ -723,6 +723,13 @@ def create_branch(chat: Chat, name: str, cut_turns: int | None) -> tuple[bool, s
                 chat.session.renderer.clear_ooc()
             except Exception:  # pylint: disable=broad-exception-caught
                 pass
+        # Each branch is its own book: the fable travels with the fork.
+        plot = getattr(getattr(chat.session, 'context', None), 'plot', None)
+        if plot is not None:
+            try:
+                plot.fork_branch(src, name, cut_turns)
+            except Exception:  # pylint: disable=broad-exception-caught
+                pass
         if cut_turns is None:
             chat.session.rag.clone_collection(src, name, overwrite=False)
         elif hasattr(chat.session.rag, 'build_collection_from_texts'):

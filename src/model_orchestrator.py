@@ -1,7 +1,7 @@
 """ Model Orchestration """
 import re
 from langchain_openai import ChatOpenAI
-from .chat_utils import ChatOptions, RAGTag # For Type Hinting
+from .chat_utils import ChatOptions, RAGTag, reasoning_effort  # Type hints
 from .sd_client import sd_enabled
 from .think_tags import install_reasoning_patches
 
@@ -51,6 +51,19 @@ class Orchestration():
             .. code-block:: python
                 story = orch.get_model('story')
     """
+    # Role key → ChatOptions field carrying its reasoning-effort knob.
+    _REASONING_FIELDS = {
+        'story': 'model_reasoning_effort',
+        'polisher': 'polisher_reasoning_effort',
+        'vision': 'vision_reasoning_effort',
+        'agent': 'agent_reasoning_effort',
+        'nsfw': 'nsfw_reasoning_effort',
+        'casual': 'casual_reasoning_effort',
+        'coding': 'coder_reasoning_effort',
+        'structured': 'structured_reasoning_effort',
+        'general': 'general_reasoning_effort',
+    }
+
     def __init__(self, console, args: ChatOptions):
         """Build one ChatOpenAI client per orchestrated role."""
         self.console = console
@@ -73,9 +86,16 @@ class Orchestration():
         }
         self.__llm = {}
         for name, spec in self._model_specs(args).items():
+            role_body = dict(extra_body)
+            field = self._REASONING_FIELDS.get(name, '')
+            effort = reasoning_effort(getattr(args, field, '')) if field else ''
+            if effort:
+                # Only sent when a valid level is set, so servers without
+                # the knob never see it in their request body.
+                role_body['reasoning_effort'] = effort
             self.__llm[name] = ChatOpenAI(
                 **spec,
-                **self._shared_llm_kwargs(args, extra_body),
+                **self._shared_llm_kwargs(args, role_body),
             )
 
     @staticmethod

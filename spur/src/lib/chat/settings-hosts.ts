@@ -78,3 +78,21 @@ export function canonicalModelId(value: string, ids: Iterable<string>): string {
   return want;
 }
 
+
+export const REASONING_LEVELS = ["low", "high", "max"] as const;
+export type ReasoningLevel = (typeof REASONING_LEVELS)[number];
+
+/** Slider stop (0..2) for a reasoning-effort value; unset sits on "max". */
+export function reasoningIndex(value: string | null | undefined): number {
+  const text = (value ?? "").trim().toLowerCase();
+  const index = REASONING_LEVELS.indexOf(text as ReasoningLevel);
+  return index < 0 ? REASONING_LEVELS.length - 1 : index;
+}
+
+/** True only for recognized effort levels (low / high / max). */
+export function isReasoningLevel(value: string | null | undefined): boolean {
+  return REASONING_LEVELS.includes(
+    (value ?? "").trim().toLowerCase() as ReasoningLevel,
+  );
+}
+

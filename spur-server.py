@@ -65,6 +65,7 @@ from src.chat_utils import (
 )
 from src.settings_yaml import (
     ALL_KEYS,
+    TUNING_KEYS,
     blank,
     list_models,
     load_file as load_settings_file,
@@ -119,7 +120,7 @@ def get_chat() -> Chat:
 
 def _opts_snapshot(opts: ChatOptions) -> dict[str, str]:
     """Effective running values (after inherit)."""
-    return {
+    snapshot = {
         'llm_server': blank(opts.host),
         'api_key': blank(opts.api_key) or 'none',
         'model': blank(opts.model),
@@ -151,6 +152,14 @@ def _opts_snapshot(opts: ChatOptions) -> dict[str, str]:
         'sd_server': blank(getattr(opts, 'sd_server', '')),
         'sd_model': blank(getattr(opts, 'sd_model', '')),
     }
+    # Sampling knobs (temperature / top_p / reasoning effort) per role.
+    for key in TUNING_KEYS:
+        if key.endswith('_reasoning_effort'):
+            snapshot[key] = blank(getattr(opts, key, ''))
+        else:
+            value = getattr(opts, key, None)
+            snapshot[key] = '' if value is None else str(value)
+    return snapshot
 
 
 def _rebuild_chat_from_yaml() -> None:
@@ -527,6 +536,13 @@ def create_branch(chat: Chat, name: str, cut_turns: int | None) -> tuple[bool, s
         chat.session.common.save_chat(hist)
         if hasattr(chat.session.renderer, 'clear_ooc'):
             chat.session.renderer.clear_ooc()
+        # Each branch is its own book: the fable travels with the fork.
+        plot = getattr(getattr(chat.session, 'context', None), 'plot', None)
+        if plot is not None:
+            try:
+                plot.fork_branch(src, name, cut_turns)
+            except Exception:  # pylint: disable=broad-exception-caught
+                pass
         if cut_turns is None:
             chat.session.rag.clone_collection(src, name, overwrite=False)
         elif hasattr(chat.session.rag, 'build_collection_from_texts'):
@@ -1161,6 +1177,74 @@ async def api_prompts_restore(request: Request) -> JSONResponse:
         'overlaid': False,
         'content': slot['content'],
         'message': 'Restored the original prompt.',
+    })
+
+
+@app.get('/api/character-sheet')
+def api_character_sheet_get() -> JSONResponse:
+    """The configured character sheet file, if the user supplied one."""
+    chat = get_chat()
+    path = blank(getattr(chat.opts, 'character_sheet', ''))
+    if not path:
+        return JSONResponse({
+            'ok': False,
+            'enabled': False,
+            'error': 'No character sheet configured.',
+        })
+    if not os.path.exists(path):
+        return JSONResponse({
+            'ok': False,
+            'enabled': True,
+            'path': path,
+            'error': f'Character sheet file not found: {path}',
+        })
+    try:
+        with open(path, 'r', encoding='utf-8') as handle:
+            content = handle.read()
+    except OSError as exc:
+        return JSONResponse({
+            'ok': False,
+            'enabled': True,
+            'path': path,
+            'error': str(exc),
+        })
+    return JSONResponse({'ok': True, 'enabled': True, 'path': path, 'content': content})
+
+
+@app.put('/api/character-sheet')
+async def api_character_sheet_save(request: Request) -> JSONResponse:
+    """Overwrite the character sheet file configured for this chat."""
+    if _streams > 0:
+        return JSONResponse(
+            {'ok': False, 'error': 'Wait for the current turn to finish.'},
+            status_code=409,
+        )
+    body = await request.json()
+    content = body.get('content')
+    if not isinstance(content, str):
+        return JSONResponse({'ok': False, 'error': 'Need content.'}, status_code=400)
+    if len(content) > 400_000:
+        return JSONResponse(
+            {'ok': False, 'error': 'Character sheet is too large.'},
+            status_code=400,
+        )
+    chat = get_chat()
+    path = blank(getattr(chat.opts, 'character_sheet', ''))
+    if not path:
+        return JSONResponse(
+            {'ok': False, 'error': 'No character sheet configured.'},
+            status_code=400,
+        )
+    try:
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        with open(path, 'w', encoding='utf-8') as handle:
+            handle.write(content)
+    except OSError as exc:
+        return JSONResponse({'ok': False, 'error': str(exc)}, status_code=400)
+    return JSONResponse({
+        'ok': True,
+        'path': path,
+        'message': 'Saved. Next turn uses this sheet.',
     })
 
 

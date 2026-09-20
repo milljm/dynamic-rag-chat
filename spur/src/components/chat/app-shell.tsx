@@ -2,11 +2,13 @@ import { useEffect, useState } from "react";
 import { Menu, PanelLeft, X } from "lucide-react";
 import { Toaster } from "sonner";
 import { useChatStore } from "@/lib/chat/store";
+import { useCharacterSheetEnabled } from "@/lib/chat/character-sheet";
 import { usesChatPy } from "@/lib/chat/remote";
 import { useSend } from "@/lib/chat/use-send";
 import { Button } from "@/components/ui/button";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { CharacterSheetEditor } from "./character-sheet-editor";
 import { Composer } from "./composer";
 import { PromptEditor } from "./prompt-editor";
 import { Sidebar } from "./sidebar";
@@ -20,7 +22,8 @@ export function AppShell() {
   const ready = useHydrateChat();
   const { send, stop, regenerate, editUser, illustrate, streaming } = useSend();
   const [navOpen, setNavOpen] = useState(false);
-  const [promptOpen, setPromptOpen] = useState(false);
+  const [editor, setEditor] = useState<null | "prompt" | "sheet">(null);
+  const sheetEnabled = useCharacterSheetEnabled();
   const sidebar = useSidebarLayout();
 
   if (!ready) {
@@ -52,7 +55,13 @@ export function AppShell() {
           }}
         >
           <div className="h-full min-w-0 overflow-hidden" style={{ width: sidebar.width }}>
-            <Sidebar streaming={streaming} onCollapse={() => sidebar.setOpen(false)} onEditPrompt={() => setPromptOpen(true)} />
+            <Sidebar
+              streaming={streaming}
+              onCollapse={() => sidebar.setOpen(false)}
+              onEditPrompt={() => setEditor("prompt")}
+              onEditCharacterSheet={() => setEditor("sheet")}
+              characterSheetEnabled={sheetEnabled}
+            />
           </div>
           {sidebar.open && (
             <div
@@ -112,7 +121,13 @@ export function AppShell() {
                   <X />
                 </Button>
               </div>
-              <Sidebar streaming={streaming} onNavigate={() => setNavOpen(false)} onEditPrompt={() => setPromptOpen(true)} />
+              <Sidebar
+                streaming={streaming}
+                onNavigate={() => setNavOpen(false)}
+                onEditPrompt={() => setEditor("prompt")}
+                onEditCharacterSheet={() => setEditor("sheet")}
+                characterSheetEnabled={sheetEnabled}
+              />
             </div>
           </div>
         )}
@@ -129,8 +144,10 @@ export function AppShell() {
             </Button>
             <span className="font-display text-lg italic">Spur</span>
           </div>
-          {promptOpen ? (
-            <PromptEditor onClose={() => setPromptOpen(false)} />
+          {editor === "prompt" ? (
+            <PromptEditor onClose={() => setEditor(null)} />
+          ) : editor === "sheet" ? (
+            <CharacterSheetEditor onClose={() => setEditor(null)} />
           ) : (
             <>
               <Thread
