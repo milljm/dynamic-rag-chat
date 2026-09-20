@@ -670,6 +670,7 @@ async function generateViaChatPy(
   let context = 0;
   let recalling = false;
   let recalled: string[] = [];
+  let searched: string[] = [];
   let ragIds: string[] = [];
   let attachments: Attachment[] = [];
   const think = { inThink: false, neverThink: false };
@@ -722,12 +723,14 @@ async function generateViaChatPy(
           if (event.context) context = event.context;
           recalling = /Recalling Documents?/i.test(event.message || "");
           if (event.recalled?.length) recalled = event.recalled;
+          if (event.searched?.length) searched = event.searched;
           patch({
             status: event.message,
             streamingModel: recalling ? undefined : event.model || model || undefined,
             streamingRoute: recalling ? undefined : event.route || route || undefined,
             streamingContext: recalling ? undefined : event.context || context || undefined,
             recalled: recalled.length ? recalled : undefined,
+            searched: searched.length ? searched : undefined,
           });
         } else if (event.type === "token") {
           if (first) {
@@ -828,6 +831,7 @@ async function generateViaChatPy(
           ttft,
         },
         ...(recalled.length ? { recalled } : {}),
+        ...(searched.length ? { searched } : {}),
         ...(ids.length ? { ragIds: ids } : {}),
         ...(attachments.length ? { attachments } : {}),
         status: undefined,

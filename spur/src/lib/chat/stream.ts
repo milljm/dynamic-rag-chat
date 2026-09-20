@@ -14,7 +14,7 @@ export type ChatRequest = {
 };
 
 export type ChatEvent =
-  | { type: "status"; message: string; model?: string; route?: string; context?: number; recalled?: string[] }
+  | { type: "status"; message: string; model?: string; route?: string; context?: number; recalled?: string[]; searched?: string[] }
   | { type: "token"; content: string }
   | { type: "reasoning"; content: string }
   | { type: "usage"; promptTokens: number; completionTokens: number; model: string; tokenSavings?: number }

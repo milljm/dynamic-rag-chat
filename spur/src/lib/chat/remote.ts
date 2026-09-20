@@ -24,6 +24,7 @@ type RemoteMessage = {
   attachments?: Attachment[];
   metrics?: StreamMetrics;
   recalled?: string[];
+  searched?: string[];
   ragIds?: string[];
   ragEntryIds?: string[];
 };
@@ -91,6 +92,7 @@ export function mergeMessages(local: Message[], remote: Message[]): Message[] {
         metrics: l.metrics ?? r.metrics,
         flags: l.flags ?? r.flags,
         recalled: l.recalled?.length ? l.recalled : r.recalled,
+        searched: l.searched?.length ? l.searched : r.searched,
         ragIds: l.ragIds?.length ? l.ragIds : r.ragIds,
         ragEntryIds: l.ragEntryIds?.length ? l.ragEntryIds : r.ragEntryIds,
       });
@@ -135,6 +137,7 @@ export function sessionToSnapshot(
       attachments: m.attachments?.length ? m.attachments : undefined,
       metrics: m.metrics,
       recalled: m.recalled?.length ? m.recalled : undefined,
+      searched: m.searched?.length ? m.searched : undefined,
       ragIds: m.ragIds?.length ? m.ragIds : undefined,
       ragEntryIds: m.ragEntryIds?.length ? m.ragEntryIds : undefined,
       createdAt: now,

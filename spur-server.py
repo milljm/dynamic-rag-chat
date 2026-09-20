@@ -259,8 +259,9 @@ async def _aiter_sync(
 def _status_sse(
     message: str, model: str = '', route: str = '', context: int = 0,
     recalled: list[str] | None = None,
+    searched: list[str] | None = None,
 ) -> bytes:
-    """status event; attach recalled names so Spur can badge the turn."""
+    """status event; attach recalled names / search queries so Spur badges the turn."""
     payload: dict[str, Any] = {
         'type': 'status',
         'message': message,
@@ -270,6 +271,8 @@ def _status_sse(
     }
     if recalled:
         payload['recalled'] = list(recalled)
+    if searched:
+        payload['searched'] = list(searched)
     return sse(payload).encode()
 
 
@@ -435,6 +438,8 @@ def session_payload(chat: Chat | None = None) -> dict[str, Any]:
                     )
                 if m.get('recalled'):
                     row['recalled'] = list(m['recalled'])
+                if m.get('searched'):
+                    row['searched'] = list(m['searched'])
                 if m.get('ragIds'):
                     row['ragIds'] = list(m['ragIds'])
                 if m.get('ragEntryIds'):
@@ -775,6 +780,7 @@ def persist_turn(
     regenerate: bool = False,
     rag_ids: list | None = None,
     recalled: list | None = None,
+    searched: list | None = None,
 ) -> None:
     documents['llm_response'] = response
     documents['regenerate'] = bool(regenerate)
@@ -817,6 +823,8 @@ def persist_turn(
         extra['ragIds'] = list(rag_ids)
     if recalled:
         extra['recalled'] = list(recalled)
+    if searched:
+        extra['searched'] = list(searched)
     generated = [
         rec for rec in (documents.get('generated_images') or [])
         if isinstance(rec, dict) and not rec.get('prior')
@@ -1470,7 +1478,7 @@ def _iter_sse_chunks(
             searches += 1
             searched.append(value)
             documents['search_resume'] = answer
-            yield _status_sse(search_status(searched), recalled=recalled)
+            yield _status_sse(search_status(searched), recalled=recalled, searched=searched)
         else:
             break
         yield b':\n\n'
@@ -1494,6 +1502,7 @@ def _iter_sse_chunks(
         'ttft': ttft,
         'gen': gen,
         'recalled': list(recalled),
+        'searched': list(searched),
     })
     yield sse({
         'type': 'usage',
@@ -1602,6 +1611,7 @@ async def api_chat(request: Request) -> StreamingResponse:
                     or documents.get('generated_images'))
                     and not documents.get('no_context')):
                 recalled = list(stats.get('recalled') or [])
+                searched = list(stats.get('searched') or [])
                 rag_ids = _rag_ids_for_turn(documents, body, recalled)
                 if rag_ids:
                     yield sse({'type': 'rag', 'ids': rag_ids}).encode()
@@ -1622,6 +1632,7 @@ async def api_chat(request: Request) -> StreamingResponse:
                     regenerate=regenerate,
                     rag_ids=rag_ids,
                     recalled=recalled,
+                    searched=searched,
                 )
             yield sse({'type': 'done'}).encode()
         except Exception as exc:  # pylint: disable=broad-exception-caught

@@ -431,6 +431,7 @@ function cloneMessage(m: Message): Message {
     metrics: m.metrics ? { ...m.metrics } : undefined,
     flags: m.flags ? { ...m.flags } : undefined,
     recalled: m.recalled ? [...m.recalled] : undefined,
+    searched: m.searched ? [...m.searched] : undefined,
     ragIds: m.ragIds ? [...m.ragIds] : undefined,
     ragEntryIds: m.ragEntryIds ? [...m.ragEntryIds] : undefined,
   };
