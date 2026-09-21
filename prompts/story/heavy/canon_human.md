@@ -12,6 +12,11 @@ speaking: {{ audience | default('') }}
 npc_locations: {{ npc_locations | default('') }}
 known_characters (roster, NOT automatically in the room): {{ known_characters | default('') }}
 </SCENE_STATE>
+{% if fable_brief %}
+<FABLE - THE DIRECTOR'S HIDDEN TRUTH OF THIS STORY. THE PLAYER HAS NOT SEEN THIS. WEAVE IT INTO THE SCENE NATURALLY. NEVER QUOTE THESE NOTES, NEVER NARRATE THEM, NEVER REVEAL A SECRET BEFORE ITS MOMENT. OPEN THREADS ARE COMMITMENTS: DO NOT DROP THEM, PAY THEM OFF WHEN THE SCENE ALLOWS>
+{{fable_brief}}
+</FABLE>
+{% endif %}
 <USER_RAG - RELEVANT OUT-OF-ORDER SNIPPETS BY PAST USER TURNS, USE AS LOOSE FACTS. THESE SNIPPETS MAY BE OUT-OF-ORDER FRAGMENTS OF PAST EVENTS. USE AS FACTS, BUT RELY ON CHAT_HISTORY FOR CURRENT SCENE ORDER. IF RAG SNIPPETS CONFLICT WITH CHAT_HISTORY, ALWAYS PRIORITIZE CHAT_HISTORY>
 {{user_documents}}
 </USER_RAG>
@@ -27,9 +32,10 @@ known_characters (roster, NOT automatically in the room): {{ known_characters | 
 <CONTEXT_PRIORITY_ORDER - MOST TO LEAST IMPORTANT>
 1. GOLD_DOCUMENTS (canonical lore)
 2. SCENE_STATE (who is here, where — current turn)
-3. CHARACTER_SHEETS
-4. CHAT_HISTORY (what just happened)
-5. RAG_DOCUMENTS (memory fragments; not a cast list)
+3. FABLE (hidden plot state; weave in, never recite)
+4. CHARACTER_SHEETS
+5. CHAT_HISTORY (what just happened)
+6. RAG_DOCUMENTS (memory fragments; not a cast list)
 </CONTEXT_PRIORITY_ORDER>
 <SCENE_INTERPRETATION>
 SCENE_STATE.present is who is in the room. Do not walk in a known_character who is not in present.

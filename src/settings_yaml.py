@@ -34,7 +34,20 @@ ROUTE_LLM_KEYS = tuple(
     llm for kind, llm, _s in ROUTE_ROWS if kind not in {'pre', 'embedding'}
 )
 
-ALL_KEYS = CORE_KEYS + ROUTE_LLM_KEYS + ROUTE_SERVER_KEYS + (
+# Per-model sampling knobs (temperature / top_p / reasoning effort) shown as
+# sliders in the Settings page. Embeddings and the rerank cross-encoder are
+# not chat-sampling models, so they have no knobs.
+_TUNING_ROLES = (
+    'model', 'pre', 'vision', 'agent', 'coder', 'casual', 'general',
+    'structured', 'nsfw', 'polisher', 'entity',
+)
+TUNING_KEYS = tuple(
+    f'{role}_{suffix}'
+    for role in _TUNING_ROLES
+    for suffix in ('temp', 'topp', 'reasoning_effort')
+)
+
+ALL_KEYS = CORE_KEYS + ROUTE_LLM_KEYS + ROUTE_SERVER_KEYS + TUNING_KEYS + (
     'tavily_key', 'sd_server', 'sd_model',
 )
 

@@ -14,7 +14,7 @@ function url(path: string): string {
   return `${chatPyOrigin()}${path}`;
 }
 
-export const SETTINGS_KEYS = [
+const BASE_SETTINGS_KEYS = [
   "llm_server",
   "api_key",
   "model",
@@ -46,6 +46,45 @@ export const SETTINGS_KEYS = [
   "sd_server",
   "sd_model",
 ] as const;
+
+/** Per-model sampling knobs (temperature / top_p / reasoning effort). */
+export const TUNING_KEYS = [
+  "model_temp",
+  "model_topp",
+  "model_reasoning_effort",
+  "pre_temp",
+  "pre_topp",
+  "pre_reasoning_effort",
+  "vision_temp",
+  "vision_topp",
+  "vision_reasoning_effort",
+  "agent_temp",
+  "agent_topp",
+  "agent_reasoning_effort",
+  "coder_temp",
+  "coder_topp",
+  "coder_reasoning_effort",
+  "casual_temp",
+  "casual_topp",
+  "casual_reasoning_effort",
+  "general_temp",
+  "general_topp",
+  "general_reasoning_effort",
+  "structured_temp",
+  "structured_topp",
+  "structured_reasoning_effort",
+  "nsfw_temp",
+  "nsfw_topp",
+  "nsfw_reasoning_effort",
+  "polisher_temp",
+  "polisher_topp",
+  "polisher_reasoning_effort",
+  "entity_temp",
+  "entity_topp",
+  "entity_reasoning_effort",
+] as const;
+
+export const SETTINGS_KEYS = [...BASE_SETTINGS_KEYS, ...TUNING_KEYS] as const;
 
 export type SettingsKey = (typeof SETTINGS_KEYS)[number];
 export type SettingsValues = Record<SettingsKey, string>;
@@ -87,6 +126,76 @@ export const ROUTE_GROUPS: {
 ];
 
 export const ROUTE_ROWS = ROUTE_GROUPS.flatMap((g) => g.rows);
+
+/** Sampling-slider keys for one model row. */
+export type TuningKeys = {
+  temp: SettingsKey;
+  topp: SettingsKey;
+  effort: SettingsKey;
+};
+
+export const GENERATOR_TUNING: TuningKeys = {
+  temp: "model_temp",
+  topp: "model_topp",
+  effort: "model_reasoning_effort",
+};
+
+export const PRE_TUNING: TuningKeys = {
+  temp: "pre_temp",
+  topp: "pre_topp",
+  effort: "pre_reasoning_effort",
+};
+
+/** Sampling sliders per Route Models row; null = not a chat-sampling model. */
+export const ROUTE_TUNING: Record<string, TuningKeys | null> = {
+  vision: {
+    temp: "vision_temp",
+    topp: "vision_topp",
+    effort: "vision_reasoning_effort",
+  },
+  agent: {
+    temp: "agent_temp",
+    topp: "agent_topp",
+    effort: "agent_reasoning_effort",
+  },
+  casual: {
+    temp: "casual_temp",
+    topp: "casual_topp",
+    effort: "casual_reasoning_effort",
+  },
+  general: {
+    temp: "general_temp",
+    topp: "general_topp",
+    effort: "general_reasoning_effort",
+  },
+  coder: {
+    temp: "coder_temp",
+    topp: "coder_topp",
+    effort: "coder_reasoning_effort",
+  },
+  structured: {
+    temp: "structured_temp",
+    topp: "structured_topp",
+    effort: "structured_reasoning_effort",
+  },
+  // A cross-encoder scores passages over /v1/rerank — no sampling knobs.
+  rerank: null,
+  nsfw: {
+    temp: "nsfw_temp",
+    topp: "nsfw_topp",
+    effort: "nsfw_reasoning_effort",
+  },
+  polisher: {
+    temp: "polisher_temp",
+    topp: "polisher_topp",
+    effort: "polisher_reasoning_effort",
+  },
+  entity: {
+    temp: "entity_temp",
+    topp: "entity_topp",
+    effort: "entity_reasoning_effort",
+  },
+};
 
 const ROLE_SERVER_KEYS = SETTINGS_KEYS.filter(
   (key): key is SettingsKey => key.endsWith("_server") && key !== "sd_server",

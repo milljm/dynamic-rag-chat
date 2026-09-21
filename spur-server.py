@@ -65,6 +65,7 @@ from src.chat_utils import (
 )
 from src.settings_yaml import (
     ALL_KEYS,
+    TUNING_KEYS,
     blank,
     list_models,
     load_file as load_settings_file,
@@ -119,7 +120,7 @@ def get_chat() -> Chat:
 
 def _opts_snapshot(opts: ChatOptions) -> dict[str, str]:
     """Effective running values (after inherit)."""
-    return {
+    snapshot = {
         'llm_server': blank(opts.host),
         'api_key': blank(opts.api_key) or 'none',
         'model': blank(opts.model),
@@ -151,6 +152,14 @@ def _opts_snapshot(opts: ChatOptions) -> dict[str, str]:
         'sd_server': blank(getattr(opts, 'sd_server', '')),
         'sd_model': blank(getattr(opts, 'sd_model', '')),
     }
+    # Sampling knobs (temperature / top_p / reasoning effort) per role.
+    for key in TUNING_KEYS:
+        if key.endswith('_reasoning_effort'):
+            snapshot[key] = blank(getattr(opts, key, ''))
+        else:
+            value = getattr(opts, key, None)
+            snapshot[key] = '' if value is None else str(value)
+    return snapshot
 
 
 def _rebuild_chat_from_yaml() -> None:
@@ -250,8 +259,9 @@ async def _aiter_sync(
 def _status_sse(
     message: str, model: str = '', route: str = '', context: int = 0,
     recalled: list[str] | None = None,
+    searched: list[str] | None = None,
 ) -> bytes:
-    """status event; attach recalled names so Spur can badge the turn."""
+    """status event; attach recalled names / search queries so Spur badges the turn."""
     payload: dict[str, Any] = {
         'type': 'status',
         'message': message,
@@ -261,6 +271,8 @@ def _status_sse(
     }
     if recalled:
         payload['recalled'] = list(recalled)
+    if searched:
+        payload['searched'] = list(searched)
     return sse(payload).encode()
 
 
@@ -426,6 +438,8 @@ def session_payload(chat: Chat | None = None) -> dict[str, Any]:
                     )
                 if m.get('recalled'):
                     row['recalled'] = list(m['recalled'])
+                if m.get('searched'):
+                    row['searched'] = list(m['searched'])
                 if m.get('ragIds'):
                     row['ragIds'] = list(m['ragIds'])
                 if m.get('ragEntryIds'):
@@ -527,6 +541,13 @@ def create_branch(chat: Chat, name: str, cut_turns: int | None) -> tuple[bool, s
         chat.session.common.save_chat(hist)
         if hasattr(chat.session.renderer, 'clear_ooc'):
             chat.session.renderer.clear_ooc()
+        # Each branch is its own book: the fable travels with the fork.
+        plot = getattr(getattr(chat.session, 'context', None), 'plot', None)
+        if plot is not None:
+            try:
+                plot.fork_branch(src, name, cut_turns)
+            except Exception:  # pylint: disable=broad-exception-caught
+                pass
         if cut_turns is None:
             chat.session.rag.clone_collection(src, name, overwrite=False)
         elif hasattr(chat.session.rag, 'build_collection_from_texts'):
@@ -759,6 +780,7 @@ def persist_turn(
     regenerate: bool = False,
     rag_ids: list | None = None,
     recalled: list | None = None,
+    searched: list | None = None,
 ) -> None:
     documents['llm_response'] = response
     documents['regenerate'] = bool(regenerate)
@@ -801,6 +823,8 @@ def persist_turn(
         extra['ragIds'] = list(rag_ids)
     if recalled:
         extra['recalled'] = list(recalled)
+    if searched:
+        extra['searched'] = list(searched)
     generated = [
         rec for rec in (documents.get('generated_images') or [])
         if isinstance(rec, dict) and not rec.get('prior')
@@ -1164,6 +1188,74 @@ async def api_prompts_restore(request: Request) -> JSONResponse:
     })
 
 
+@app.get('/api/character-sheet')
+def api_character_sheet_get() -> JSONResponse:
+    """The configured character sheet file, if the user supplied one."""
+    chat = get_chat()
+    path = blank(getattr(chat.opts, 'character_sheet', ''))
+    if not path:
+        return JSONResponse({
+            'ok': False,
+            'enabled': False,
+            'error': 'No character sheet configured.',
+        })
+    if not os.path.exists(path):
+        return JSONResponse({
+            'ok': False,
+            'enabled': True,
+            'path': path,
+            'error': f'Character sheet file not found: {path}',
+        })
+    try:
+        with open(path, 'r', encoding='utf-8') as handle:
+            content = handle.read()
+    except OSError as exc:
+        return JSONResponse({
+            'ok': False,
+            'enabled': True,
+            'path': path,
+            'error': str(exc),
+        })
+    return JSONResponse({'ok': True, 'enabled': True, 'path': path, 'content': content})
+
+
+@app.put('/api/character-sheet')
+async def api_character_sheet_save(request: Request) -> JSONResponse:
+    """Overwrite the character sheet file configured for this chat."""
+    if _streams > 0:
+        return JSONResponse(
+            {'ok': False, 'error': 'Wait for the current turn to finish.'},
+            status_code=409,
+        )
+    body = await request.json()
+    content = body.get('content')
+    if not isinstance(content, str):
+        return JSONResponse({'ok': False, 'error': 'Need content.'}, status_code=400)
+    if len(content) > 400_000:
+        return JSONResponse(
+            {'ok': False, 'error': 'Character sheet is too large.'},
+            status_code=400,
+        )
+    chat = get_chat()
+    path = blank(getattr(chat.opts, 'character_sheet', ''))
+    if not path:
+        return JSONResponse(
+            {'ok': False, 'error': 'No character sheet configured.'},
+            status_code=400,
+        )
+    try:
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        with open(path, 'w', encoding='utf-8') as handle:
+            handle.write(content)
+    except OSError as exc:
+        return JSONResponse({'ok': False, 'error': str(exc)}, status_code=400)
+    return JSONResponse({
+        'ok': True,
+        'path': path,
+        'message': 'Saved. Next turn uses this sheet.',
+    })
+
+
 def _prepare_chat_documents(chat, body: dict) -> tuple[dict, list]:
     """Run prepare_turn / no-context and stamp uploads, includes, agent flags."""
     prompt = str(body.get('text') or '')
@@ -1386,7 +1478,7 @@ def _iter_sse_chunks(
             searches += 1
             searched.append(value)
             documents['search_resume'] = answer
-            yield _status_sse(search_status(searched), recalled=recalled)
+            yield _status_sse(search_status(searched), recalled=recalled, searched=searched)
         else:
             break
         yield b':\n\n'
@@ -1410,6 +1502,7 @@ def _iter_sse_chunks(
         'ttft': ttft,
         'gen': gen,
         'recalled': list(recalled),
+        'searched': list(searched),
     })
     yield sse({
         'type': 'usage',
@@ -1518,6 +1611,7 @@ async def api_chat(request: Request) -> StreamingResponse:
                     or documents.get('generated_images'))
                     and not documents.get('no_context')):
                 recalled = list(stats.get('recalled') or [])
+                searched = list(stats.get('searched') or [])
                 rag_ids = _rag_ids_for_turn(documents, body, recalled)
                 if rag_ids:
                     yield sse({'type': 'rag', 'ids': rag_ids}).encode()
@@ -1538,6 +1632,7 @@ async def api_chat(request: Request) -> StreamingResponse:
                     regenerate=regenerate,
                     rag_ids=rag_ids,
                     recalled=recalled,
+                    searched=searched,
                 )
             yield sse({'type': 'done'}).encode()
         except Exception as exc:  # pylint: disable=broad-exception-caught

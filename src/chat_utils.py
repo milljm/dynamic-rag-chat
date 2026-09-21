@@ -484,6 +484,18 @@ class StandardAttributes:
                    )
 
 # pylint: disable=too-many-instance-attributes  # thats what dataclasses are for
+# Reasoning-effort levels (GLM-5.3 family: low / high / max). The empty
+# string means "leave the parameter out" — servers that do not know the
+# knob (OpenAI gpt-*, LM Studio, Ollama) must never see it.
+REASONING_LEVELS = ('low', 'high', 'max')
+
+
+def reasoning_effort(value) -> str:
+    """Normalize a reasoning-effort knob; '' when unset or unrecognized."""
+    text = '' if value is None else str(value).strip().lower()
+    return text if text in REASONING_LEVELS else ''
+
+
 @dataclass(slots=True, kw_only=True)
 class ChatOptions:
     """
@@ -541,26 +553,37 @@ class ChatOptions:
     # ---------- model settings
     model_temp: float = 1.0
     model_topp: float = 0.95
+    model_reasoning_effort: str = ''    # low | high | max; '' = server default
     pre_temp: float = 0.7
     pre_topp: float = 0.95
+    pre_reasoning_effort: str = ''
     nsfw_temp: float = 1.0
     nsfw_topp: float = 0.95
+    nsfw_reasoning_effort: str = ''
     polisher_temp: float = 1.0
     polisher_topp: float = 0.95
+    polisher_reasoning_effort: str = ''
     entity_temp: float = 0.7
     entity_topp: float = 0.95
+    entity_reasoning_effort: str = ''
     agent_temp: float = 0.6
     agent_topp: float = 0.95
+    agent_reasoning_effort: str = ''
     vision_temp: float = 0.9
     vision_topp: float = 0.95
+    vision_reasoning_effort: str = ''
     casual_temp: float = 0.9
     casual_topp: float = 0.95
+    casual_reasoning_effort: str = ''
     general_temp: float = 0.9
     general_topp: float = 0.95
+    general_reasoning_effort: str = ''
     coder_temp: float = 0.7
     coder_topp: float = 0.95
+    coder_reasoning_effort: str = ''
     structured_temp: float = 0.7
     structured_topp: float = 0.95
+    structured_reasoning_effort: str = ''
     completion_tokens: int = 4000
     repeat_penalty: float = 1.10
     frequency_penalty: float = 0.4
@@ -580,6 +603,7 @@ class ChatOptions:
     debug: bool = False
     verbose: bool = False
     light_mode: bool = False
+    plot_manager: bool = True   # hidden fable brain behind story mode
 
     name: str = 'assistant'
     user_name: str = 'John'
@@ -696,7 +720,15 @@ class ChatOptions:
     }
 
     _INT_FIELDS = {'matches', 'completion_tokens', 'chat_history', 'history_sessions'}
-    _FLOAT_FIELDS = {'rerank_timeout'}
+    _FLOAT_FIELDS = {
+        'rerank_timeout',
+        'model_temp', 'model_topp', 'pre_temp', 'pre_topp',
+        'nsfw_temp', 'nsfw_topp', 'polisher_temp', 'polisher_topp',
+        'entity_temp', 'entity_topp', 'agent_temp', 'agent_topp',
+        'vision_temp', 'vision_topp', 'casual_temp', 'casual_topp',
+        'general_temp', 'general_topp', 'coder_temp', 'coder_topp',
+        'structured_temp', 'structured_topp',
+    }
     _IGNORED_FIELDS = {'color', 'use_rags', 'spur', 'spur_rebuild', 'serve'}
     @classmethod
     def _build(cls,
@@ -718,10 +750,13 @@ class ChatOptions:
             field_name = cls._ALIASES.get(key, key)
             if field_name not in data:
                 continue
-            if field_name in cls._INT_FIELDS:
-                value = int(value)
-            elif field_name in cls._FLOAT_FIELDS:
-                value = float(value)
+            if field_name in cls._INT_FIELDS or field_name in cls._FLOAT_FIELDS:
+                # Blank numbers (yaml `key:` with no value) keep the default.
+                if value is None or (isinstance(value, str) and not value.strip()):
+                    continue
+                value = int(value) if field_name in cls._INT_FIELDS else float(value)
+            elif field_name.endswith('_reasoning_effort'):
+                value = reasoning_effort(value)
             data[field_name] = value
 
         # vector directory default needs `current_dir`

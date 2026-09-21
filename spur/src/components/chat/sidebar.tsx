@@ -105,12 +105,16 @@ export function Sidebar({
   onCollapse,
   streaming = false,
   onEditPrompt,
+  onEditCharacterSheet,
+  characterSheetEnabled,
 }: {
   className?: string;
   onNavigate?: () => void;
   onCollapse?: () => void;
   streaming?: boolean;
   onEditPrompt?: () => void;
+  onEditCharacterSheet?: () => void;
+  characterSheetEnabled?: boolean;
 }) {
   const currentId = useChatStore((s) => s.currentId);
   const branches = useChatStore((s) => s.branches);
@@ -188,6 +192,10 @@ export function Sidebar({
                 if (!ok) toast.message("Mode is locked on this branch.");
               }}
               onEditPrompt={usesChatPy() ? onEditPrompt : undefined}
+              onEditCharacterSheet={
+                usesChatPy() ? onEditCharacterSheet : undefined
+              }
+              characterSheetEnabled={characterSheetEnabled}
             />
           )}
         </SidebarSection>

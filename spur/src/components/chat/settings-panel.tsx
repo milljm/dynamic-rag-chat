@@ -12,12 +12,23 @@ import {
   saveSettings,
   uniqueRoleHosts,
   ROUTE_GROUPS,
+  GENERATOR_TUNING,
+  PRE_TUNING,
+  ROUTE_TUNING,
   type ModelInfo,
   type PingResult,
   type SettingsKey,
   type SettingsValues,
+  type TuningKeys,
 } from "@/lib/chat/settings";
+import {
+  REASONING_LEVELS,
+  isReasoningLevel,
+  reasoningIndex,
+} from "@/lib/chat/settings-hosts";
+import { Slider } from "@/components/ui/slider";
 import { useBehaviors } from "@/lib/chat/behaviors";
+import { SETTINGS_SAVED_EVENT } from "@/lib/chat/character-sheet";
 import { usesChatPy } from "@/lib/chat/remote";
 import { useChatStore } from "@/lib/chat/store";
 import { cn } from "@/lib/utils";
@@ -194,6 +205,119 @@ function ModelSelect({
         info.map(renderOption)
       )}
     </select>
+  );
+}
+
+function fmtKnob(value: number): string {
+  return (Math.round(value * 100) / 100).toFixed(2);
+}
+
+function numFrom(raw: string | undefined, fallback: number): number {
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function SliderRow({
+  label,
+  display,
+  min,
+  max,
+  step,
+  value,
+  onChange,
+  ticks,
+}: {
+  label: string;
+  display: string;
+  min: number;
+  max: number;
+  step: number;
+  value: number;
+  onChange: (next: number) => void;
+  ticks?: string[];
+}) {
+  return (
+    <div className="grid gap-1">
+      <div className="flex items-baseline justify-between gap-2">
+        <span className={fieldLabelClass}>{label}</span>
+        <span className="font-mono text-[11px] text-muted-foreground">
+          {display}
+        </span>
+      </div>
+      <Slider
+        aria-label={label}
+        value={[value]}
+        min={min}
+        max={max}
+        step={step}
+        onValueChange={(next) => {
+          const first = next[0];
+          if (typeof first === "number") onChange(first);
+        }}
+      />
+      {ticks ? (
+        <div className="flex justify-between text-[10px] uppercase tracking-wide text-muted-foreground">
+          {ticks.map((tick) => (
+            <span key={tick}>{tick}</span>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** Temperature / top_p / reasoning-effort sliders below one model. */
+function ModelTuning({
+  keys,
+  values,
+  effective,
+  patch,
+}: {
+  keys: TuningKeys;
+  values: SettingsValues;
+  effective: SettingsValues | null;
+  patch: (key: SettingsKey, value: string) => void;
+}) {
+  const temp = numFrom(values[keys.temp], numFrom(effective?.[keys.temp], 1));
+  const topp = numFrom(values[keys.topp], numFrom(effective?.[keys.topp], 0.95));
+  const effort = (values[keys.effort] ?? "").trim().toLowerCase();
+  const known = isReasoningLevel(effort);
+  const stop = reasoningIndex(effort);
+  return (
+    <div className="grid gap-2.5 rounded-sm bg-secondary/60 p-2.5 shadow-[var(--shadow-border)]">
+      <div className="grid grid-cols-2 gap-3">
+        <SliderRow
+          label="Temp"
+          display={fmtKnob(temp)}
+          min={0}
+          max={2}
+          step={0.05}
+          value={temp}
+          onChange={(v) => patch(keys.temp, fmtKnob(v))}
+        />
+        <SliderRow
+          label="Top P"
+          display={fmtKnob(topp)}
+          min={0}
+          max={1}
+          step={0.01}
+          value={topp}
+          onChange={(v) => patch(keys.topp, fmtKnob(v))}
+        />
+      </div>
+      <SliderRow
+        label="Reasoning"
+        display={`${REASONING_LEVELS[stop] ?? "max"}${known ? "" : " · default"}`}
+        min={0}
+        max={2}
+        step={1}
+        value={stop}
+        onChange={(next) =>
+          patch(keys.effort, REASONING_LEVELS[next] ?? "max")
+        }
+        ticks={[...REASONING_LEVELS]}
+      />
+    </div>
   );
 }
 
@@ -409,6 +533,7 @@ function SettingsPanel({
       setEffective(result.effective);
       toast.success(result.message || "Saved. Next turn uses these models.");
       await useChatStore.getState().hydrateFromServer();
+      window.dispatchEvent(new Event(SETTINGS_SAVED_EVENT));
       onClose();
     } catch (err) {
       toast.error(String(err));
@@ -452,7 +577,7 @@ function SettingsPanel({
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
           <div className="grid gap-5">
             <details>
-              <summary className="cursor-pointer text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+              <summary className="spur-sep cursor-pointer text-[11px] font-medium uppercase tracking-wide">
                 Behaviors
               </summary>
               <div className="mt-3 grid gap-3">
@@ -482,7 +607,7 @@ function SettingsPanel({
             ) : (
               <>
                 <details className="border-t border-border pt-3">
-                  <summary className="cursor-pointer text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                  <summary className="spur-sep cursor-pointer text-[11px] font-medium uppercase tracking-wide">
                     Required Models
                   </summary>
                   <div className="mt-3 grid gap-3">
@@ -535,6 +660,12 @@ function SettingsPanel({
                     details={mainCat.details}
                   />
                 </Field>
+                <ModelTuning
+                  keys={GENERATOR_TUNING}
+                  values={values}
+                  effective={effective}
+                  patch={patch}
+                />
                 <div className="grid gap-1.5">
                   <span className={fieldLabelClass}>Pre-conditioner</span>
                   <ModelSelect
@@ -561,6 +692,12 @@ function SettingsPanel({
                     </span>
                   )}
                 </div>
+                <ModelTuning
+                  keys={PRE_TUNING}
+                  values={values}
+                  effective={effective}
+                  patch={patch}
+                />
                 <div className="grid gap-1.5">
                   <span className={fieldLabelClass}>Embeddings</span>
                   <ModelSelect
@@ -591,7 +728,7 @@ function SettingsPanel({
               </details>
 
               <details className="border-t border-border pt-3">
-                <summary className="cursor-pointer text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                <summary className="spur-sep cursor-pointer text-[11px] font-medium uppercase tracking-wide">
                   Route Models
                 </summary>
                 <p className="mt-2 text-[11px] text-muted-foreground">
@@ -616,6 +753,7 @@ function SettingsPanel({
                       <div className="grid gap-4">
                   {group.rows.map((row) => {
                     const cat = catalogFor(values[row.server]);
+                    const tuning = ROUTE_TUNING[row.id];
                     return (
                     <div key={row.id} className="grid gap-1.5">
                       <span className={modelLabelClass}>
@@ -648,6 +786,14 @@ function SettingsPanel({
                           {cat.note}
                         </span>
                       ) : null}
+                      {tuning ? (
+                        <ModelTuning
+                          keys={tuning}
+                          values={values}
+                          effective={effective}
+                          patch={patch}
+                        />
+                      ) : null}
                       {row.id === "agent" ? (
                         <Field
                           label="Tavily"
@@ -670,7 +816,7 @@ function SettingsPanel({
                 </div>
               </details>
               <details className="border-t border-border pt-3">
-                <summary className="cursor-pointer text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                <summary className="spur-sep cursor-pointer text-[11px] font-medium uppercase tracking-wide">
                   Stable Diffusion
                 </summary>
                   <p className="mt-2 text-[11px] text-muted-foreground">

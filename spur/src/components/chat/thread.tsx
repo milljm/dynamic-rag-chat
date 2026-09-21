@@ -713,6 +713,7 @@ const MessageBubble = memo(function MessageBubble({
             route={message.streamingRoute}
             context={message.streamingContext}
             recalled={message.recalled}
+            searched={message.searched}
           />
         ) : null}
         {message.metrics && !pending && (
@@ -747,6 +748,13 @@ const MessageBubble = memo(function MessageBubble({
             {message.recalled?.length ? (
               <FootStat tip={`Recalled ${message.recalled.join(", ")}`}>
                 <span className="ml-0.5 text-muted-foreground/40">📄</span>
+              </FootStat>
+            ) : null}
+            {message.searched?.length ? (
+              <FootStat tip={`Searched ${message.searched.join(", ")}`}>
+                <span className="ml-0.5 inline-flex items-center text-muted-foreground/40">
+                  <Globe className="size-3" />
+                </span>
               </FootStat>
             ) : null}
           </p>
@@ -972,6 +980,18 @@ function RecallMark({ names }: { names?: string[] }) {
   );
 }
 
+function SearchMark({ names }: { names?: string[] }) {
+  if (!names?.length) return null;
+  return (
+    <span
+      className="ml-1.5 inline-flex items-center text-muted-foreground/40"
+      title={`Searched ${names.join(", ")}`}
+    >
+      <Globe className="size-3" />
+    </span>
+  );
+}
+
 function splitPromptPct(label: string): { text: string; pct: string } {
   const match = label.match(/^(Processing Prompt…?)\s+([\d.]+%)\s*$/i);
   if (!match) return { text: label, pct: "" };
@@ -984,12 +1004,14 @@ function StatusLine({
   route,
   context,
   recalled,
+  searched,
 }: {
   status?: string;
   model?: string;
   route?: string;
   context?: number;
   recalled?: string[];
+  searched?: string[];
 }) {
   const label = status || "Processing Prompt…";
   const recall = label.match(/^(Recalling Documents?…?)\s*(\[.*\])?\s*$/i);
@@ -1018,6 +1040,7 @@ function StatusLine({
           {route ? ` [${route}]` : ""}
           {context ? ` ${fmtContext(context)}` : ""}
           <RecallMark names={recalled} />
+          <SearchMark names={searched} />
         </span>
       ) : (
         <>
@@ -1027,6 +1050,7 @@ function StatusLine({
             </span>
           ) : null}
           <RecallMark names={recalled} />
+          <SearchMark names={searched} />
         </>
       )}
     </p>

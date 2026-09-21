@@ -73,6 +73,24 @@ class SettingsYamlTest(unittest.TestCase):
             self.assertEqual(values['model'], 'gemma3:27b')
             self.assertEqual(values['llm_server'], 'http://localhost:11434/v1')
 
+    def test_tuning_keys_roundtrip(self):
+        """Temperature / top_p / reasoning-effort sliders persist as strings."""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / '.chat.yaml'
+            save_file(path, {
+                'llm_server': 'http://localhost:11434/v1',
+                'model': 'glm-5.3-flash',
+                'model_temp': '0.5',
+                'model_topp': '1.0',
+                'model_reasoning_effort': 'low',
+                'nsfw_reasoning_effort': 'max',
+            })
+            values, _ = load_file(path)
+            self.assertEqual(values['model_temp'], '0.5')
+            self.assertEqual(values['model_topp'], '1.0')
+            self.assertEqual(values['model_reasoning_effort'], 'low')
+            self.assertEqual(values['nsfw_reasoning_effort'], 'max')
+
     def test_models_urls_appends_v1(self):
         self.assertEqual(
             models_urls('http://localhost:1234'),

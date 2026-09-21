@@ -934,7 +934,8 @@ def _default_lookup(defaults, use_defaults):
 def _add_llm_group(parser, title, prefix, dests, D):
     """Add the standard --*-llm/--*-server/--*-temp/--*-top_p group.
 
-    dests maps keys 'llm', 'host', 'temp', 'topp' to ChatOptions field names.
+    dests maps keys 'llm', 'host', 'temp', 'topp', 'effort' to ChatOptions
+    field names.
     """
     group = parser.add_argument_group(title)
     group.add_argument(
@@ -953,6 +954,12 @@ def _add_llm_group(parser, title, prefix, dests, D):
         f'--{prefix}-top_p', metavar='', dest=dests['topp'], type=float,
         default=D(dests['topp']), help='top_p (default: %(default)s)',
     )
+    group.add_argument(
+        f'--{prefix}-reasoning_effort', metavar='', dest=dests['effort'],
+        type=str, default=D(dests['effort']),
+        help='Reasoning effort: low, high, or max.\n'
+             'Blank = server default (default: %(default)s)',
+    )
     return group
 
 
@@ -967,6 +974,11 @@ def _add_core_model_args(parser, D):
                        help='Temperature (default: %(default)s)')
     story.add_argument('--model-top_p', metavar='', dest='model_topp', type=float,
                        default=D('model_topp'), help='top_p (default: %(default)s)')
+    story.add_argument('--model-reasoning_effort', metavar='',
+                       dest='model_reasoning_effort', type=str,
+                       default=D('model_reasoning_effort'),
+                       help='Reasoning effort: low, high, or max.\n'
+                            'Blank = server default (default: %(default)s)')
 
     pre_model = parser.add_argument_group(
         'Preconditioner Model (lightweight model) Options',
@@ -981,6 +993,11 @@ def _add_core_model_args(parser, D):
                            help='Temperature (default: %(default)s)')
     pre_model.add_argument('--pre-top_p', metavar='', type=float, dest='pre_topp',
                            default=D('pre_topp'), help='top_p (default: %(default)s)')
+    pre_model.add_argument('--pre-reasoning_effort', metavar='',
+                           dest='pre_reasoning_effort', type=str,
+                           default=D('pre_reasoning_effort'),
+                           help='Reasoning effort: low, high, or max.\n'
+                                'Blank = server default (default: %(default)s)')
 
     embedding_model = parser.add_argument_group('Embedding Model Options')
     embedding_model.add_argument(
@@ -1017,7 +1034,8 @@ def _add_optional_model_args(parser, D):
     polisher = _add_llm_group(
         parser, 'Polisher Model Options (optionally polish output)', 'polisher',
         {'llm': 'polisher_llm', 'host': 'polisher_host',
-         'temp': 'polisher_temp', 'topp': 'polisher_topp'},
+         'temp': 'polisher_temp', 'topp': 'polisher_topp',
+         'effort': 'polisher_reasoning_effort'},
         D,
     )
     polisher.add_argument(
@@ -1028,28 +1046,36 @@ def _add_optional_model_args(parser, D):
     groups = (
         ('NSFW Model Options (optional)', 'nsfw',
          {'llm': 'nsfw_llm', 'host': 'nsfw_host',
-          'temp': 'nsfw_temp', 'topp': 'nsfw_topp'}),
+          'temp': 'nsfw_temp', 'topp': 'nsfw_topp',
+          'effort': 'nsfw_reasoning_effort'}),
         ('NPC Character Creation Model Options (optional)', 'entity',
          {'llm': 'entity_llm', 'host': 'entity_host',
-          'temp': 'entity_temp', 'topp': 'entity_topp'}),
+          'temp': 'entity_temp', 'topp': 'entity_topp',
+          'effort': 'entity_reasoning_effort'}),
         ('Vision Model Options (optional)', 'vision',
          {'llm': 'vision_llm', 'host': 'vision_host',
-          'temp': 'vision_temp', 'topp': 'vision_topp'}),
+          'temp': 'vision_temp', 'topp': 'vision_topp',
+          'effort': 'vision_reasoning_effort'}),
         ('Agentic Model Options (optional)', 'agent',
          {'llm': 'agent_llm', 'host': 'agent_host',
-          'temp': 'agent_temp', 'topp': 'agent_topp'}),
+          'temp': 'agent_temp', 'topp': 'agent_topp',
+          'effort': 'agent_reasoning_effort'}),
         ('Casual Model Options (optional)', 'casual',
          {'llm': 'casual_llm', 'host': 'casual_host',
-          'temp': 'casual_temp', 'topp': 'casual_topp'}),
+          'temp': 'casual_temp', 'topp': 'casual_topp',
+          'effort': 'casual_reasoning_effort'}),
         ('General Model Options (optional)', 'general',
          {'llm': 'general_llm', 'host': 'general_host',
-          'temp': 'general_temp', 'topp': 'general_topp'}),
+          'temp': 'general_temp', 'topp': 'general_topp',
+          'effort': 'general_reasoning_effort'}),
         ('Coder Model Options (optional)', 'coder',
          {'llm': 'coder_llm', 'host': 'coder_host',
-          'temp': 'coder_temp', 'topp': 'coder_topp'}),
+          'temp': 'coder_temp', 'topp': 'coder_topp',
+          'effort': 'coder_reasoning_effort'}),
         ('Analysis/Reasoning Model Options (optional)', 'structured',
          {'llm': 'structured_llm', 'host': 'structured_host',
-          'temp': 'structured_temp', 'topp': 'structured_topp'}),
+          'temp': 'structured_temp', 'topp': 'structured_topp',
+          'effort': 'structured_reasoning_effort'}),
     )
     for title, prefix, dests in groups:
         _add_llm_group(parser, title, prefix, dests, D)
