@@ -25,7 +25,7 @@
   --spur-turn-bg: rgba(4, 49, 0, 0.78);
   --spur-turn-shadow: 0 1px 6px rgba(124, 232, 122, 0.32),
     0 0 0 1px rgba(217, 224, 142, 0.2);
-  --spur-route: #ff9100;
+  --spur-route: #00ff0d;
   /* Open settings separators (Behaviors, Route Models, …) tint with this. */
   --spur-sep-open: #ff9100;
   --spur-ttl-warn: #f0a8a0;
@@ -74,9 +74,9 @@ html[data-theme="light"] {
   --spur-turn-bg: rgba(110, 255, 100, 0.586);
   --spur-turn-shadow: 0 1px 6px rgb(132, 66, 0),
     0 0 0 1px rgba(30, 110, 34, 0.28);
-  --spur-route: #1e4d2b;
-  /* Bright green open separators (light mode). */
-  --spur-sep-open: #22c55e;
+  --spur-route: #995100;
+  /* Darker green open separators (light mode). */
+  --spur-sep-open: #007c2d;
   --spur-ttl-warn: #280500;
   --spur-ttl-warn-bg: rgba(255, 118, 118, 0.666);
   --spur-ttl-warn-shadow: 0 1px 6px rgb(139, 63, 0),
