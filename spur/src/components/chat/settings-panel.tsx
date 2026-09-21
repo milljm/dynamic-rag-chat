@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Settings2, X } from "lucide-react";
+import { RefreshCw, Settings2, X } from "lucide-react";
 import { toast } from "sonner";
 import {
   canonicalModelId,
@@ -41,6 +41,9 @@ const fieldClass =
 
 const fieldLabelClass =
   "text-[11px] font-medium uppercase tracking-wide text-muted-foreground";
+
+const fieldLabelAccentClass =
+  "text-[11px] font-medium uppercase tracking-wide text-route";
 
 const modelLabelClass =
   "font-display text-[11px] font-semibold uppercase tracking-[0.32em] text-route";
@@ -87,16 +90,18 @@ function failedCatalog(error: string): Catalog {
 
 function Field({
   label,
+  labelClass = fieldLabelClass,
   hint,
   children,
 }: {
   label: string;
+  labelClass?: string;
   hint?: string;
   children: React.ReactNode;
 }) {
   return (
     <label className="grid gap-1">
-      <span className={fieldLabelClass}>
+      <span className={labelClass}>
         {label}
       </span>
       {children}
@@ -611,47 +616,64 @@ function SettingsPanel({
                     Required Models
                   </summary>
                   <div className="mt-3 grid gap-3">
-                    <h3 className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                      Server
-                    </h3>
-                <Field label="URL" hint="OpenAI-compatible (LM Studio / Ollama)">
-                  <Input
-                    value={values.llm_server}
-                    onChange={(e) => patch("llm_server", e.target.value)}
-                    onBlur={(e) => {
-                      if (e.target.value) void onPing(e.target.value, values.api_key, false);
-                    }}
-                    placeholder="http://127.0.0.1:1234/v1"
-                    autoComplete="off"
-                    spellCheck={false}
-                  />
-                </Field>
-                <Field label="API key">
-                  <Input
-                    type="password"
-                    value={values.api_key}
-                    onChange={(e) => patch("api_key", e.target.value)}
-                    autoComplete="off"
-                  />
-                </Field>
-                <div className="flex items-center gap-2">
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    disabled={pinging || !values.llm_server}
-                    onClick={() => void onPing()}
-                  >
-                    {pinging ? "Pinging…" : "Ping"}
-                  </Button>
-                  <span className="text-[11px] text-muted-foreground">
-                    {pingNote}
-                  </span>
-                </div>
-              </div>
+                    <div className="grid gap-1">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className={fieldLabelAccentClass}>
+                          Server URL
+                        </span>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-sm"
+                          className="-mr-1.5"
+                          aria-label="Refresh models"
+                          title="Refresh models"
+                          disabled={pinging || !values.llm_server}
+                          onClick={() => void onPing()}
+                        >
+                          <RefreshCw
+                            className={cn(pinging && "animate-spin")}
+                          />
+                        </Button>
+                      </div>
+                      <Input
+                        value={values.llm_server}
+                        onChange={(e) => patch("llm_server", e.target.value)}
+                        onBlur={(e) => {
+                          if (e.target.value)
+                            void onPing(
+                              e.target.value,
+                              values.api_key,
+                              false,
+                            );
+                        }}
+                        placeholder="http://127.0.0.1:1234/v1"
+                        autoComplete="off"
+                        spellCheck={false}
+                      />
+                      <span className="text-[11px] text-muted-foreground">
+                        {pingNote || "OpenAI-compatible (LM Studio / Ollama)"}
+                      </span>
+                    </div>
+                    <Field
+                      label="API key"
+                      labelClass={fieldLabelAccentClass}
+                    >
+                      <Input
+                        type="password"
+                        value={values.api_key}
+                        onChange={(e) => patch("api_key", e.target.value)}
+                        autoComplete="off"
+                      />
+                    </Field>
+                  </div>
 
               <div className="grid gap-3">
-                <Field label="Generator" hint="Uses the server above">
+                <Field
+                  label="Generator"
+                  labelClass={fieldLabelAccentClass}
+                  hint="Uses the server above"
+                >
                   <ModelSelect
                     required
                     value={values.model}
@@ -667,7 +689,7 @@ function SettingsPanel({
                   patch={patch}
                 />
                 <div className="grid gap-1.5">
-                  <span className={fieldLabelClass}>Pre-conditioner</span>
+                  <span className={fieldLabelAccentClass}>Pre-conditioner</span>
                   <ModelSelect
                     required
                     value={values.pre_llm}
@@ -699,7 +721,7 @@ function SettingsPanel({
                   patch={patch}
                 />
                 <div className="grid gap-1.5">
-                  <span className={fieldLabelClass}>Embeddings</span>
+                  <span className={fieldLabelAccentClass}>Embeddings</span>
                   <ModelSelect
                     required
                     value={values.embedding_llm}
