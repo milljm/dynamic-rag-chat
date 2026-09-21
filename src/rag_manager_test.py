@@ -60,6 +60,46 @@ class RagManagerTest(unittest.TestCase):
         self.assertNotIn('hello', rag._chroma)
         self.assertNotIn('hello', rag._pdr)
 
+    def test_purge_fable_archive_after_turn(self):
+        rag = RAG(None, None, _opts())
+        rag.common = SimpleNamespace(
+            attributes=SimpleNamespace(collections={'ai': 'ai_documents'}),
+        )
+        payload = {
+            'ids': ['c1', 'c2', 'c3', 'c4'],
+            'metadatas': [
+                # Archived on turn 5: goes when the cut is below 5.
+                {'source': 'fable_archive', 'fable_turn': '5', 'doc_id': 'p1'},
+                # Archived on turn 2: survives a rewind to turn 3.
+                {'source': 'fable_archive', 'fable_turn': '2', 'doc_id': 'p2'},
+                # Not a fable archive: never touched.
+                {'source': 'user_query', 'doc_id': 'p3'},
+                # Archive without a turn stamp (legacy): kept.
+                {'source': 'fable_archive', 'doc_id': 'p4'},
+            ],
+        }
+
+        class _Col:
+            @staticmethod
+            def get(include=None):
+                del include
+                return payload
+
+        class _Store:
+            _collection = _Col()
+
+        deleted = []
+
+        def fake_delete(collection, ids):
+            deleted.append((collection, list(ids)))
+            return len(ids)
+
+        with patch.object(rag, '_vector_store', return_value=_Store()), \
+                patch.object(rag, 'delete_entries', side_effect=fake_delete):
+            removed = rag.purge_fable_archive_after('story', 3)
+        self.assertEqual(deleted, [('story_ai_documents', ['p1'])])
+        self.assertEqual(removed, 1)
+
     def test_collection_prefix_fork_is_not_shared_assistant(self):
         self.assertEqual(
             RAG.collection_prefix('scratch', 'user_documents', True),

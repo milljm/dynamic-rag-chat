@@ -13,6 +13,7 @@
 import {
   memo,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -42,7 +43,7 @@ const PAD = { t: 10, r: 12, b: 18, l: 34 };
 /** One chart legend / hover-tooltip row: [label, textClass, dotClass, value]. */
 type LegendRow = [label: string, textCls: string, dotCls: string, v: number | null];
 
-/** Label for the orange non-reasoning line. */
+/** Fallback label for the orange non-reasoning line (metrics may override via `altTooltipLabel`). */
 const ALT_LABEL = "Non-reasoning";
 
 const PerfChart = memo(function PerfChart({
@@ -85,8 +86,7 @@ const PerfChart = memo(function PerfChart({
     return niceMax(m);
   }, [series, alt]);
 
-  const xAt = (i: number) =>
-    PAD.l + (maxTurn <= 1 ? innerW / 2 : (i / (maxTurn - 1)) * innerW);
+  const xAt = (i: number) => PAD.l + (maxTurn <= 1 ? innerW / 2 : (i / (maxTurn - 1)) * innerW);
   const yAt = (v: number) => PAD.t + (1 - v / yMax) * innerH;
 
   const buildPath = (arr: (number | null)[]) => {
@@ -125,6 +125,20 @@ const PerfChart = memo(function PerfChart({
   const yTicks = [0, 0.25, 0.5, 0.75, 1];
   const hoverX = hover != null ? xAt(hover) : 0;
   const flip = hoverX > width / 2;
+
+  // Measured (pre-paint) tooltip width, so the single-line bubble can be kept
+  // fully inside the chart — the sidebar clips horizontal overflow.
+  const tipRef = useRef<HTMLDivElement | null>(null);
+  const [tipW, setTipW] = useState(0);
+  useLayoutEffect(() => {
+    if (hover == null) return;
+    const w = tipRef.current?.offsetWidth ?? 0;
+    setTipW((prev) => (prev === w ? prev : w));
+  }, [hover, metric, alt]);
+  const tipX =
+    hover == null
+      ? 0
+      : Math.min(Math.max(flip ? hoverX - 8 - tipW : hoverX + 8, 2), Math.max(2, width - tipW - 2));
 
   return (
     <div ref={wrapRef} className="relative">
@@ -213,19 +227,31 @@ const PerfChart = memo(function PerfChart({
 
       {hover != null && maxTurn > 0 ? (
         <div
-          className="pointer-events-none absolute top-2 z-10 min-w-36 rounded-sm border border-border bg-popover px-2 py-1.5 font-mono text-[10px] tabular-nums shadow-[var(--shadow-border)]"
-          style={{
-            left: flip ? hoverX - 8 : hoverX + 8,
-            transform: flip ? "translateX(-100%)" : undefined,
-          }}
+          ref={tipRef}
+          className="pointer-events-none absolute top-2 z-10 min-w-36 whitespace-nowrap rounded-sm border border-border bg-popover px-2 py-1.5 font-mono text-[10px] tabular-nums shadow-[var(--shadow-border)]"
+          style={{ left: tipX }}
         >
           <div className="mb-0.5 text-[9px] uppercase tracking-wide text-muted-foreground">
             Turn {history[hover].turn}
           </div>
           {(
             [
-              [metric.label, "text-chart-line", "bg-chart-line", series[hover]],
-              ...(alt ? [[ALT_LABEL, "text-chart-alt", "bg-chart-alt", alt[hover]]] : []),
+              [
+                metric.tooltipLabel ?? metric.label,
+                "text-chart-line",
+                "bg-chart-line",
+                series[hover],
+              ],
+              ...(alt
+                ? [
+                    [
+                      metric.altTooltipLabel ?? ALT_LABEL,
+                      "text-chart-alt",
+                      "bg-chart-alt",
+                      alt[hover],
+                    ],
+                  ]
+                : []),
             ] as LegendRow[]
           ).map(([name, textCls, dotCls, v]) => (
             <div key={name} className="flex items-center gap-1.5">
@@ -284,12 +310,7 @@ export function MetricsWidget() {
           {metric.unit}
         </span>
       </div>
-      <PerfChart
-        history={history}
-        series={series}
-        alt={showAlt ? alt : null}
-        metric={metric}
-      />
+      <PerfChart history={history} series={series} alt={showAlt ? alt : null} metric={metric} />
       <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[10px] tabular-nums">
         <span className="flex min-w-0 items-center gap-1.5">
           <span className="size-1.5 shrink-0 rounded-full bg-chart-line" />

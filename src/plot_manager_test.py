@@ -276,6 +276,70 @@ class PlotManagerTest(unittest.TestCase):
             self.assertIn('the sealed letter', gone)
             self.assertNotIn('drive: greed', gone)
 
+    def test_director_never_briefs_the_player(self):
+        """A director directive for the PC is dropped, legacy ones purged."""
+        with tempfile.TemporaryDirectory() as tmp:
+            mgr, llm = _mgr(tmp, scene=_Scene())
+            # A fable file from before the guard could carry a PC entry.
+            mgr.fable['npc_directives'] = {
+                'jason': {'drive': 'old', 'secret': 'legacy leak',
+                          'plan': 'narrated by the model', 'stance': 'eager'},
+            }
+            llm.scribe = _scribe_json()
+            llm.director = _director_json(names=['jason', 'mira'])
+            mgr.record({'turn_num': 3})
+            self.assertNotIn('jason', mgr.fable['npc_directives'])
+            self.assertIn('mira', mgr.fable['npc_directives'])
+
+    def test_brief_never_renders_the_player(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            mgr, llm = _mgr(tmp, scene=_Scene())
+            mgr.fable['npc_directives'] = {
+                'jason': {'drive': 'tend the garden', 'secret': 'sage pouch',
+                          'plan': 'deliver herbs', 'stance': 'cheerful'},
+                'mira': {'drive': 'greed', 'secret': 'poisoned the well',
+                         'plan': 'flee at dawn', 'stance': 'cold'},
+            }
+            here = mgr.brief(['jason', 'mira'])
+            self.assertIn('mira — drive: greed', here)
+            self.assertNotIn('jason —', here)
+            self.assertNotIn('sage pouch', here)
+
+    def test_unclaimed_open_loops_are_not_threads(self):
+        """An event the scribe re-lists without planted=true stays out.
+
+        Live runs filled every loop slot with narrated events ("the goat
+        ate a weed"), crowding the real threads out of the brief.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            mgr, llm = _mgr(tmp)
+            llm.scribe = _scribe_json(loops=json.dumps([
+                {'summary': 'the goat eats a weed', 'status': 'open',
+                 'planted': False, 'entity': ['thistle']},
+            ]))
+            _record(mgr, llm, 4, llm.scribe)
+            self.assertEqual(mgr.fable['loops'], [])
+
+    def test_reworded_loop_updates_the_existing_thread(self):
+        """A paraphrased carry-forward bumps the thread instead of twinning."""
+        with tempfile.TemporaryDirectory() as tmp:
+            mgr, llm = _mgr(tmp)
+            mgr.fable['loops'] = [{
+                'summary': 'thistle climbs the fence slat',
+                'planted_turn': 4, 'last_seen_turn': 4, 'entity': ['thistle'],
+            }]
+            mgr.fable['last_fabled_turn'] = 4
+            llm.scribe = _scribe_json(loops=json.dumps([
+                {'summary': 'the goat climbs the fence slat',
+                 'status': 'open', 'planted': False, 'entity': ['goat']},
+            ]))
+            _record(mgr, llm, 5, llm.scribe)
+            self.assertEqual(len(mgr.fable['loops']), 1)
+            loop = mgr.fable['loops'][0]
+            self.assertEqual(loop['summary'], 'thistle climbs the fence slat')
+            self.assertEqual(loop['last_seen_turn'], 5)
+            self.assertEqual(loop['entity'], ['goat', 'thistle'])
+
     def test_malformed_llm_output_never_fatal(self):
         with tempfile.TemporaryDirectory() as tmp:
             mgr, llm = _mgr(tmp)
@@ -307,6 +371,152 @@ class PlotManagerTest(unittest.TestCase):
             mgr = PlotManager(_Console(), _Common(), opts, llm,
                               _Prompts(), None)
             self.assertEqual(mgr.record({'turn_num': 1}), [])
+
+    def test_record_writes_ledger_pages(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            mgr, llm = _mgr(tmp)
+            llm.scribe = _scribe_json()
+            mgr.record({'turn_num': 1})
+            llm.scribe = _scribe_json(spine='Spine after turn 2.')
+            mgr.record({'turn_num': 2})
+            self.assertEqual(mgr.fable['last_fabled_turn'], 2)
+            self.assertEqual(
+                mgr.fable['turns']['2']['spine'], 'Spine after turn 2.',
+            )
+            self.assertEqual(mgr.fable['turns']['1']['last_fabled_turn'], 1)
+            again = PlotManager(_Console(), _Common(), mgr.opts,
+                                _LLM(), _Prompts(), None)
+            self.assertEqual(sorted(again.fable['turns']), ['1', '2'])
+            self.assertEqual(
+                again.fable['turns']['2']['spine'], 'Spine after turn 2.',
+            )
+
+    def test_rollback_restores_page_and_truncates(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            mgr, llm = _mgr(tmp)
+            for turn in (1, 2, 3):
+                llm.scribe = _scribe_json(spine=f'Spine {turn}.')
+                mgr.record({'turn_num': turn})
+            mgr.rollback_to(2)
+            self.assertEqual(mgr.fable['spine'], 'Spine 2.')
+            self.assertEqual(mgr.fable['last_fabled_turn'], 2)
+            self.assertEqual(sorted(mgr.fable['turns']), ['1', '2'])
+            with open(os.path.join(tmp, 'ephemeral_fable_story.json'),
+                      encoding='utf-8') as handle:
+                disk = json.load(handle)
+            self.assertEqual(disk['last_fabled_turn'], 2)
+            self.assertNotIn('Spine 3', disk['spine'])
+            # Rolling back to zero is the empty book.
+            mgr.rollback_to(0)
+            self.assertEqual(mgr.fable['spine'], '')
+            self.assertEqual(mgr.fable['last_fabled_turn'], 0)
+            self.assertEqual(mgr.fable['turns'], {})
+
+    def test_rollback_past_ledger_starts_empty(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            mgr, llm = _mgr(tmp)
+            llm.scribe = _scribe_json()
+            mgr.record({'turn_num': 5})
+            mgr.rollback_to(2)
+            self.assertEqual(mgr.fable['spine'], '')
+            self.assertEqual(mgr.fable['last_fabled_turn'], 0)
+            self.assertEqual(mgr.fable['turns'], {})
+            # A later record keeps the ledger consistent with the new now.
+            llm.scribe = _scribe_json(spine='Rewritten.')
+            mgr.record({'turn_num': 3})
+            self.assertEqual(mgr.fable['spine'], 'Rewritten.')
+            self.assertEqual(sorted(mgr.fable['turns']), ['3'])
+
+    def test_legacy_snapshots_migrate_to_ledger(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            legacy = {
+                'spine': 'Spine after turn 2.',
+                'loops': [],
+                'npc_directives': {},
+                'dormant_arcs': [],
+                'director_notes': '',
+                'last_fabled_turn': 2,
+                'snapshots': {
+                    '3': {
+                        'spine': 'Spine after turn 2.',
+                        'loops': [], 'npc_directives': {},
+                        'dormant_arcs': [], 'director_notes': '',
+                        'last_fabled_turn': 2,
+                    },
+                },
+            }
+            with open(os.path.join(tmp, 'ephemeral_fable_story.json'),
+                      'w', encoding='utf-8') as handle:
+                json.dump(legacy, handle)
+            mgr, llm = _mgr(tmp)
+            self.assertEqual(
+                mgr.fable['turns']['2']['spine'], 'Spine after turn 2.',
+            )
+            self.assertNotIn('snapshots', mgr.fable)
+            # Regenerating turn 3 restores the migrated page first.
+            llm.scribe = _scribe_json(spine='Rewritten turn 3.')
+            _record(mgr, llm, 3, llm.scribe, regen=True)
+            self.assertEqual(mgr.fable['spine'], 'Rewritten turn 3.')
+            self.assertEqual(mgr.fable['last_fabled_turn'], 3)
+
+    def test_reset_and_delete_branch_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            mgr, llm = _mgr(tmp)
+            llm.scribe = _scribe_json()
+            mgr.record({'turn_num': 1})
+            mgr.set_branch('alt')
+            llm.scribe = _scribe_json(spine='Alt book.')
+            mgr.record({'turn_num': 1})
+            alt_path = os.path.join(tmp, 'ephemeral_fable_alt.json')
+            story_path = os.path.join(tmp, 'ephemeral_fable_story.json')
+            self.assertTrue(os.path.exists(alt_path))
+            # The branch you are on is never deleted out from under you.
+            mgr.delete_branch('alt')
+            self.assertTrue(os.path.exists(alt_path))
+            mgr.set_branch('story')
+            mgr.delete_branch('alt')
+            self.assertFalse(os.path.exists(alt_path))
+            # Reset empties the current book and its ledger on disk.
+            mgr.reset_branch()
+            self.assertEqual(mgr.fable['spine'], '')
+            self.assertEqual(mgr.fable['last_fabled_turn'], 0)
+            self.assertEqual(mgr.fable['turns'], {})
+            with open(story_path, encoding='utf-8') as handle:
+                disk = json.load(handle)
+            self.assertEqual(disk['last_fabled_turn'], 0)
+            self.assertEqual(disk['turns'], {})
+
+    def test_fork_cut_truncates_ledger(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            mgr, llm = _mgr(tmp)
+            for turn in (1, 2, 3):
+                llm.scribe = _scribe_json(spine=f'Spine {turn}.')
+                mgr.record({'turn_num': turn})
+            mgr.fork_branch('story', 'book2', cut_turns=2)
+            with open(os.path.join(tmp, 'ephemeral_fable_book2.json'),
+                      encoding='utf-8') as handle:
+                cut = json.load(handle)
+            self.assertEqual(cut['spine'], 'Spine 2.')
+            self.assertEqual(cut['last_fabled_turn'], 2)
+            self.assertEqual(sorted(cut['turns']), ['1', '2'])
+            # Full clone carries every page.
+            mgr.fork_branch('story', 'book3')
+            with open(os.path.join(tmp, 'ephemeral_fable_book3.json'),
+                      encoding='utf-8') as handle:
+                clone = json.load(handle)
+            self.assertEqual(sorted(clone['turns']), ['1', '2', '3'])
+
+    def test_ledger_prunes_to_cap(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            mgr, _ = _mgr(tmp)
+            mgr.fable['turns'] = {
+                str(t): {'spine': f'S{t}', 'last_fabled_turn': t}
+                for t in range(1, 402)
+            }
+            mgr._prune_ledger()
+            self.assertEqual(len(mgr.fable['turns']), 400)
+            self.assertNotIn('1', mgr.fable['turns'])
+            self.assertIn('401', mgr.fable['turns'])
 
     def test_branch_files_are_separate(self):
         with tempfile.TemporaryDirectory() as tmp:

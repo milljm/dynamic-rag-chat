@@ -8,7 +8,9 @@ being supplied to the LLM. It utilizing several methods:
     Staggered History.
     ParentDocument/ChildDocument retrieval (return one large response with many small one)
 """
+import json
 import os
+import re
 import threading
 from typing import Optional
 from langchain_core.documents import Document
@@ -16,21 +18,38 @@ from langchain_core.prompts import ChatPromptTemplate, PromptTemplate
 from langchain_core.prompts import HumanMessagePromptTemplate
 from langchain_openai import ChatOpenAI
 from openai import APITimeoutError
-from .rag_manager import RAG, RAGTag
-from .chat_utils import (
-    CommonUtils,
-    ChatOptions,
-    reasoning_effort,
-    remember_rag_entry_ids,
-    dedupe_rag_chunks,
-)
-from .prompt_manager import PromptManager
-from .filter_builder import FilterBuilder
-from .scene_manager import SceneManager
-from .plot_manager import PlotManager
-from .gold_fetch import MAX_GOLD_FETCHES
-from .attachment_store import list_attachments
+try:
+    from .rag_manager import RAG, RAGTag
+    from .chat_utils import (
+        CommonUtils,
+        ChatOptions,
+        reasoning_effort,
+        remember_rag_entry_ids,
+        dedupe_rag_chunks,
+    )
+    from .prompt_manager import PromptManager
+    from .filter_builder import FilterBuilder
+    from .scene_manager import SceneManager
+    from .plot_manager import PlotManager
+    from .gold_fetch import MAX_GOLD_FETCHES
+    from .attachment_store import list_attachments
+except ImportError:  # loaded as a top-level module (test harness)
+    from rag_manager import RAG, RAGTag
+    from chat_utils import (
+        CommonUtils,
+        ChatOptions,
+        reasoning_effort,
+        remember_rag_entry_ids,
+        dedupe_rag_chunks,
+    )
+    from prompt_manager import PromptManager
+    from filter_builder import FilterBuilder
+    from scene_manager import SceneManager
+    from plot_manager import PlotManager
+    from gold_fetch import MAX_GOLD_FETCHES
+    from attachment_store import list_attachments
 
+# pylint: disable=too-many-public-methods  # one verb per history mutation
 class ContextManager(PromptManager):
     """
     ### ContextManager
@@ -251,7 +270,12 @@ class ContextManager(PromptManager):
         tags = self.common.get_tags(content)
 
         if do_scene and not self.opts.assistant_mode:
-            tags = self.scene.ground_scene(tags)
+            # Regenerating re-grounds the last turn instead of minting a
+            # new one: ground_scene rewinds to the previous page first,
+            # so the discarded reply's cast never bleeds into the rewrite.
+            tags = self.scene.ground_scene(
+                tags, regen=bool(documents.get('regenerate')),
+            )
             if self.debug:
                 self.console.print(f'SCENE MANAGER OVERRIDE:\n{tags}\n\n',
                                 style=f'color({self.opts.color})', highlight=False)
@@ -359,17 +383,24 @@ class ContextManager(PromptManager):
         if self.debug:
             self.console.print(f'ROLL REVERSAL PRE-PROCESSOR:\n{roll_reversal}\n\n',
                 style=f'color({self.opts.color})', highlight=False)
+        # do_scene=False: the query path grounds inside pre_processor();
+        # the reply path grounds explicitly below, exactly once.
         (_, list_rag_tags, error) = self.pre_processor(
-            response, roll_reversal, direction='response')
+            response, roll_reversal, direction='response', do_scene=False)
         if not error:
             self.console.print('ERROR running pre-processor. Generated output not saved.'
                                r' Advised to run `\regenerate` to try again.',
                 style=f'color({self.opts.color})', highlight=False)
             return
 
-        self._mint_new_characters(roll_reversal)
         if not self.opts.assistant_mode:
-            list_rag_tags = self.scene.ground_scene(list_rag_tags)
+            # Merge the cast first: minting below reads the grounded scene.
+            # turn_num keys this reply's ledger page (the query pass
+            # already grounded the same turn).
+            list_rag_tags = self.scene.ground_scene(
+                list_rag_tags, turn_num=documents.get('turn_num'),
+            )
+        self._mint_new_characters(roll_reversal)
 
         # Fable the turn: hidden plot state, updated while the user types.
         # Retired threads come back for cold storage in the AI collection.
@@ -396,7 +427,13 @@ class ContextManager(PromptManager):
             ids=list(reserved_ids) if reserved_ids else None,
         )
         if archived:
-            archive_tags = [RAGTag('source', 'fable_archive')]
+            # `fable_turn` lets rewind/delete purge cold-storage threads
+            # that belong to turns which no longer exist (they are not
+            # stamped on any message's ragEntryIds).
+            archive_tags = [
+                RAGTag('source', 'fable_archive'),
+                RAGTag('fable_turn', str(documents.get('turn_num') or 0)),
+            ]
             names = sorted({
                 str(n) for item in archived for n in item.get('entity', [])
             })
@@ -408,10 +445,93 @@ class ContextManager(PromptManager):
                 collection=collection,
             )
 
+# ---------- ephemeral plot/scene sync for history mutations ----------
+
+    def rewind_ephemeral(self, turn: int, branch: str) -> None:
+        """Roll scene + fable back to ``turn``, purge later archives.
+
+        Called from rewind / delete-last / edit-user in every front-end
+        so the hidden state never describes turns that no longer exist.
+        Never fatal: a missing manager or a failed purge must not block
+        the history mutation that triggered it.
+        """
+        if self.opts.assistant_mode:
+            return
+        try:
+            self.scene.rollback_to(turn)
+        except Exception:  # pylint: disable=broad-exception-caught
+            pass
+        if self.plot is not None:
+            try:
+                self.plot.rollback_to(turn)
+            except Exception:  # pylint: disable=broad-exception-caught
+                pass
+        try:
+            self.rag.purge_fable_archive_after(branch, turn)
+        except Exception:  # pylint: disable=broad-exception-caught
+            pass
+
+    def reset_ephemeral_branch(self, branch: str) -> None:
+        """Empty scene + fable for a branch whose history was reset."""
+        if self.opts.assistant_mode:
+            return
+        try:
+            self.scene.set_branch(branch)
+            self.scene.reset_branch()
+        except Exception:  # pylint: disable=broad-exception-caught
+            pass
+        if self.plot is not None:
+            try:
+                self.plot.set_branch(branch)
+                self.plot.reset_branch()
+            except Exception:  # pylint: disable=broad-exception-caught
+                pass
+
+    def delete_ephemeral_branch(self, branch: str) -> None:
+        """Drop a deleted branch's scene and fable files."""
+        if self.opts.assistant_mode:
+            return
+        try:
+            self.scene.delete_branch(branch)
+        except Exception:  # pylint: disable=broad-exception-caught
+            pass
+        if self.plot is not None:
+            try:
+                self.plot.delete_branch(branch)
+            except Exception:  # pylint: disable=broad-exception-caught
+                pass
+
+    def fork_ephemeral_branch(self, src: str, name: str,
+                              cut_turns: int | None = None) -> None:
+        """Copy the parent scene + fable into a forked branch.
+
+        Each branch is its own book: the fable travels with the fork,
+        and so does the grounded scene (location, cast, turn ledger).
+        """
+        if self.opts.assistant_mode:
+            return
+        try:
+            self.scene.fork_branch(src, name, cut_turns)
+        except Exception:  # pylint: disable=broad-exception-caught
+            pass
+        if self.plot is not None:
+            try:
+                self.plot.fork_branch(src, name, cut_turns)
+            except Exception:  # pylint: disable=broad-exception-caught
+                pass
+
     def _mint_new_characters(self, documents: dict) -> None:
-        """Write sheets for anyone new in the scene: people, then creatures."""
+        """Write sheets for everyone in the scene: people, then creatures.
+
+        Gated on the sheet *file*, never on the known-character roster:
+        ground_scene() unions the cast into that roster before this runs,
+        so a roster check would burn every name before a sheet exists.
+        create_character() skips names whose file already exists, so a
+        failed LLM call simply retries on a later turn.
+        """
+        player = (self.opts.user_name or 'user').strip().lower()
         for char in self.scene.scene_names('entity'):
-            if self.scene.is_new_character(char):
+            if char != player:  # the protagonist's sheet is user-supplied
                 self.create_character(char, documents)
         # Creatures never join the known-character roster and get their own
         # sheet shape. create_character() skips them once the file exists.
@@ -468,11 +588,50 @@ class ContextManager(PromptManager):
                                 'character_llm_debug.log'), 'w', encoding='utf-8') as f:
             f.write('\n\n'.join([str(prompt),str(content)]))
 
+        sheet = self._parse_sheet(str(content))
+        if sheet is None:
+            # A prose refusal ("No output - CHAT_HISTORY is empty ...") must
+            # not be cached as a sheet: the file-exists gate at the top of
+            # this method would burn the name forever. Leave no file so a
+            # later turn retries, as the docstring promises.
+            self.console.print(
+                f'ENTITY-PROCESSOR returned no usable sheet for "{char}"; '
+                'will retry on a later turn\n\n',
+                style=f'color({self.opts.color})', highlight=False)
+            return
+
+        if str(sheet.get('name', '')).strip().lower() in ('', 'unknown', 'none'):
+            # Keep the sheet addressable by its roster name.
+            sheet['name'] = char
+
         if self.debug:
             self.console.print(f'Generating New Character:\n{content}\n\n',
                             style=f'color({self.opts.color})', highlight=False)
         with open(entity_file, 'w', encoding='utf-8') as f:
-            f.write(content)
+            f.write(json.dumps(sheet, indent=2))
+
+    @staticmethod
+    def _parse_sheet(content: str) -> Optional[dict]:
+        """Pull a usable sheet dict out of an entity-LLM response.
+
+        Both sheet shapes (person and creature) always carry a non-empty
+        ``name``; prose refusals carry no JSON at all. Returns None when
+        the response is not a JSON object with a usable name, so the
+        caller can leave the sheet file unwritten and retry later.
+        """
+        match = re.search(r'\{.*\}', content, re.DOTALL)
+        if not match:
+            return None
+        try:
+            sheet = json.loads(match.group(0))
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(sheet, dict):
+            return None
+        name = sheet.get('name')
+        if not isinstance(name, str) or not name.strip():
+            return None
+        return sheet
 
     @staticmethod
     def stagger_indices(history_size: int,

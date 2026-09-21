@@ -8,6 +8,13 @@ from .think_tags import install_reasoning_patches
 install_reasoning_patches()
 
 MAX_AGENT_CALLS = 2
+# Story replies are hard-capped at 300 words by <WRITING_STYLE> (~450
+# tokens) plus a small reasoning allowance. A huge completion budget gives
+# a skipped-EOS continuation room to "double post" a second take of the
+# scene inside one stream (vector_data turn 11: 621 tokens of two takes).
+# Story/nsfw roles are therefore clamped; every other role keeps the
+# configured budget (agent/vision can genuinely need the room).
+STORY_COMPLETION_CAP = 2000
 # Tagger often scores these 1.0 anyway; force a search when the query is live.
 _LIVE_QUERY = re.compile(
     r'(?ix)'
@@ -95,7 +102,7 @@ class Orchestration():
                 role_body['reasoning_effort'] = effort
             self.__llm[name] = ChatOpenAI(
                 **spec,
-                **self._shared_llm_kwargs(args, role_body),
+                **self._shared_llm_kwargs(args, role_body, name),
             )
 
     @staticmethod
@@ -157,13 +164,17 @@ class Orchestration():
         }
 
     @staticmethod
-    def _shared_llm_kwargs(args: ChatOptions, extra_body: dict) -> dict:
+    def _shared_llm_kwargs(args: ChatOptions, extra_body: dict,
+                           role: str = '') -> dict:
         """Constructor kwargs shared by every ChatOpenAI role."""
+        completion = args.completion_tokens
+        if role in ('story', 'nsfw'):
+            completion = min(completion, STORY_COMPLETION_CAP)
         return {
             'frequency_penalty': args.frequency_penalty,
             'presence_penalty': args.presence_penalty,
             'streaming': True,
-            'max_completion_tokens': args.completion_tokens,
+            'max_completion_tokens': completion,
             'stop_sequences': ['<END_BEAT>', '<END_TURN>'],
             'api_key': args.api_key,
             'extra_body': extra_body,

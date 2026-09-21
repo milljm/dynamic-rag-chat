@@ -17,12 +17,13 @@ from typing import Generator
 
 import streamlit as st
 from PIL import Image
+from langchain_core.messages import AIMessageChunk
 from rich.console import Console
 
 from chat import Chat, ChatOptions, SessionContext, parse_args, seed_from_string
 from src import RenderWindow
-from src.chat_utils import CommonUtils, RAGTag, load_pdf
-from src.prompt_progress import PromptProgress, format_prompt_status
+from src.chat_utils import CommonUtils, EndMarkerFeed, RAGTag, load_pdf
+from src.prompt_progress import PromptProgress, format_prompt_status, stop_inference
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Page config MUST be the first Streamlit call
@@ -1007,6 +1008,7 @@ def call_llm_stream(
     metrics.token_savings = documents.get('token_savings', 0)
     started = time.time()
     first = True
+    marker_feed = EndMarkerFeed()
     for token in renderer.stream_response(messages):
         if isinstance(token, PromptProgress):
             status.markdown(format_prompt_status(token.fraction))
@@ -1015,9 +1017,18 @@ def call_llm_stream(
         if first:
             metrics.ttft = time.time() - started
             first = False
-        metrics.token_count += renderer.response_count(
-            getattr(token, 'content', '') or ''
-        )
+        emit = marker_feed.feed(getattr(token, 'content', '') or '')
+        if marker_feed.hit:
+            # Reply closed itself: kill the inference, keep the turn.
+            stop_inference()
+            break
+        if not emit:
+            continue
+        try:
+            token.content = emit  # keep chunk metadata for the parser
+        except Exception:  # pylint: disable=broad-exception-caught
+            token = AIMessageChunk(content=emit)
+        metrics.token_count += renderer.response_count(emit)
         yield token
     metrics.generation_time = time.time() - started
 

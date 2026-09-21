@@ -134,6 +134,10 @@ export type MetricDef = {
   key: MetricKey;
   /** Chip label. */
   label: string;
+  /** Optional hover-tooltip label; falls back to `label` when unset. */
+  tooltipLabel?: string;
+  /** Optional hover-tooltip label for the orange non-reasoning series. */
+  altTooltipLabel?: string;
   /** Y-axis / readout unit. */
   unit: string;
   /** Metric value at a turn; null = no data (chart gap). */
@@ -162,6 +166,8 @@ export const METRICS: MetricDef[] = [
   {
     key: "gen",
     label: "Gen",
+    tooltipLabel: "Reasoning",
+    altTooltipLabel: "Non-Reasoning",
     unit: "s",
     value: (t) => t.gen,
     alt: (t) => t.nonReasoningGen,
@@ -170,6 +176,8 @@ export const METRICS: MetricDef[] = [
   {
     key: "tokens",
     label: "Tok",
+    tooltipLabel: "Reasoning Tokens",
+    altTooltipLabel: "Non-Reasoning Tokens",
     unit: "tok",
     value: (t) => t.completionTokens,
     alt: (t) => t.nonReasoningTokens,

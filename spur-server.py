@@ -57,11 +57,13 @@ from src.attachment_store import list_attachments
 from src.chat_utils import (
     HISTORY_META_KEYS,
     CommonUtils,
+    EndMarkerFeed,
     load_history_from_dir,
     drop_last_assistant,
     edit_user_turn as slice_edit_user_turn,
     purge_rag_entries,
     stamp_user_rag_entry_ids,
+    strip_end_markers,
 )
 from src.settings_yaml import (
     ALL_KEYS,
@@ -79,6 +81,7 @@ from src.prompt_progress import (
     begin_generation,
     format_prompt_status,
     generation_stopped,
+    stop_inference,
 )
 
 
@@ -541,13 +544,11 @@ def create_branch(chat: Chat, name: str, cut_turns: int | None) -> tuple[bool, s
         chat.session.common.save_chat(hist)
         if hasattr(chat.session.renderer, 'clear_ooc'):
             chat.session.renderer.clear_ooc()
-        # Each branch is its own book: the fable travels with the fork.
-        plot = getattr(getattr(chat.session, 'context', None), 'plot', None)
-        if plot is not None:
-            try:
-                plot.fork_branch(src, name, cut_turns)
-            except Exception:  # pylint: disable=broad-exception-caught
-                pass
+        # Each branch is its own book: the fable and the grounded scene
+        # travel with the fork.
+        context = getattr(chat.session, 'context', None)
+        if context is not None:
+            context.fork_ephemeral_branch(src, name, cut_turns)
         if cut_turns is None:
             chat.session.rag.clone_collection(src, name, overwrite=False)
         elif hasattr(chat.session.rag, 'build_collection_from_texts'):
@@ -584,6 +585,9 @@ def delete_branch(chat: Chat, name: str) -> tuple[bool, str]:
         chat.session.rag.wipe_branch_stores(name)
     elif hasattr(chat.session.rag, 'delete_collection'):
         chat.session.rag.delete_collection(name)
+    context = getattr(chat.session, 'context', None)
+    if context is not None:
+        context.delete_ephemeral_branch(name)
     return True, f"Deleted '{name}'."
 
 
@@ -601,6 +605,9 @@ def reset_branch(chat: Chat) -> tuple[bool, str]:
         chat.session.rag.delete_collection(branch)
     hist[branch] = []
     chat.session.common.save_chat(hist)
+    context = getattr(chat.session, 'context', None)
+    if context is not None:
+        context.reset_ephemeral_branch(branch)
     if hasattr(chat.session.renderer, 'clear_ooc'):
         chat.session.renderer.clear_ooc()
     _clear_sd(chat)
@@ -632,6 +639,9 @@ def delete_last_turn(chat: Chat) -> tuple[bool, str]:
     _purge_chat_rag(chat, dropped)
     hist[branch] = msgs
     chat.session.common.save_chat(hist)
+    context = getattr(chat.session, 'context', None)
+    if context is not None:
+        context.rewind_ephemeral(_turn_count(msgs), branch)
     if hasattr(chat.session.renderer, 'clear_ooc'):
         chat.session.renderer.clear_ooc()
     _clear_sd(chat)
@@ -670,6 +680,9 @@ def edit_user_turn(chat: Chat, n: int, text: str) -> tuple[bool, str]:
         sliced[-1].pop('ragEntryIds', None)
     hist[branch] = sliced
     chat.session.common.save_chat(hist)
+    context = getattr(chat.session, 'context', None)
+    if context is not None:
+        context.rewind_ephemeral(n - 1, branch)
     if hasattr(chat.session.renderer, 'clear_ooc'):
         chat.session.renderer.clear_ooc()
     return True, 'Edited user turn.'
@@ -686,6 +699,9 @@ def rewind_to(chat: Chat, n: int) -> tuple[bool, str]:
     _purge_chat_rag(chat, msgs[n * 2:])
     hist[branch] = kept
     chat.session.common.save_chat(hist)
+    context = getattr(chat.session, 'context', None)
+    if context is not None:
+        context.rewind_ephemeral(n, branch)
     if hasattr(chat.session.renderer, 'clear_ooc'):
         chat.session.renderer.clear_ooc()
     _clear_sd(chat)
@@ -833,8 +849,11 @@ def persist_turn(
         extra['attachments'] = _slim_attachments(_vector_dir(), generated)
     if msgs and isinstance(msgs[-1], dict) and msgs[-1].get('role') == 'assistant':
         # save_history runs sanitize_response which strips ``` fences.
-        # Restore the streamed answer so reload still highlights.
-        msgs[-1]['content'] = response
+        # Restore the streamed answer so reload still highlights. The
+        # end-of-turn markers are cut again here: the stream filter
+        # already withholds them, but a raw response must never be able
+        # to resurrect one into history.
+        msgs[-1]['content'] = strip_end_markers(response)
         msgs[-1].update(extra)
     common.save_chat(hist)
 
@@ -1378,6 +1397,7 @@ def _iter_sse_chunks(
             break
         parser = ThinkFeed()
         mid_feed = MidTurnFeed()
+        marker_feed = EndMarkerFeed()
         last_tag_channel = 'visible'
         _reset_renderer_think(renderer)
         chunks = renderer.stream_response(packed)
@@ -1434,9 +1454,16 @@ def _iter_sse_chunks(
                         )
                     emit_v, hit_v = mid_feed.feed(visible)
                     if emit_v:
-                        bump(renderer.response_count(emit_v))
-                        answer += emit_v
-                        yield sse({'type': 'token', 'content': emit_v}).encode()
+                        # The marker feed withholds <END_TURN>/<END_BEAT>;
+                        # on a full marker the reply is over — stop reading
+                        # so post-processing can start.
+                        emit_v = marker_feed.feed(emit_v)
+                        if emit_v:
+                            bump(renderer.response_count(emit_v))
+                            answer += emit_v
+                            yield sse({'type': 'token', 'content': emit_v}).encode()
+                        if marker_feed.hit:
+                            break
                     if hit_v:
                         last_tag_channel = 'visible'
                         break
@@ -1453,10 +1480,15 @@ def _iter_sse_chunks(
                 bump(len(leftover.split()))
                 reasoning += leftover
                 yield sse({'type': 'reasoning', 'content': leftover}).encode()
-            else:
-                bump(renderer.response_count(leftover))
-                answer += leftover
-                yield sse({'type': 'token', 'content': leftover}).encode()
+            elif not marker_feed.hit:
+                emit_v = marker_feed.feed(leftover)
+                if emit_v:
+                    bump(renderer.response_count(emit_v))
+                    answer += emit_v
+                    yield sse({'type': 'token', 'content': emit_v}).encode()
+        if marker_feed.hit:
+            # Reply closed itself: kill the inference, keep the turn.
+            stop_inference()
         kind = mid_feed.kind
         value = mid_feed.value
         if generation_stopped() or not kind or not assistant or meta is None:

@@ -840,6 +840,54 @@ class RAG():
             removed += self.delete_entries(collection, entry_ids)
         return removed
 
+    def purge_fable_archive_after(self, branch: str, turn) -> int:
+        """
+        ### Purge Fable Archive After
+
+        Delete ``fable_archive`` parents archived for turns after
+        ``turn`` in the branch's AI collection. Retired fable loops are
+        not stamped on history ``ragEntryIds``, so the normal rewind
+        purge never sees them — this removes cold-storage threads that
+        belong to turns which no longer exist. Compares turns in Python
+        because Chroma metadata stores the number as a string (and
+        ``$gt`` would misorder ``'10' < '5'``).
+
+        *Key init args:*
+            .. code-block:: python
+                branch: str  # history branch name (unprefixed)
+                turn: int    # keep archives at or before this turn
+        *Returns:*
+            .. code-block:: python
+                int  # child vectors removed; misses are silent 0
+        """
+        try:
+            cut = max(0, int(turn))
+        except (TypeError, ValueError):
+            return 0
+        collection = f'{branch}_{self.common.attributes.collections["ai"]}'
+        try:
+            vector = self._vector_store(collection)
+            # pylint: disable=protected-access
+            payload = vector._collection.get(include=['metadatas'])
+            # pylint: enable=protected-access
+        except Exception:  # pylint: disable=broad-exception-caught
+            return 0
+        stale = []
+        for cid, meta in zip(
+            payload.get('ids') or [], payload.get('metadatas') or [],
+        ):
+            if not isinstance(meta, dict):
+                continue
+            if meta.get('source') != 'fable_archive':
+                continue
+            try:
+                archived_turn = int(meta.get('fable_turn') or 0)
+            except (TypeError, ValueError):
+                continue
+            if archived_turn > cut:
+                stale.append(str(meta.get('doc_id') or cid))
+        return self.delete_entries(collection, stale) if stale else 0
+
     def delete_collection(self, source: str)->None:
         """
         ### Delete Collection

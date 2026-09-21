@@ -11,11 +11,13 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from chat_utils import (  # noqa: C0413
     ChatOptions,
     CommonUtils,
+    EndMarkerFeed,
     RAGTag,
     RegExp,
     active_branch,
     dedupe_rag_chunks,
     overlap_ratio,
+    strip_end_markers,
 )
 
 
@@ -279,6 +281,92 @@ class DedupeRagChunksTest(unittest.TestCase):
             ),
             [],
         )
+
+
+class StripEndMarkersTest(unittest.TestCase):
+    """Double-post regression: a reply is cut at its end-of-turn marker."""
+
+    def test_marker_on_final_line_is_removed(self):
+        self.assertEqual(
+            strip_end_markers('Scene ends here.\n<END_TURN>'),
+            'Scene ends here.',
+        )
+
+    def test_double_post_is_cut_at_first_marker(self):
+        text = 'Take one ends.<END_TURN>Take two begins. Also <END_TURN>'
+        self.assertEqual(strip_end_markers(text), 'Take one ends.')
+
+    def test_beat_marker_cuts_too(self):
+        self.assertEqual(strip_end_markers('Beat.<END_BEAT>continued'), 'Beat.')
+
+    def test_partial_trailing_marker_is_removed(self):
+        self.assertEqual(strip_end_markers('Scene ends.<END_TUR'), 'Scene ends.')
+        self.assertEqual(strip_end_markers('Scene ends.<END'), 'Scene ends.')
+
+    def test_prose_angle_brackets_survive(self):
+        text = 'She scrawled <3 on the note and <something> in the margin'
+        self.assertEqual(strip_end_markers(text), text)
+
+    def test_empty_text_passes_through(self):
+        self.assertEqual(strip_end_markers(''), '')
+
+    def test_sanitize_response_strips_markers(self):
+        util = CommonUtils.__new__(CommonUtils)
+        util.opts = SimpleNamespace(assistant_mode=False)
+        util.regex = RegExp()
+        cleaned = util.sanitize_response('Reply text <END_TURN> second take')
+        self.assertNotIn('<END_TURN>', cleaned)
+        self.assertIn('Reply text', cleaned)
+
+
+class EndMarkerFeedTest(unittest.TestCase):
+    """Stream filter: markers never surface; hit fires on the full marker."""
+
+    def test_marker_split_across_chunks(self):
+        feed = EndMarkerFeed()
+        self.assertEqual(feed.feed('Scene ends.\n<EN'), 'Scene ends.\n')
+        self.assertFalse(feed.hit)
+        self.assertEqual(feed.feed('D_TURN>'), '')
+        self.assertTrue(feed.hit)
+
+    def test_marker_with_pre_and_post_text_in_one_chunk(self):
+        feed = EndMarkerFeed()
+        self.assertEqual(feed.feed('End here.<END_TURN>never shown'), 'End here.')
+        self.assertTrue(feed.hit)
+        self.assertEqual(feed.feed('more'), '')
+        self.assertEqual(feed.flush(), '')
+
+    def test_beat_marker_hits_too(self):
+        feed = EndMarkerFeed()
+        self.assertEqual(feed.feed('Beat.<END_BEAT>rest'), 'Beat.')
+        self.assertTrue(feed.hit)
+
+    def test_clean_text_passes_through(self):
+        feed = EndMarkerFeed()
+        self.assertEqual(feed.feed('Harrick laughs. '), 'Harrick laughs. ')
+        self.assertFalse(feed.hit)
+
+    def test_partial_marker_tail_is_dropped_by_flush(self):
+        feed = EndMarkerFeed()
+        self.assertEqual(feed.feed('Scene ends.<END_TUR'), 'Scene ends.')
+        self.assertFalse(feed.hit)
+        self.assertEqual(feed.flush(), '')
+
+    def test_prose_angle_bracket_passes_through(self):
+        feed = EndMarkerFeed()
+        self.assertEqual(feed.feed('She scrawled <3 on'), 'She scrawled <3 on')
+        self.assertEqual(feed.feed(' the note'), ' the note')
+        self.assertEqual(feed.flush(), '')
+
+    def test_empty_feed_is_noop(self):
+        feed = EndMarkerFeed()
+        self.assertEqual(feed.feed(''), '')
+        self.assertFalse(feed.hit)
+
+    def test_flush_empty_after_hit(self):
+        feed = EndMarkerFeed()
+        feed.feed('done.<END_TURN>')
+        self.assertEqual(feed.flush(), '')
 
 
 class ChatOptionsTuningTest(unittest.TestCase):
