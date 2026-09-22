@@ -178,6 +178,16 @@ class StoryStackTests(unittest.TestCase):
         self.assertEqual(positions, sorted(positions))
         self.assertNotIn('<OOC_MODE>', system)
 
+    def test_input_contract_defines_three_channels(self):
+        """Dialog / inner thought / emote channels are spelled out."""
+        pm = PromptManager(_Console(), ROOT, _args(False))
+        system, _ = pm.compose_story_plot(_story_documents())
+        self.assertIn('INPUT CONTRACT - THREE CHANNELS', system)
+        self.assertIn('[Bracketed text]', system)
+        self.assertIn('THOUGHT PRIVACY', system)
+        self.assertIn('THOUGHT TELLS', system)
+        self.assertIn('visible tells', system)
+
     def test_ooc_turn_is_much_shorter_than_story_turn(self):
         pm = PromptManager(_Console(), ROOT, _args(False))
         story, _ = pm.compose_story_plot(_story_documents())

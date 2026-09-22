@@ -580,6 +580,11 @@ class Chat():
             dropped = [item for item in snapshot if id(item) not in kept]
             purge_rag_entries(self.session.rag, dropped)
             self.session.common.save_chat(history)
+            context = getattr(self.session, 'context', None)
+            if context is not None:
+                context.rewind_ephemeral(
+                    turn_count(history[self.chat_branch]), self.chat_branch,
+                )
             self.session.renderer.clear_ooc()
             clear_session(str(self.opts.vector_dir))
             console.print('[green]Deleted last turn.[/green]', highlight=False)
@@ -599,6 +604,9 @@ class Chat():
             purge_rag_entries(self.session.rag, cur[len(kept):])
             history[self.chat_branch] = kept
             self.session.common.save_chat(history)
+            context = getattr(self.session, 'context', None)
+            if context is not None:
+                context.rewind_ephemeral(n, self.chat_branch)
             console.print(
                 f'[green]Rewound to turn {n} of {total}.[/green]',
                 highlight=False,
@@ -631,6 +639,9 @@ class Chat():
                 history.pop(arg)
                 self.session.rag.wipe_branch_stores(arg)
                 self.session.common.save_chat(history)
+                context = getattr(self.session, 'context', None)
+                if context is not None:
+                    context.delete_ephemeral_branch(arg)
                 console.print(f'[green]Deleted: [/green]{arg}', highlight=False)
                 return
 
@@ -640,6 +651,9 @@ class Chat():
         history[self.chat_branch] = []
         console.print(f'[green]Reset: [/green]{self.chat_branch}', highlight=False)
         self.session.common.save_chat(history)
+        context = getattr(self.session, 'context', None)
+        if context is not None:
+            context.reset_ephemeral_branch(self.chat_branch)
         clear_session(str(self.opts.vector_dir))
 
     def _list_branches(self, history: dict) -> None:
@@ -711,6 +725,14 @@ class Chat():
         history['current'] = name
         self.chat_branch = name
         self.session.common.save_chat(history)
+        # Each branch is its own book: the fable and the grounded scene
+        # travel with the fork (TUI `cut` counts messages, managers count
+        # turns).
+        context = getattr(self.session, 'context', None)
+        if context is not None:
+            context.fork_ephemeral_branch(
+                src, name, None if cut is None else cut // 2,
+            )
         self.session.renderer.clear_ooc()
         try:
             if cut is None:

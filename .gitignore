@@ -10,3 +10,6 @@ spur/.nitro/
 spur/.tanstack/
 spur/.env
 spur/.grok/
+.DS_Store
+.serena/
+.vscode/

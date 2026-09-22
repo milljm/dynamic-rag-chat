@@ -28,8 +28,51 @@ from prompt_progress import (  # noqa: E402
     abort_generation,
     generation_stopped,
     reset_progress_caches,
+    stop_inference,
     stream_chat,
+    _attach_http,
 )
+
+
+class _CloseSpy:
+    """Minimal stand-in for an in-flight HTTP body."""
+
+    closed = 0
+
+    def close(self):
+        self.closed += 1
+
+
+class StopInferenceTest(unittest.TestCase):
+    """Marker-path abort: close the HTTP body, never latch the Stop flag."""
+
+    def setUp(self) -> None:
+        reset_progress_caches()
+        begin_generation()
+
+    def tearDown(self) -> None:
+        abort_generation()
+        reset_progress_caches()
+
+    def test_noop_without_inflight_body(self):
+        self.assertFalse(stop_inference())
+        self.assertFalse(generation_stopped())
+
+    def test_closes_body_without_latching_stop(self):
+        spy = _CloseSpy()
+        _attach_http(spy)
+        self.assertTrue(stop_inference())
+        self.assertEqual(spy.closed, 1)
+        self.assertFalse(generation_stopped())
+        # Detached: a second call has nothing to close.
+        self.assertFalse(stop_inference())
+
+    def test_abort_generation_still_latches_stop(self):
+        spy = _CloseSpy()
+        _attach_http(spy)
+        self.assertTrue(abort_generation())
+        self.assertEqual(spy.closed, 1)
+        self.assertTrue(generation_stopped())
 
 
 SAMPLE = {

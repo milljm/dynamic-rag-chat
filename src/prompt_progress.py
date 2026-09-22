@@ -105,8 +105,20 @@ def abort_generation() -> bool:
     Chat Completions has no cancel POST. Closing the stream is the stop
     command — LM Studio logs ``Client disconnected. Stopping generation…``.
     """
-    global _GEN_HTTP
     _GEN_STOP.set()
+    return stop_inference()
+
+
+def stop_inference() -> bool:
+    """Close the in-flight LLM HTTP body without latching the Stop flag.
+
+    The end-of-turn marker path uses this: the reply is complete, so the
+    server should stop burning tokens, but the user did not hit Stop —
+    ``generation_stopped()`` stays False, post-processing proceeds, and
+    the next turn streams normally (the TUI never calls
+    ``begin_generation``, so a latched flag there would kill it).
+    """
+    global _GEN_HTTP
     with _GEN_LOCK:
         stream = _GEN_HTTP
         _GEN_HTTP = None

@@ -27,8 +27,9 @@ from langchain_openai import ChatOpenAI # For Type Hinting
 from .prompt_manager import PromptManager
 from .context_manager import ContextManager # For Type Hinting
 from .chat_utils import (
-    CommonUtils, ChatOptions, RAGTag, append_turn,
+    CommonUtils, ChatOptions, EndMarkerFeed, RAGTag, append_turn,
     purge_rag_entries, reserve_ai_rag_entry, stamp_user_rag_entry_ids,
+    strip_end_markers,
 )
 from .model_orchestrator import Orchestration, MAX_AGENT_CALLS
 from .agent_tools import DuckDuckGoSearchTool, StockPriceTool
@@ -44,7 +45,9 @@ from .think_tags import ThinkFeed, chunk_text, split_think
 from .sd_tools import make_sd_tools, seed_last_generated
 from .gold_fetch import MAX_GOLD_FETCHES, take_need_gold, recall_status
 from .search_fetch import MAX_SEARCH_FETCHES, take_need_search, search_status
-from .prompt_progress import PromptProgress, format_prompt_status, stream_chat
+from .prompt_progress import (
+    PromptProgress, format_prompt_status, stop_inference, stream_chat,
+)
 
 # Regex to detect stock-related queries for status display
 _STOCK_QUERY = re.compile(
@@ -1222,6 +1225,7 @@ class RenderWindow(PromptManager):
         """
         current_response = ''
         first_token_at = 0
+        marker_feed = EndMarkerFeed()
         for piece in self.stream_response(messages):
             if isinstance(piece, PromptProgress):
                 self._status(format_prompt_status(piece.fraction))
@@ -1229,13 +1233,19 @@ class RenderWindow(PromptManager):
             piece = self.reveal_thinking(piece, self.state.verbose)
             if first_token_at == 0:
                 first_token_at = time.time()
-            current_response += piece.content
-            footer_meta['token_count'] += self.response_count(piece.content)
-            if self._paint_token(
-                documents, footer_meta, color, live, inference_start,
-                first_token_at, current_response,
-            ):
-                current_response = ''
+            emit = marker_feed.feed(piece.content)
+            if emit:
+                current_response += emit
+                footer_meta['token_count'] += self.response_count(emit)
+                if self._paint_token(
+                    documents, footer_meta, color, live, inference_start,
+                    first_token_at, current_response,
+                ):
+                    current_response = ''
+            if marker_feed.hit:
+                # Reply closed itself: kill the inference, keep the turn.
+                stop_inference()
+                break
         return current_response, first_token_at
 
     def _resume_gold_fetches(
@@ -1309,29 +1319,36 @@ class RenderWindow(PromptManager):
             documents['llm_response'] = current_response
             messages = self.get_messages(meta_data, documents, polish=True)
             current_response = ''
+            marker_feed = EndMarkerFeed()
             for piece in self.stream_response(messages):
                 if isinstance(piece, PromptProgress):
                     continue
                 piece = self.reveal_thinking(piece, self.state.verbose)
-                current_response += piece.content
-                footer_meta['token_count'] += self.response_count(piece.content)
-                if passes == pass_num + 1:
-                    self.renderable.response = self.build_content(current_response)
-                else:
-                    self.renderable.response = Text(
-                        f'Polishing pass {pass_num+1} of {passes-1} before final...',
-                        style=f'color({color}',
+                emit = marker_feed.feed(piece.content)
+                if emit:
+                    current_response += emit
+                    footer_meta['token_count'] += self.response_count(emit)
+                    if passes == pass_num + 1:
+                        self.renderable.response = self.build_content(current_response)
+                    else:
+                        self.renderable.response = Text(
+                            f'Polishing pass {pass_num+1} of {passes-1} before final...',
+                            style=f'color({color}',
+                        )
+                    self.renderable.footer = self.render_footer(
+                        time.time() - inference_start,
+                        time.time() - first_token_at,
+                        **footer_meta,
                     )
-                self.renderable.footer = self.render_footer(
-                    time.time() - inference_start,
-                    time.time() - first_token_at,
-                    **footer_meta,
-                )
-                name_color = self.state.pulse_colors[self.state.pulse_color_index]
-                self.renderable.assistant = Text(
-                    documents['name'], style=f'bold color({name_color})',
-                )
-                self.render_chat(live)
+                    name_color = self.state.pulse_colors[self.state.pulse_color_index]
+                    self.renderable.assistant = Text(
+                        documents['name'], style=f'bold color({name_color})',
+                    )
+                    self.render_chat(live)
+                if marker_feed.hit:
+                    # A stray marker ends the pass like a normal reply.
+                    stop_inference()
+                    break
         return current_response
 
     def _prime_live_panel(self, documents, meta_data, footer_meta, color) -> None:
@@ -1432,6 +1449,10 @@ class RenderWindow(PromptManager):
     def save_history(self, documents: dict, current_response: str,
                      reasoning: str = '') -> None:
         """Save turn as role/content messages. Reasoning is optional extra."""
+        # Cut at <END_TURN>/<END_BEAT> before anything downstream sees the
+        # reply — including the OOC branch below, which bypasses
+        # sanitize_response and feeds the next turn's OOC_INSTRUCTIONS.
+        current_response = strip_end_markers(current_response)
         stream = self.state.stream
         history = self.common.load_chat()
 
@@ -1467,6 +1488,17 @@ class RenderWindow(PromptManager):
         if thought:
             assistant_extra['reasoning'] = thought
         regenerate = bool(documents.get('regenerate'))
+        # Declare the fable turn up front: the reply being saved is the
+        # (N+1)th exchange — or the Nth when regenerating the last one.
+        # _stash_turn_rag runs before append_turn, so the branch list is
+        # still in its pre-append state here.
+        completed = sum(
+            1 for msg in history[branch]
+            if isinstance(msg, dict) and msg.get('role') == 'assistant'
+        )
+        documents.setdefault(
+            'turn_num', completed if regenerate else completed + 1,
+        )
         self._stash_turn_rag(documents, history[branch], branch, assistant_extra)
         current_response = self.common.sanitize_response(current_response)
 

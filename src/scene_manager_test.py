@@ -230,6 +230,236 @@ class SceneManagerTest(unittest.TestCase):
             mgr.set_branch('story')
             self.assertEqual(mgr.scene['player_location'], 'tavern')
 
+    def test_placeholder_locations_are_never_stored(self):
+        """A tagger's '?' never becomes authoritative state or a lie."""
+        with tempfile.TemporaryDirectory() as tmp:
+            mgr = _mgr(tmp)
+            mgr.ground_scene(_tags(
+                entity=['jason', 'mira'], player_location='tavern',
+                npc_locations=['mira: tavern'], moving_confidence=0.0,
+            ))
+            # The reply tagger gives up: '?' for both the PC and an NPC.
+            grounded = mgr.ground_scene(_tags(
+                entity=['jason'], player_location='?',
+                npc_locations=['mira: ?', 'bram: ?'],
+                moving_confidence=0.0,
+            ))
+            scene = dict(grounded)
+            self.assertEqual(scene['player_location'], 'tavern')
+            self.assertNotIn('mira: ?', scene['npc_locations'])
+            self.assertNotIn('bram: ?', scene['npc_locations'])
+            self.assertIn('mira: tavern', scene['npc_locations'])
+
+    def test_placeholder_player_location_never_moves_the_pc(self):
+        """Even high confidence cannot relocate the PC to '?'.
+
+        The reply tagger misreads rooms it merely mentions; SCENE_STATE is
+        authoritative for the next turn, so junk strings must not move her.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            mgr = _mgr(tmp)
+            mgr.ground_scene(_tags(
+                entity=['jason'], player_location='garden',
+                moving_confidence=0.0,
+            ))
+            grounded = mgr.ground_scene(_tags(
+                entity=['jason'], player_location='?',
+                moving_confidence=0.9,
+            ))
+            self.assertEqual(dict(grounded)['player_location'], 'garden')
+
+    def test_placeholder_player_location_fills_from_next_real_tag(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            mgr = _mgr(tmp)
+            mgr.ground_scene(_tags(
+                entity=['jason'], player_location='?',
+                moving_confidence=0.0,
+            ))
+            self.assertEqual(mgr.scene['player_location'], '')
+            mgr.ground_scene(_tags(
+                entity=['jason'], player_location='cabin',
+                moving_confidence=0.0,
+            ))
+            self.assertEqual(mgr.scene['player_location'], 'cabin')
+
+
+class SceneLedgerTest(unittest.TestCase):
+    """Per-turn scene pages: record, rollback, reset, delete, fork."""
+
+    def test_ground_scene_writes_ledger_pages(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            mgr = _mgr(tmp)
+            mgr.ground_scene(_tags(
+                entity=['jason'], player_location='tavern',
+            ), turn_num=1)
+            mgr.ground_scene(_tags(
+                entity=['jason', 'mira'], player_location='tavern',
+            ), turn_num=2)
+            self.assertEqual(mgr.last_grounded_turn, 2)
+            self.assertEqual(mgr.turns['2']['entity'], ['jason', 'mira'])
+            self.assertEqual(mgr.turns['1']['entity'], ['jason'])
+            # Regenerating turn 2 re-grounds that page from the previous
+            # one, so the discarded reply's cast does not bleed through.
+            mgr.ground_scene(_tags(
+                entity=['jason'], player_location='tavern',
+            ), regen=True)
+            self.assertEqual(mgr.turns['2']['entity'], ['jason'])
+            self.assertEqual(mgr.last_grounded_turn, 2)
+            # The ledger round-trips through the JSON file.
+            again = _mgr(tmp)
+            self.assertEqual(again.last_grounded_turn, 2)
+            self.assertEqual(again.turns['1']['entity'], ['jason'])
+            # Ledger keys never leak into the grounded meta tags.
+            self.assertNotIn('turns', dict(mgr.ground_scene(_tags(
+                entity=['jason'], player_location='tavern',
+            ))))
+
+    def test_regen_regrounds_from_previous_page(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            mgr = _mgr(tmp)
+            mgr.ground_scene(_tags(
+                entity=['jason'], player_location='inn',
+            ), turn_num=1)
+            mgr.ground_scene(_tags(
+                entity=['jason', 'mira'], player_location='vault',
+                moving_confidence=0.9,
+            ), turn_num=2)
+            # Regenerate turn 2: the re-sent query restores page 1 as
+            # the merge base, then the rewritten reply grounds on top.
+            mgr.ground_scene(_tags(
+                entity=['jason'], player_location='inn', moving_confidence=0.0,
+            ), regen=True)
+            mgr.ground_scene(_tags(
+                entity=['jason', 'orpheus'], player_location='inn',
+                moving_confidence=0.0,
+            ), turn_num=2)
+            self.assertEqual(mgr.scene['player_location'], 'inn')
+            self.assertEqual(mgr.scene['entity'], ['jason', 'orpheus'])
+            self.assertNotIn('mira', mgr.scene['entity'])
+            self.assertEqual(mgr.turns['2']['entity'], ['jason', 'orpheus'])
+
+    def test_turn_number_defaults_to_next(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            mgr = _mgr(tmp)
+            mgr.ground_scene(_tags(entity=['jason'], player_location='inn'))
+            self.assertEqual(mgr.last_grounded_turn, 1)
+            mgr.ground_scene(_tags(entity=['jason'], player_location='inn'))
+            self.assertEqual(mgr.last_grounded_turn, 2)
+
+    def test_rollback_restores_page_and_truncates(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            mgr = _mgr(tmp)
+            mgr.ground_scene(_tags(
+                entity=['jason'], player_location='inn',
+            ), turn_num=1)
+            mgr.ground_scene(_tags(
+                entity=['jason', 'mira'], player_location='inn',
+            ), turn_num=2)
+            mgr.ground_scene(_tags(
+                entity=['jason', 'mira'], player_location='vault',
+                moving_confidence=0.9,
+            ), turn_num=3)
+            mgr.rollback_to(2)
+            self.assertEqual(mgr.scene['player_location'], 'inn')
+            self.assertIn('mira', mgr.scene['entity'])
+            self.assertEqual(mgr.last_grounded_turn, 2)
+            self.assertEqual(sorted(mgr.turns), ['1', '2'])
+            # The file on disk agrees.
+            with open(os.path.join(tmp, 'ephemeral_scene_story.json'),
+                      encoding='utf-8') as handle:
+                disk = json.load(handle)
+            self.assertEqual(disk['last_grounded_turn'], 2)
+            # Rolling back to zero is the empty scene.
+            mgr.rollback_to(0)
+            self.assertEqual(mgr.scene['player_location'], '')
+            self.assertEqual(mgr.scene['entity'], ['jason'])
+            self.assertEqual(mgr.last_grounded_turn, 0)
+            self.assertEqual(mgr.turns, {})
+
+    def test_rollback_past_ledger_starts_empty(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            mgr = _mgr(tmp)
+            mgr.ground_scene(_tags(
+                entity=['jason'], player_location='vault',
+            ), turn_num=9)
+            mgr.rollback_to(3)
+            self.assertEqual(mgr.scene['player_location'], '')
+            self.assertEqual(mgr.scene['entity'], ['jason'])
+            self.assertEqual(mgr.last_grounded_turn, 0)
+            self.assertEqual(mgr.turns, {})
+            # The next grounding keys from the rolled-back counter.
+            mgr.ground_scene(_tags(entity=['mira'], player_location='dock'))
+            self.assertEqual(mgr.last_grounded_turn, 1)
+
+    def test_reset_and_delete_branch_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            mgr = _mgr(tmp)
+            mgr.ground_scene(_tags(
+                entity=['jason', 'mira'], player_location='inn',
+            ), turn_num=1)
+            mgr.set_branch('alt')
+            self.assertEqual(mgr.scene['player_location'], '')
+            mgr.ground_scene(_tags(
+                entity=['jason'], player_location='cave',
+            ), turn_num=1)
+            alt_path = os.path.join(tmp, 'ephemeral_scene_alt.json')
+            story_path = os.path.join(tmp, 'ephemeral_scene_story.json')
+            self.assertTrue(os.path.exists(alt_path))
+            # The branch you are on is never deleted out from under you.
+            mgr.delete_branch('alt')
+            self.assertTrue(os.path.exists(alt_path))
+            mgr.set_branch('story')
+            mgr.delete_branch('alt')
+            self.assertFalse(os.path.exists(alt_path))
+            # Reset empties the current scene and its ledger on disk.
+            mgr.reset_branch()
+            self.assertEqual(mgr.scene['player_location'], '')
+            self.assertEqual(mgr.scene['entity'], ['jason'])
+            self.assertEqual(mgr.last_grounded_turn, 0)
+            self.assertEqual(mgr.turns, {})
+            with open(story_path, encoding='utf-8') as handle:
+                disk = json.load(handle)
+            self.assertEqual(disk['last_grounded_turn'], 0)
+
+    def test_fork_full_clone_and_cut(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            mgr = _mgr(tmp)
+            mgr.ground_scene(_tags(
+                entity=['jason'], player_location='inn',
+            ), turn_num=1)
+            mgr.ground_scene(_tags(
+                entity=['jason', 'mira'], player_location='vault',
+                moving_confidence=0.9,
+            ), turn_num=2)
+            # Full clone: the whole scene travels, ledger and all.
+            mgr.fork_branch('story', 'book2')
+            with open(os.path.join(tmp, 'ephemeral_scene_book2.json'),
+                      encoding='utf-8') as handle:
+                clone = json.load(handle)
+            self.assertEqual(clone['player_location'], 'vault')
+            self.assertEqual(sorted(clone['turns']), ['1', '2'])
+            self.assertEqual(clone['last_grounded_turn'], 2)
+            # Cut fork: the scene as of page one — the vault never was.
+            mgr.fork_branch('story', 'book3', cut_turns=1)
+            with open(os.path.join(tmp, 'ephemeral_scene_book3.json'),
+                      encoding='utf-8') as handle:
+                cut = json.load(handle)
+            self.assertEqual(cut['player_location'], 'inn')
+            self.assertEqual(cut['last_grounded_turn'], 1)
+            self.assertEqual(sorted(cut['turns']), ['1'])
+
+    def test_ledger_prunes_to_cap(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            mgr = _mgr(tmp)
+            mgr.turns = {
+                str(t): {'player_location': f'room{t}'}
+                for t in range(1, 402)
+            }
+            mgr._prune_ledger()
+            self.assertEqual(len(mgr.turns), 400)
+            self.assertNotIn('1', mgr.turns)
+            self.assertIn('401', mgr.turns)
+
 
 if __name__ == '__main__':
     unittest.main()

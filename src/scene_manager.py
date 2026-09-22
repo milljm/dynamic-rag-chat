@@ -2,6 +2,8 @@
 import os
 import re
 import json
+import shutil
+from copy import deepcopy
 from typing import Any, Optional
 try:
     from .chat_utils import CommonUtils, ChatOptions, RAGTag
@@ -16,7 +18,12 @@ _PRONOUNS = {
     'pc', 'player',
 }
 _EMPTY = {'', 'none', 'null', 'unspecified', 'unknown', 'n/a'}
+# Location strings that mean "the tagger had no idea". Persisting them
+# puts literal junk ("bram: ?") into SCENE_STATE, which the prompt calls
+# authoritative.
+_PLACEHOLDER_LOCATIONS = _EMPTY | {'?', '??', '???', 'na', 'tbd', '-', '—'}
 _MOVE_THRESHOLD = 0.7
+_MAX_LEDGER = 400        # per-turn scene pages kept for rollback/fork
 
 
 class SceneManager:
@@ -40,10 +47,9 @@ class SceneManager:
                 scene.ground_scene(tags)
                 scene.save_scene()
 
-        - NPC sheets:
-            .. code-block:: python
-                if scene.is_new_character(name):
-                    ...
+        - NPC sheets are minted from the grounded cast by
+          ContextManager.create_character(); the sheet file on disk is
+          the already-seen gate, not the known-character roster.
     """
 
     def __init__(self, console, common: CommonUtils, args: ChatOptions):
@@ -52,6 +58,8 @@ class SceneManager:
         self.opts = args
         self.branch = 'story'
         self.debug = args.debug
+        self.turns: dict[str, dict] = {}
+        self.last_grounded_turn = 0
         self.scene = self.load_scene()
 
     def _player(self) -> str:
@@ -117,10 +125,13 @@ class SceneManager:
 
     @staticmethod
     def _location(value) -> str:
-        """Single location string, lowercase."""
+        """Single location string, lowercase; placeholders become ''."""
         if isinstance(value, (list, tuple)):
             value = value[0] if value else ''
-        return str(value or '').strip().lower()
+        text = str(value or '').strip().lower()
+        if text in _PLACEHOLDER_LOCATIONS:
+            return ''
+        return text
 
     def _npc_map(self, value) -> dict[str, str]:
         """Parse `name: place` tokens into a dict."""
@@ -129,9 +140,12 @@ class SceneManager:
             if ':' in token:
                 name, _, place = token.partition(':')
                 name = name.strip().lower()
-                place = place.strip().lower()
-                if name and name not in _PRONOUNS:
-                    mapping[name] = place or mapping.get(name, '')
+                place = self._location(place)
+                if name and name not in _PRONOUNS and place:
+                    # A placeholder or empty place records nothing at all:
+                    # it must not overwrite a real location in the merge,
+                    # and it must not persist junk ("bram: ?") as state.
+                    mapping[name] = place
             elif token not in _PRONOUNS:
                 mapping.setdefault(token, '')
         return mapping
@@ -194,11 +208,19 @@ class SceneManager:
         """Dict → RAGTag list."""
         return [RAGTag(tag=k, content=v) for k, v in tags.items()]
 
-    def _scene_file(self) -> str:
+    def _scene_file(self, branch: Optional[str] = None) -> str:
         """Per-branch scene path."""
-        safe = re.sub(r'[^a-zA-Z0-9_-]+', '_', self.branch or 'story')
+        safe = re.sub(r'[^a-zA-Z0-9_-]+', '_', branch or self.branch or 'story')
         safe = safe.strip('_') or 'story'
         return os.path.join(self.opts.vector_dir, f'ephemeral_scene_{safe}.json')
+
+    @staticmethod
+    def _as_turn(value) -> int:
+        """Best-effort turn number, 0 when absent/unparsable."""
+        try:
+            return max(0, int(value))
+        except (TypeError, ValueError):
+            return 0
 
     def new_scene(self) -> dict[str, Any]:
         """Empty scene that keeps the roster of known characters."""
@@ -228,30 +250,139 @@ class SceneManager:
                 continue
             try:
                 with open(path, 'r', encoding='utf-8') as handle:
-                    return self._normalize_scene(json.load(handle))
+                    data = json.load(handle)
+                self.turns = {
+                    str(self._as_turn(k)): deepcopy(v)
+                    for k, v in (data.get('turns') or {}).items()
+                    if self._as_turn(k) and isinstance(v, dict)
+                }
+                self.last_grounded_turn = self._as_turn(
+                    data.get('last_grounded_turn'),
+                )
+                return self._normalize_scene(data)
             except (OSError, TypeError, ValueError, json.JSONDecodeError):
                 continue
+        self.turns = {}
+        self.last_grounded_turn = 0
         return self._no_scene()
 
     def save_scene(self, scene: Optional[dict[str, Any]] = None):
-        """Save current scene state to disk and keep memory in sync."""
+        """Save current scene state plus the turn ledger to disk."""
         data = scene if scene is not None else self.get_scene()
         self.scene = data
         os.makedirs(self.opts.vector_dir, exist_ok=True)
         with open(self._scene_file(), 'w', encoding='utf-8') as handle:
-            json.dump(data, handle)
+            json.dump({
+                **data,
+                'turns': self.turns,
+                'last_grounded_turn': self.last_grounded_turn,
+            }, handle)
 
-    def is_new_character(self, character: str) -> bool:
-        """Return True and record the name if this NPC has not been seen."""
-        entry = (character or '').strip().lower()
-        if not entry or entry in _PRONOUNS or entry in _EMPTY:
-            return False
-        known = [c.lower() for c in self.scene.get('known_characters', [])]
-        if entry in known:
-            return False
-        self.scene.setdefault('known_characters', []).append(entry)
+# ---------- turn ledger / rollback / fork (mirrors PlotManager) ----------
+
+    def _ledger(self) -> dict[int, dict]:
+        """Post-turn scene states keyed by turn number."""
+        return {
+            self._as_turn(k): v
+            for k, v in (self.turns or {}).items() if self._as_turn(k)
+        }
+
+    def _prune_ledger(self) -> None:
+        """Keep the newest _MAX_LEDGER pages; oldest pages fall off."""
+        if len(self.turns) <= _MAX_LEDGER:
+            return
+        keep = sorted(self.turns, key=self._as_turn)[-_MAX_LEDGER:]
+        self.turns = {key: self.turns[key] for key in keep}
+
+    def _write_page(self, turn: int, scene: dict) -> None:
+        """Record the post-turn scene so any later turn can be undone."""
+        self.turns[str(turn)] = deepcopy(scene)
+        self._prune_ledger()
+
+    def rollback_to(self, turn: int) -> None:
+        """Truncate the scene to its state as of ``turn``.
+
+        The live scene becomes the post-``turn`` ledger page — the
+        nearest recorded page at or before ``turn``; with nothing there
+        (a brand-new branch, or pages pruned past the rewind point) the
+        empty scene — and every later page is dropped, so rewound turns
+        never happened.
+        """
+        turn = max(0, self._as_turn(turn))
+        pages = self._ledger()
+        eligible = [k for k in pages if k <= turn]
+        if eligible:
+            self.scene = deepcopy(pages[max(eligible)])
+            self.last_grounded_turn = max(eligible)
+        else:
+            self.scene = self._no_scene()
+            self.last_grounded_turn = 0
+        self.turns = {
+            str(k): deepcopy(v) for k, v in pages.items() if k <= turn
+        }
         self.save_scene()
-        return True
+
+    def reset_branch(self) -> None:
+        """Empty the current branch's scene (its history was reset)."""
+        self.scene = self._no_scene()
+        self.turns = {}
+        self.last_grounded_turn = 0
+        self.save_scene()
+
+    def delete_branch(self, branch: str) -> None:
+        """Drop a deleted branch's scene file. Best effort, never fatal."""
+        if not branch or branch == self.branch:
+            return
+        try:
+            os.remove(self._scene_file(branch))
+        except OSError:
+            pass
+
+    def fork_branch(self, src: str, name: str,
+                    cut_turns: Optional[int] = None) -> None:
+        """Copy the parent scene into a forked branch.
+
+        Full clone copies the file verbatim — location, cast and turn
+        ledger travel with the fork. A cut fork keeps the scene exactly
+        as of that page: the post-``cut`` ledger entry (nearest page at
+        or before the cut, else the empty scene) with later pages
+        pruned. Best effort, never fatal.
+        """
+        if not name or name == src:
+            return
+        self.save_scene()
+        src_path = self._scene_file(src)
+        dst_path = self._scene_file(name)
+        if cut_turns is None:
+            if os.path.exists(src_path):
+                shutil.copyfile(src_path, dst_path)
+            return
+        if not os.path.exists(src_path):
+            return
+        try:
+            with open(src_path, 'r', encoding='utf-8') as handle:
+                data = json.load(handle)
+        except (OSError, TypeError, ValueError, json.JSONDecodeError):
+            return
+        cut = max(0, int(cut_turns))
+        pages = {
+            self._as_turn(k): v
+            for k, v in (data.get('turns') or {}).items()
+            if self._as_turn(k) and isinstance(v, dict)
+        }
+        eligible = [k for k in pages if k <= cut]
+        if eligible:
+            scene = self._normalize_scene(pages[max(eligible)])
+            last = max(eligible)
+        else:
+            scene = self._no_scene()
+            last = 0
+        ledger = {str(k): deepcopy(v) for k, v in pages.items() if k <= cut}
+        os.makedirs(self.opts.vector_dir, exist_ok=True)
+        with open(dst_path, 'w', encoding='utf-8') as handle:
+            json.dump(
+                {**scene, 'turns': ledger, 'last_grounded_turn': last}, handle,
+            )
 
     def _merge_stay(self, prev: dict, incoming: dict) -> dict:
         """Same room: people persist even if the tagger omitted them."""
@@ -297,7 +428,8 @@ class SceneManager:
         scene['npc_locations'] = self._npc_list(self._npc_map(incoming.get('npc_locations')))
         return scene
 
-    def ground_scene(self, tags: list[RAGTag]) -> list[RAGTag]:
+    def ground_scene(self, tags: list[RAGTag], turn_num: int | None = None,
+                     regen: bool = False) -> list[RAGTag]:
         """Sanitize tags against the previous turn and persist the result.
 
         - People already in the room stay in the room unless location changed.
@@ -306,14 +438,35 @@ class SceneManager:
         - A location change requires both a new player_location string and
           moving_confidence > 0.7. Overconfident taggers no longer wipe the
           cast because the player looked out a window.
+
+        ``turn_num`` keys the per-turn ledger page (from
+        ``documents['turn_num']`` on the reply pass); unset it derives
+        from ``last_grounded_turn`` — the next turn for a fresh query,
+        the same turn when ``regen`` (a regenerate re-grounds the page
+        that is already there, after rewinding the live scene to the
+        previous page so the discarded reply's cast never bleeds into
+        the rewrite).
         """
+        turn = self._as_turn(turn_num)
+        if not turn:
+            turn = (
+                self.last_grounded_turn if regen
+                else self.last_grounded_turn + 1
+            )
         prev = dict(self.scene)
+        if regen and turn > 1:
+            pages = self._ledger()
+            eligible = [k for k in pages if k <= turn - 1]
+            if eligible:
+                prev = deepcopy(pages[max(eligible)])
         incoming = self._ragtag_to_scene_dict(tags)
         if self._is_relocating(incoming, prev, tags):
             scene = self._merge_move(prev, incoming)
         else:
             scene = self._merge_stay(prev, incoming)
         scene['known_characters'] = self._union(scene.get('known_characters'), scene.get('entity'))
+        self._write_page(turn, scene)
+        self.last_grounded_turn = max(self.last_grounded_turn, turn)
         self.save_scene(scene)
         meta = self._ragtag_to_dict(tags)
         meta.update(scene)

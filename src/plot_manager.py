@@ -42,7 +42,39 @@ _MAX_LOOPS = 8           # open threads kept hot
 _LOOP_TTL = 12           # turns a loop may go untouched before archiving
 _MAX_DIRECTIVES = 6      # hidden NPC directives kept
 _MAX_NOTES = 400         # director notes, characters
-_MAX_SNAPSHOTS = 8       # per-turn snapshots kept for regenerate/fork
+_MAX_LEDGER = 400        # per-turn fable pages kept for rollback/fork
+
+# Scribe loop summaries are fuzzy-matched against stored threads so a
+# reworded carry-forward ("goat climbs the fence" vs "thistle climbs the
+# fence slat") updates the existing loop instead of minting a twin.
+_LOOP_OVERLAP = 0.6      # Jaccard token overlap treated as the same thread
+_LOOP_MIN_SHARED = 3     # ... with at least this many shared content words
+_LOOP_STOPWORDS = frozenset(
+    'a an the this that these those to of and or in on at for with from by '
+    'is are was were be been being am as into back out up down over under '
+    'again then so but her his their its it he she they them his hers ours '
+    'my me i we you your'.split()
+)
+
+
+def _summary_tokens(summary: str) -> set[str]:
+    """Content words of a loop summary, stopwords removed."""
+    words = set(re.findall(r'[a-z0-9]+', str(summary).lower()))
+    return words - _LOOP_STOPWORDS
+
+
+def _is_same_thread(words: set[str], stored_summary: str) -> bool:
+    """True when an incoming summary rewords a stored thread.
+
+    Both a minimum shared-content-word floor and a Jaccard ratio: the
+    floor keeps short generic summaries ("hook number 1" vs "hook number
+    2") from collapsing into one thread on two shared words alone.
+    """
+    stored = _summary_tokens(stored_summary)
+    shared = words & stored
+    if len(shared) < _LOOP_MIN_SHARED:
+        return False
+    return len(shared) / len(words | stored) >= _LOOP_OVERLAP
 
 
 class PlotManager:
@@ -167,9 +199,10 @@ class PlotManager:
             'dormant_arcs': [],
             'director_notes': '',
             'last_fabled_turn': 0,
-            'snapshots': {},
+            'turns': {},
         }
 
+    # pylint: disable-next=too-many-branches  # one guard per legacy shape
     def _normalize(self, data) -> dict[str, Any]:
         """Coerce a loaded JSON blob into the fable shape."""
         fable = self._empty()
@@ -207,23 +240,35 @@ class PlotManager:
             fable['dormant_arcs'] = [
                 self._clean_str(arc, 200) for arc in arcs
                 if self._clean_str(arc, 200)
-            ][:_MAX_SNAPSHOTS]
+            ][:2]
         fable['director_notes'] = self._clean_str(
             data.get('director_notes'), _MAX_NOTES,
         )
         fable['last_fabled_turn'] = self._as_turn(data.get('last_fabled_turn'))
-        snaps = data.get('snapshots')
-        if isinstance(snaps, dict):
-            fable['snapshots'] = {
-                str(k): self._normalize(v)
-                for k, v in snaps.items()
+        pages = data.get('turns')
+        if isinstance(pages, dict):
+            fable['turns'] = {
+                str(self._as_turn(k)): self._normalize(v)
+                for k, v in pages.items()
                 if self._as_turn(k)
             }
+        # Legacy files kept pre-turn `snapshots`; a snapshot of turn N is
+        # the post-turn state of N-1 (and of turn 1 is the empty book, so
+        # it has no page).
+        snaps = data.get('snapshots')
+        if isinstance(snaps, dict):
+            for key, value in snaps.items():
+                turn = self._as_turn(key)
+                if turn > 1 and str(turn - 1) not in fable['turns']:
+                    fable['turns'][str(turn - 1)] = self._normalize(value)
         return fable
 
     def _state(self) -> dict[str, Any]:
-        """Fable without the snapshots key (the persistable state)."""
-        return {k: v for k, v in self.fable.items() if k != 'snapshots'}
+        """Fable without the ledger keys (the persistable turn state)."""
+        return {
+            k: v for k, v in self.fable.items()
+            if k not in ('snapshots', 'turns')
+        }
 
     def load_fable(self) -> dict[str, Any]:
         """Load fable from disk, or start empty."""
@@ -254,41 +299,83 @@ class PlotManager:
         self.branch = name
         self.fable = self.load_fable()
 
-    # ---------- snapshot / fork (Rooted: copy-on-fork) ----------
+    # ---------- turn ledger / rollback / fork (Rooted) ----------
 
-    def _snapshot(self, turn: int) -> None:
-        """Remember the pre-turn state so a regenerate can redo this turn."""
-        snaps = self.fable.setdefault('snapshots', {})
-        snaps[str(turn)] = deepcopy(self._state())
-        keep = sorted(
-            (k for k in snaps if self._as_turn(k) <= turn),
-            key=self._as_turn,
-        )[-_MAX_SNAPSHOTS:]
-        self.fable['snapshots'] = {k: snaps[k] for k in keep}
+    def _ledger(self) -> dict[int, dict[str, Any]]:
+        """Post-turn fable states keyed by turn number."""
+        turns = self.fable.get('turns') or {}
+        return {
+            self._as_turn(k): v for k, v in turns.items() if self._as_turn(k)
+        }
 
-    def _restore_snapshot(self, turn: int) -> None:
-        """Rewind the fable to the state before ``turn`` was fabled."""
-        snaps = self.fable.get('snapshots') or {}
-        eligible = [
-            self._as_turn(k) for k in snaps if self._as_turn(k) <= turn
-        ]
-        if not eligible:
+    def _prune_ledger(self) -> None:
+        """Keep the newest _MAX_LEDGER pages; oldest pages fall off."""
+        turns = self.fable.get('turns') or {}
+        if len(turns) <= _MAX_LEDGER:
             return
-        restored = deepcopy(snaps[str(max(eligible))])
-        restored['snapshots'] = {
-            k: v for k, v in snaps.items()
-            if self._as_turn(k) <= turn
+        keep = sorted(turns, key=self._as_turn)[-_MAX_LEDGER:]
+        self.fable['turns'] = {key: turns[key] for key in keep}
+
+    def _write_page(self, turn: int) -> None:
+        """Record the post-turn fable so any later turn can be undone."""
+        self.fable.setdefault('turns', {})[str(turn)] = deepcopy(self._state())
+        self._prune_ledger()
+
+    def _restore_pre_turn(self, turn: int) -> None:
+        """Rewind the fable to the state before ``turn`` was fabled."""
+        turns = self._ledger()
+        ledger = {
+            str(k): deepcopy(v) for k, v in turns.items() if k <= turn - 1
+        }
+        eligible = [k for k in turns if k <= turn - 1]
+        restored = deepcopy(turns[max(eligible)]) if eligible else self._empty()
+        restored['turns'] = ledger
+        self.fable = restored
+
+    def rollback_to(self, turn: int) -> None:
+        """Truncate the fable to its state as of ``turn``.
+
+        The current fable becomes the post-``turn`` ledger page — the
+        nearest recorded page at or before ``turn``; with nothing there
+        (a brand-new book, or pages pruned past the rewind point) the
+        empty book — and every later page is dropped. Called for rewind,
+        delete-last and edit-user so the director never again whispers
+        about turns that no longer exist.
+        """
+        turn = max(0, self._as_turn(turn))
+        turns = self._ledger()
+        eligible = [k for k in turns if k <= turn]
+        restored = deepcopy(turns[max(eligible)]) if eligible else self._empty()
+        restored['turns'] = {
+            str(k): deepcopy(v) for k, v in turns.items() if k <= turn
         }
         self.fable = restored
+        self.save_fable()
+
+    def reset_branch(self) -> None:
+        """Empty the current branch's fable (its history was reset)."""
+        self.fable = self._empty()
+        self.save_fable()
+
+    def delete_branch(self, branch: str) -> None:
+        """Drop a deleted branch's fable file. Best effort, never fatal."""
+        if not branch or branch == self.branch:
+            return
+        try:
+            os.remove(self._fable_file(branch))
+        except OSError:
+            pass
 
     def fork_branch(self, src: str, name: str,
                     cut_turns: Optional[int] = None) -> None:
         """Copy the parent fable into a forked branch.
 
         Full clone copies the file verbatim — the bookworm opens the book
-        at page one. A cut fork keeps the fable up to that page: the
-        nearest per-turn snapshot at or before the cut, with any loop
-        planted after the cut pruned away. Best effort, never fatal.
+        at page one, ledger and all. A cut fork keeps the fable exactly
+        as of that page: the post-``cut`` ledger entry (nearest page at
+        or before the cut, else the empty book) with later pages pruned
+        and any loop planted after the cut dropped. Best effort, never
+        fatal.
         """
         if not name or name == src:
             return
@@ -308,22 +395,22 @@ class PlotManager:
             return
         cut = max(0, int(cut_turns))
         state = self._normalize(data)
-        snaps = {
-            self._as_turn(k): v for k, v in state.pop('snapshots').items()
+        pages = state.pop('turns', None) or {}
+        turns = {self._as_turn(k): v for k, v in pages.items()}
+        eligible = [k for k in turns if k <= cut]
+        restored = deepcopy(turns[max(eligible)]) if eligible else self._empty()
+        restored['turns'] = {
+            str(k): deepcopy(v) for k, v in turns.items() if k <= cut
         }
-        eligible = [k for k in snaps if k <= cut + 1]
-        if eligible:
-            state = deepcopy(snaps[max(eligible)])
-        state['loops'] = [
-            loop for loop in state.get('loops', [])
+        restored['loops'] = [
+            loop for loop in restored.get('loops', [])
             if self._as_turn(loop.get('planted_turn')) <= cut
         ]
-        last = self._as_turn(state.get('last_fabled_turn'))
-        state['last_fabled_turn'] = min(last, cut) if last else cut
-        state['snapshots'] = {str(cut): self._state()}
+        last = self._as_turn(restored.get('last_fabled_turn'))
+        restored['last_fabled_turn'] = min(last, cut) if last else cut
         os.makedirs(self.opts.vector_dir, exist_ok=True)
         with open(dst_path, 'w', encoding='utf-8') as handle:
-            json.dump(state, handle)
+            json.dump(restored, handle)
 
     # ---------- the heavy prompt's hidden brief ----------
 
@@ -347,7 +434,13 @@ class PlotManager:
                 + '\n'.join(f'- {loop["summary"]}' for loop in loops)
             )
         directives = self.fable.get('npc_directives') or {}
-        here = [n.strip().lower() for n in (present or [])]
+        # The player is always in `present`, but their mind is not ours to
+        # brief: a stored PC directive reads back as inner monologue.
+        player = self._player()
+        here = [
+            n.strip().lower() for n in (present or [])
+            if n.strip().lower() != player
+        ]
         lines = []
         for name in here:
             spec = directives.get(name)
@@ -418,8 +511,7 @@ class PlotManager:
             return []
         turn = declared or last + 1
         if regen:
-            self._restore_snapshot(turn)
-        self._snapshot(turn)
+            self._restore_pre_turn(turn)
 
         scene = {}
         if self.scene is not None:
@@ -444,6 +536,7 @@ class PlotManager:
         if direction:
             self._apply_director(direction)
         self.fable['last_fabled_turn'] = max(last, turn)
+        self._write_page(turn)
         self.save_fable()
         return archived
 
@@ -474,6 +567,19 @@ class PlotManager:
                      if self._key(loop['summary']) == key),
                     None,
                 )
+                if found is None:
+                    # Paraphrase guard: the scribe rewords a thread it is
+                    # carrying forward ("goat climbs the fence" vs "thistle
+                    # climbs the fence slat"). Token overlap above
+                    # _LOOP_OVERLAP counts as the same thread; the stored
+                    # summary stays canonical and only the seen-turn moves.
+                    words = _summary_tokens(summary)
+                    if words:
+                        found = next(
+                            (loop for loop in self.fable['loops']
+                             if _is_same_thread(words, loop['summary'])),
+                            None,
+                        )
                 if found is not None:
                     found['entity'] = sorted(
                         set(found.get('entity', [])) | set(names),
@@ -488,9 +594,12 @@ class PlotManager:
                         found['last_seen_turn'] = max(
                             self._as_turn(found.get('last_seen_turn')), turn,
                         )
-                elif planted or status != 'closed':
-                    # A new thread planted this turn (or an untracked open
-                    # thread the scribe still sees — keep it, dated now).
+                elif planted:
+                    # A new thread planted this turn. Threads the scribe
+                    # merely re-lists without claiming a planting stay out:
+                    # live runs showed that branch filling every slot with
+                    # narrated events ("the goat ate a weed") until no real
+                    # thread fit.
                     self.fable['loops'].append({
                         'summary': summary,
                         'planted_turn': turn,
@@ -513,6 +622,7 @@ class PlotManager:
 
     def _apply_director(self, delta: dict) -> None:
         """Merge hidden-layer deltas, capped and roster-validated."""
+        player = self._player()
         known = set()
         if self.scene is not None:
             known = {
@@ -526,6 +636,11 @@ class PlotManager:
                 key = str(name).strip().lower()
                 if not key or key in _EMPTY or key in _PRONOUNS:
                     continue
+                if key == player:
+                    # The player writes their own mind. A director plan for
+                    # the PC leaks straight through brief() into the heavy
+                    # prompt and comes back out as invented inner monologue.
+                    continue
                 if known and key not in known:
                     continue
                 if not isinstance(spec, dict):
@@ -537,6 +652,8 @@ class PlotManager:
                 }
                 if entry:
                     merged[key] = entry
+            # Purge legacy player directives from earlier fable files too.
+            merged.pop(player, None)
             if known:
                 merged = {
                     k: v for k, v in merged.items() if k in known

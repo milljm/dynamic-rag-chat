@@ -33,6 +33,101 @@ def load_pdf(path: str) -> list:
         )
     return docs
 
+
+# End-of-turn markers the story prompts tell the model to close its reply
+# with. They are also registered as server-side stop strings, so a server
+# that honors ``stop`` never streams them; the client-side cut below is
+# the safety net for servers that stream the marker anyway or stop
+# mid-marker. Without it, one skipped EOS lets the model start a second
+# take of the scene inside the same message (the "double post").
+END_MARKERS = ('<END_BEAT>', '<END_TURN>')
+_PARTIAL_MARKER_MIN = 4  # shortest prefix worth cutting ('<END')
+
+
+def strip_end_markers(text: str) -> str:
+    """Cut an LLM reply at its first end-of-turn marker, if any."""
+    if not text:
+        return text
+    cut = len(text)
+    for marker in END_MARKERS:
+        idx = text.find(marker)
+        if idx != -1:
+            cut = min(cut, idx)
+    cleaned = text[:cut]
+    # A server may stop mid-marker; drop a trailing partial marker too.
+    for marker in END_MARKERS:
+        for size in range(len(marker) - 1, _PARTIAL_MARKER_MIN - 1, -1):
+            if cleaned.endswith(marker[:size]):
+                cleaned = cleaned[:-size]
+                break
+        else:
+            continue
+        break
+    return cleaned.rstrip()
+
+
+class EndMarkerFeed:
+    """
+    ### EndMarkerFeed
+
+    Streaming companion to :func:`strip_end_markers`. Text is released
+    only once it can no longer become ``<END_BEAT>`` / ``<END_TURN>``, so
+    the marker is never painted, streamed to Spur, or assembled into the
+    reply. When a full marker arrives ``hit`` flips True — the caller
+    should stop reading the stream (``prompt_progress.stop_inference``)
+    and let post-processing take over.
+
+    *Usage:*
+        .. code-block:: python
+            feed = EndMarkerFeed()
+            for chunk in llm_stream:
+                emit = feed.feed(chunk.content)
+                if feed.hit:
+                    stop_inference()
+                    break
+            emit += feed.flush()
+    """
+
+    def __init__(self) -> None:
+        self.buf = ''
+        self.hit = False
+
+    def feed(self, text: str) -> str:
+        """Consume one chunk; return the text safe to emit now."""
+        if self.hit or not text:
+            return ''
+        self.buf += text
+        cut = -1
+        for marker in END_MARKERS:
+            idx = self.buf.find(marker)
+            if idx != -1 and (cut == -1 or idx < cut):
+                cut = idx
+        if cut != -1:
+            self.hit = True
+            released, self.buf = self.buf[:cut], ''
+            return released
+        # Hold back the longest tail that could still complete a marker.
+        hold = 0
+        for marker in END_MARKERS:
+            for size in range(min(len(marker) - 1, len(self.buf)), 0, -1):
+                if self.buf.endswith(marker[:size]):
+                    hold = max(hold, size)
+                    break
+        split = len(self.buf) - hold
+        released, self.buf = self.buf[:split], self.buf[split:]
+        return released
+
+    def flush(self) -> str:
+        """Drop the holdback at end of stream.
+
+        ``feed`` only ever leaves a marker prefix in the buffer, so what
+        is held is cut like a partial marker: prose loses at most the few
+        characters that looked like the start of ``<END_TURN>``, and a
+        server-cut marker never surfaces.
+        """
+        self.buf = ''
+        return ''
+
 class RAGTag(NamedTuple):
     """
     ### RAGTag
@@ -878,6 +973,7 @@ class CommonUtils():
 
     def sanitize_response(self, response: str, strip: bool = False)->str:
         """ remove emojis, metadata tagging, etc """
+        response = strip_end_markers(response)
         response = self.remove_tags(response)
         response = self.removed_other(response)
         if strip:
